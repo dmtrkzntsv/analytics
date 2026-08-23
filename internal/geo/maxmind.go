@@ -3,6 +3,8 @@ package geo
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -24,13 +26,35 @@ func init() {
 	providers["maxmind"] = newMaxmind
 }
 
+// downloadClient bounds how long a single download attempt may take, so a
+// hung transfer doesn't block refreshLoop from stopping promptly on Close.
+var downloadClient = &http.Client{Timeout: 5 * time.Minute}
+
+// sanitizeTransportErr strips the request URL (and therefore the embedded
+// license key) from transport-level errors before they're logged or
+// wrapped. *url.Error's Error() method includes the full request URL
+// (including query string), so we unwrap to the underlying cause instead of
+// returning it as-is.
+func sanitizeTransportErr(err error) error {
+	var uerr *url.Error
+	if errors.As(err, &uerr) {
+		return uerr.Err
+	}
+	return err
+}
+
 // downloadDB fetches url into dest atomically (tmp file + rename),
 // extracting the .mmdb member from MaxMind's tar.gz. Package var so tests
-// stub the network.
-var downloadDB = func(rawURL, dest string) error {
-	resp, err := http.Get(rawURL)
+// stub the network. The returned error must never contain rawURL, since it
+// carries the license key in its query string.
+var downloadDB = func(ctx context.Context, rawURL, dest string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("geo: maxmind download request failed: %w", sanitizeTransportErr(err))
+	}
+	resp, err := downloadClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("geo: maxmind download request failed: %w", sanitizeTransportErr(err))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
@@ -57,6 +81,7 @@ var downloadDB = func(rawURL, dest string) error {
 			}
 			if _, err := io.Copy(f, tr); err != nil {
 				f.Close()
+				os.Remove(tmp)
 				return err
 			}
 			f.Close()
@@ -70,7 +95,8 @@ type maxmind struct {
 	mu     sync.RWMutex
 	reader *maxminddb.Reader
 	logger *slog.Logger
-	stop   chan struct{}
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 func newMaxmind(u *url.URL, dataDir string, logger *slog.Logger) (Provider, error) {
@@ -78,12 +104,15 @@ func newMaxmind(u *url.URL, dataDir string, logger *slog.Logger) (Provider, erro
 	if key == "" {
 		return nil, fmt.Errorf("geo: maxmind DSN requires a license key (maxmind://KEY)")
 	}
-	m := &maxmind{path: filepath.Join(dataDir, "GeoLite2-Country.mmdb"), logger: logger, stop: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	m := &maxmind{path: filepath.Join(dataDir, "GeoLite2-Country.mmdb"), logger: logger, ctx: ctx, cancel: cancel}
 	if err := m.ensureFresh(key); err != nil {
+		cancel()
 		return nil, err
 	}
 	r, err := maxminddb.Open(m.path)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("geo: open mmdb: %w", err)
 	}
 	m.reader = r
@@ -97,7 +126,7 @@ func (m *maxmind) ensureFresh(key string) error {
 		return nil
 	}
 	dl := fmt.Sprintf("https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-Country&license_key=%s&suffix=tar.gz", url.QueryEscape(key))
-	if derr := downloadDB(dl, m.path); derr != nil {
+	if derr := downloadDB(m.ctx, dl, m.path); derr != nil {
 		if err == nil {
 			m.logger.Warn("geo: refresh failed, keeping stale db", "error", derr)
 			return nil // stale but usable
@@ -112,7 +141,7 @@ func (m *maxmind) refreshLoop(key string) {
 	defer t.Stop()
 	for {
 		select {
-		case <-m.stop:
+		case <-m.ctx.Done():
 			return
 		case <-t.C:
 			if err := m.ensureFresh(key); err != nil {
@@ -150,7 +179,7 @@ func (m *maxmind) Country(_ *http.Request, ip string) string {
 }
 
 func (m *maxmind) Close() error {
-	close(m.stop)
+	m.cancel()
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if m.reader != nil {
