@@ -54,13 +54,9 @@ func New(cfg *config.Config, q Enqueuer, g geo.Provider, salt Salt, logger *slog
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status":"ok"}`))
 	})
-	s.registerScript(mux) // Task 14; no-op stub until then
+	s.registerScript(mux)
 	return mux
 }
-
-// registerScript wires GET /js/script.js. Task 14 replaces this stub with
-// the real handler; until then the route is unregistered (404).
-func (s *server) registerScript(mux *http.ServeMux) {}
 
 // originAllowed reports whether the request origin is allowed for the
 // project and emits CORS headers when it is.
