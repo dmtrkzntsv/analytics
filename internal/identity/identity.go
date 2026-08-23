@@ -14,9 +14,9 @@ import (
 )
 
 const (
-	saltKey      = "visitor_salt"
-	saltTimeKey  = "visitor_salt_rotated_at"
-	rotateEvery  = 24 * time.Hour
+	saltKey     = "visitor_salt"
+	saltTimeKey = "visitor_salt_rotated_at"
+	rotateEvery = 24 * time.Hour
 )
 
 func VisitorHash(salt, ip, userAgent, project string) string {
