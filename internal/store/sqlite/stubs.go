@@ -11,18 +11,6 @@ import (
 // Stub implementations for store.Store methods not yet implemented in this
 // task; later sqlite tasks replace each stub with a real implementation.
 
-func (d *DB) SyncProjects(ctx context.Context, ps []store.ProjectInfo) error {
-	return fmt.Errorf("sqlite: not implemented")
-}
-
-func (d *DB) WriteWebHits(ctx context.Context, hits []store.WebHit) error {
-	return fmt.Errorf("sqlite: not implemented")
-}
-
-func (d *DB) WriteProductEvents(ctx context.Context, evs []store.ProductEvent) error {
-	return fmt.Errorf("sqlite: not implemented")
-}
-
 func (d *DB) WebDaysBefore(ctx context.Context, project string, before civil.Date) ([]civil.Date, error) {
 	return nil, fmt.Errorf("sqlite: not implemented")
 }
@@ -47,22 +35,10 @@ func (d *DB) IncrementalVacuum(ctx context.Context) error {
 	return fmt.Errorf("sqlite: not implemented")
 }
 
-func (d *DB) ProjectAliases(ctx context.Context) ([]string, error) {
-	return nil, fmt.Errorf("sqlite: not implemented")
-}
-
 func (d *DB) KnownAttributeKeys(ctx context.Context) ([]string, error) {
 	return nil, fmt.Errorf("sqlite: not implemented")
 }
 
 func (d *DB) RebuildFlatView(ctx context.Context, keys []string) error {
-	return fmt.Errorf("sqlite: not implemented")
-}
-
-func (d *DB) GetMeta(ctx context.Context, key string) (string, error) {
-	return "", fmt.Errorf("sqlite: not implemented")
-}
-
-func (d *DB) SetMeta(ctx context.Context, key, value string) error {
 	return fmt.Errorf("sqlite: not implemented")
 }
