@@ -2,7 +2,9 @@
 # Coverage gate per spec §14: total >= 80%, core packages >= 85%.
 set -euo pipefail
 
-packages=$(go list ./... | grep -v '/cmd/' || true)
+# node_modules is excluded because some npm packages (flatted) ship Go
+# source, which go list ./... would otherwise pull into the coverage total.
+packages=$(go list ./... | grep -v '/cmd/' | grep -v '/node_modules/' || true)
 if [ -z "$packages" ]; then
   echo "no packages yet"
   exit 0

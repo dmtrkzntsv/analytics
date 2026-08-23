@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
@@ -250,5 +251,81 @@ func TestNewLogger(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "hello") {
 		t.Errorf("log file = %q, want it to contain the message", body)
+	}
+}
+
+// Spec §5.4a: an IP address or a full User-Agent must never reach the
+// database or the logs. They may only feed the one-way visitor hash and the
+// device/browser classification.
+func TestServeNeverPersistsIPOrUserAgent(t *testing.T) {
+	const (
+		secretIP = "203.0.113.77"
+		secretUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+			"(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 UNIQUEMARKERSTRING"
+	)
+	dbPath := filepath.Join(t.TempDir(), "privacy.db")
+	addr := freePort(t)
+	cfg := testConfig(t, addr, dbPath)
+
+	var logs strings.Builder
+	logger := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- Serve(ctx, cfg, logger) }()
+	base := "http://" + addr
+	waitHealthy(t, base)
+
+	req, err := http.NewRequest("POST", base+"/api/hit",
+		strings.NewReader(`{"project":"app","url":"https://app.com/pricing"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Origin", "https://app.com")
+	req.Header.Set("User-Agent", secretUA)
+	req.Header.Set("X-Forwarded-For", secretIP)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 202 {
+		t.Fatalf("hit: %d", resp.StatusCode)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("serve: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("serve did not shut down")
+	}
+
+	// Scan the raw database bytes, not just the columns: this catches an IP
+	// or UA smuggled into any field, index or free page.
+	raw, err := os.ReadFile(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{secretIP, "UNIQUEMARKERSTRING", secretUA} {
+		if bytes.Contains(raw, []byte(secret)) {
+			t.Errorf("database contains %q; it must never be persisted", secret)
+		}
+		if strings.Contains(logs.String(), secret) {
+			t.Errorf("logs contain %q; it must never be logged", secret)
+		}
+	}
+	// Sanity: the hit really was recorded, so the assertions above are not
+	// passing merely because nothing was written.
+	st, err := store.Open("sqlite://" + dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	days, err := st.WebDaysBefore(context.Background(), "app", mustDay("2100-01-01"))
+	if err != nil || len(days) != 1 {
+		t.Fatalf("hit not persisted: %v %v", days, err)
 	}
 }

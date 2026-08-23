@@ -7,11 +7,15 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o $(BIN) ./cmd/analytics
 
+# GOPKGS excludes node_modules: some npm packages ship Go source that
+# go list ./... would otherwise treat as part of this module.
+GOPKGS = $(shell go list ./... | grep -v '/node_modules/')
+
 test:
-	go test -race ./...
+	go test -race $(GOPKGS)
 
 vet:
-	go vet ./...
+	go vet $(GOPKGS)
 
 check: vet
 	./scripts/coverage.sh
