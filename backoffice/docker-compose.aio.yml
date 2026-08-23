@@ -39,7 +39,7 @@ services:
       - ./evidence-entrypoint.sh:/entrypoint.sh:ro
       - data:/data:ro              # reads the LIVE db read-only (WAL readers ok)
     environment:
-      - EVIDENCE_SOURCE__analytics__filename=/data/analytics.db
+      - EVIDENCE_SOURCE__analytics__filename=../../../data/analytics.db
 
   # Split-topology variant of this service (uncomment on a backoffice-only
   # machine, remove `analytics`+`litestream` above, and point Evidence at

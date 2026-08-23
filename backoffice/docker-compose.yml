@@ -31,7 +31,7 @@ services:
       - ./evidence-entrypoint.sh:/entrypoint.sh:ro
       - data:/data:ro
     environment:
-      - EVIDENCE_SOURCE__analytics__filename=/data/replica.db
+      - EVIDENCE_SOURCE__analytics__filename=../../../data/replica.db
 
 volumes:
   data:

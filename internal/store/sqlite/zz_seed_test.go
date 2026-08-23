@@ -1,0 +1,85 @@
+package sqlite
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/dmitry/analytics/internal/civil"
+	"github.com/dmitry/analytics/internal/store"
+)
+
+// TestSeedEvidenceFixture builds a populated database for the Evidence build
+// check. Skipped unless SEED_DB is set.
+func TestSeedEvidenceFixture(t *testing.T) {
+	path := os.Getenv("SEED_DB")
+	if path == "" {
+		t.Skip("SEED_DB not set")
+	}
+	db, err := openAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SyncProjects(ctx, []store.ProjectInfo{
+		{Alias: "app", Name: "App"}, {Alias: "blog", Name: "Blog"}}); err != nil {
+		t.Fatal(err)
+	}
+	var hits []store.WebHit
+	var evs []store.ProductEvent
+	base := time.Now().UTC().AddDate(0, 0, -10)
+	for d := 0; d < 10; d++ {
+		day := base.AddDate(0, 0, d)
+		for i := 0; i < 5; i++ {
+			ts := day.Add(time.Duration(i) * time.Hour)
+			hits = append(hits, store.WebHit{
+				ID: fmt.Sprintf("h%d-%d", d, i), Project: "app", TS: ts,
+				VisitorHash: fmt.Sprintf("v%d", i%3), Path: []string{"/", "/pricing", "/docs"}[i%3],
+				ReferrerSource: []string{"google", "", "hn"}[i%3],
+				Country:        []string{"US", "DE", "FR"}[i%3], Device: []string{"desktop", "mobile"}[i%2],
+				Browser: "Chrome", OS: "Linux",
+				UTMSource: []string{"hn", "", ""}[i%3], UTMMedium: []string{"social", "", ""}[i%3],
+				UTMCampaign: []string{"launch", "", ""}[i%3],
+			})
+			evs = append(evs, store.ProductEvent{
+				ID: fmt.Sprintf("e%d-%d", d, i), Project: "app",
+				EventName: []string{"signup", "subscribed"}[i%2],
+				UserID:    fmt.Sprintf("u%d", i%3), TS: ts,
+				Attributes: map[string]string{"plan": []string{"pro", "free"}[i%2]},
+			})
+		}
+	}
+	if err := db.WriteWebHits(ctx, hits); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.WriteProductEvents(ctx, evs); err != nil {
+		t.Fatal(err)
+	}
+	// Aggregate the oldest days so both sides of the stitch views have rows.
+	for d := 0; d < 4; d++ {
+		day := civilOf(base.AddDate(0, 0, d))
+		if err := db.AggregateWebDay(ctx, "app", day); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.AggregateProductDay(ctx, "app", day, store.ProductAggSettings{
+			Enabled: true, Attributes: map[string][]string{"*": {"plan"}}, TopN: 10}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keys, err := db.KnownAttributeKeys(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RebuildFlatView(ctx, keys); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("seeded %s: %d hits, %d events", path, len(hits), len(evs))
+}
+
+func civilOf(t time.Time) civil.Date { return civil.DateOf(t) }

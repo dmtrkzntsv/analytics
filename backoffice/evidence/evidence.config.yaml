@@ -1,0 +1,10 @@
+title: Analytics
+
+# Evidence 40 requires plugins to be declared explicitly; the component
+# library and the sqlite datasource must both be listed or `evidence sources`
+# fails with "plugins: Required".
+plugins:
+  components:
+    "@evidence-dev/core-components": {}
+  datasources:
+    "@evidence-dev/sqlite": {}
