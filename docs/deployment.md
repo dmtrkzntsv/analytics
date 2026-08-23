@@ -27,10 +27,21 @@ Any S3-compatible store works; only `endpoint` and `bucket` change.
 ## 2. VPS install (both topologies)
 
 ```bash
+# From a published release (no checkout needed):
+curl -fsSL https://raw.githubusercontent.com/dmtrkzntsv/analytics/main/deploy/install.sh | sudo bash
+
+# Or from a checkout:
 git clone <repo> && cd analytics
 make build
 sudo ./deploy/install.sh          # --user NAME to skip the prompt, --yes for defaults
 ```
+
+The curl form detects the architecture, downloads the matching tarball from
+the latest GitHub release (`--version vX.Y.Z` to pin) and verifies its
+SHA256 before installing. While the repository is private it needs a token:
+prepend `-H "Authorization: Bearer $GITHUB_TOKEN"` to the curl and run
+`sudo GITHUB_TOKEN="$GITHUB_TOKEN" bash`. Releases are published by CI on
+every `v*` tag.
 
 The installer creates a system account, installs the binary to
 `/usr/local/bin/analytics`, creates `/var/lib/analytics` (0750, owned by the
@@ -197,7 +208,7 @@ buffered in memory when the host died — bounded by `buffer.flush_interval`.
 | --- | --- |
 | Logs | `journalctl -u analytics -f` |
 | Restart | `systemctl restart analytics` |
-| Upgrade | `make build && sudo ./deploy/install.sh --yes && systemctl restart analytics` |
+| Upgrade | `curl -fsSL …/deploy/install.sh \| sudo bash -s -- --yes && sudo systemctl restart analytics` (or `make build && sudo ./deploy/install.sh --yes` from a checkout) |
 | Apply migrations only | `analytics migrate -config /etc/analytics/config.json` |
 | Database size | `du -h /var/lib/analytics/analytics.db` |
 | Replication status | `journalctl -u litestream --since -1h` |

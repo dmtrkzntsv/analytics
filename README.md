@@ -31,15 +31,35 @@ Put Caddy, nginx or a Cloudflare tunnel in front of `:8080` for TLS.
 
 Ingestion on a public VPS, dashboards at home off a replica.
 
-On the VPS:
+On the VPS — either straight from a GitHub release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dmtrkzntsv/analytics/main/deploy/install.sh | sudo bash
+```
+
+(add `-s -- --yes` for a non-interactive install, `-s -- --version v0.2.0` to
+pin; while the repository is private, pass a token:
+`curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" …/install.sh | sudo GITHUB_TOKEN="$GITHUB_TOKEN" bash`)
+
+or from a checkout:
 
 ```bash
 make build
 sudo ./deploy/install.sh              # prompts for a service account
+```
+
+then in both cases:
+
+```bash
 sudo vi /etc/analytics/config.json    # projects, allowed_origins
 sudo vi /etc/analytics/litestream.env # R2 credentials
 sudo systemctl start analytics litestream
 ```
+
+The remote form downloads the release tarball for the machine's architecture
+(amd64/arm64/arm), verifies it against the release's `SHA256SUMS`, and installs
+binary, config, systemd units and logrotate rules. Releases are published by
+CI whenever a `v*` tag is pushed.
 
 On the backoffice machine:
 
@@ -197,8 +217,45 @@ make test        # go test -race
 make check       # vet + coverage gate: >=80% total, >=85% for core packages
 make build       # single binary
 make build-all   # linux amd64 / arm64 / arm
+make dist        # release tarballs (binary + deploy/) with SHA256SUMS
 make docker      # container image
 ```
 
 Tests are written first; every commit is expected to leave `make check`
 green.
+
+### Testing the service locally
+
+```bash
+make run          # build and serve on 127.0.0.1:8080 with local/config.json
+make smoke        # boot the real binary, POST a hit + an event, verify rows land
+make test-install # run deploy/install.sh in a Debian container, assert artifacts
+make dashboards   # Evidence dev server against local/analytics.db (port 3000)
+make clean        # remove binary, dist/, local/ state
+```
+
+`make run` writes a dev config on first use (`local/config.json`: project
+`dev`, localhost origins, `geo: none`, debug text logs, database at
+`local/analytics.db`) — edit it freely, it is never overwritten. Exercise it
+with a browser UA (curl's default is classified as a bot and dropped):
+
+```bash
+curl -X POST localhost:8080/api/hit -A 'Mozilla/5.0' \
+  -H 'Origin: http://localhost:8080' -H 'Content-Type: application/json' \
+  -d '{"project":"dev","url":"http://localhost/some-page"}'
+```
+
+`make smoke` is the end-to-end check: scratch database, real HTTP ingestion
+including an Origin-rejection case, then row counts straight from SQLite.
+`make test-install` runs the installer in a throwaway container with
+`systemctl` stubbed and asserts users, permissions, units, config, logrotate,
+and that re-running preserves an edited config.
+
+### Releasing
+
+Push a tag and CI builds the tarballs and publishes the GitHub release that
+`curl … install.sh` consumes:
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```

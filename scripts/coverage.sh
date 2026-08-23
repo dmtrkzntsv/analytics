@@ -4,12 +4,13 @@ set -euo pipefail
 
 # node_modules is excluded because some npm packages (flatted) ship Go
 # source, which go list ./... would otherwise pull into the coverage total.
-packages=$(go list ./... | grep -v '/cmd/' | grep -v '/node_modules/' || true)
+packages=$(go list ./... | grep -v '/cmd/' | grep -v '/scripts/' | grep -v '/node_modules/' || true)
 if [ -z "$packages" ]; then
   echo "no packages yet"
   exit 0
 fi
 
+# shellcheck disable=SC2086  # word splitting of the package list is intended
 go test -race -coverprofile=coverage.out $packages
 
 total=$(go tool cover -func=coverage.out | awk '/^total:/ {gsub(/%/,"",$3); print $3}')
