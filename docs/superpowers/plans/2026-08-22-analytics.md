@@ -18,6 +18,7 @@
 - All tests run with `-race`. TDD: test first, watch it fail, implement, watch it pass, commit.
 - All timestamps UTC, ISO-8601 `2006-01-02T15:04:05Z`; days are `YYYY-MM-DD` strings in SQL, `civil.Date` in Go.
 - IDs are UUIDv7 (`uuid.NewV7()`).
+- Projects are identified by a unique `alias` (config key, `data-project` attribute, payload `"project"` field, and the `project` column on every event/aggregate row). The `projects` table's PRIMARY KEY `id` is a UUIDv7 generated at first registration and never referenced by config or payloads.
 - SQLite: single writer connection (`SetMaxOpenConns(1)`), WAL, `synchronous=NORMAL`, `cache_size=-16000` default, never full `VACUUM`.
 - IP addresses and full User-Agents must never be stored or logged.
 - slog structured logging; no per-request log lines on the hot path.
@@ -373,18 +374,18 @@ func (d Date) Before(o Date) bool { return d.Time().Before(o.Time()) }
   - `type Retention struct { Web RetentionClass; Product RetentionClass }`
   - `type RetentionClass struct { RawDays int; AggregateDays int }`
   - `type SyncConfig struct { Interval Duration; LitestreamConfig string; ReplicaPath string }`
-  - `type Project struct { ID string; Name string; AllowedOrigins []string; Retention *RetentionOverride; ProductAggregation *ProductAggregation }`
+  - `type Project struct { Alias string; Name string; AllowedOrigins []string; Retention *RetentionOverride; ProductAggregation *ProductAggregation }`
   - `type RetentionOverride struct { Web *RetentionClassOverride; Product *RetentionClassOverride }`, `type RetentionClassOverride struct { RawDays *int; AggregateDays *int }`
   - `type ProductAggregation struct { Enabled bool; Attributes map[string][]string; TopN int }` (TopN default 50 applied in Load)
   - `func Load(path string) (*Config, error)` — reads file, applies defaults, validates
   - `func Parse(r io.Reader) (*Config, error)` — same from a reader (tests use this)
-  - `func (c *Config) Project(id string) *Project` — nil if unknown
-  - `func (c *Config) RetentionFor(projectID string) Retention` — global merged with project override
+  - `func (c *Config) Project(alias string) *Project` — nil if unknown
+  - `func (c *Config) RetentionFor(project string) Retention` — global merged with project override
   - JSON field names are snake_case per the spec §4 example (`flush_max_events`, `allowed_origins`, `product_aggregation`, ...)
 
 Defaults (applied when fields are zero): Listen `127.0.0.1:8080`, Geo `cloudflare://`, Buffer `{1000, 5s, 10000}`, Retention web `{7, 365}` product `{30, 365}`, Sync interval `5m`, ProductAggregation.TopN `50`, Log `{info, json}`.
 
-Validation errors (returned, not warned): missing/empty `database`; no projects; duplicate project IDs; project without ID; empty `allowed_origins` entry; unparsable DSN scheme in `database`/`geo`; negative retention days; `raw_days` = 0.
+Validation errors (returned, not warned): missing/empty `database`; no projects; duplicate project aliases; project without alias; empty `allowed_origins` entry; unparsable DSN scheme in `database`/`geo`; negative retention days; `raw_days` = 0.
 
 - [ ] **Step 1: Write failing tests**
 
@@ -400,7 +401,7 @@ import (
 
 const minimal = `{
   "database": "sqlite:///tmp/a.db",
-  "projects": [{"id": "app", "name": "App", "allowed_origins": ["https://app.com"]}]
+  "projects": [{"alias": "app", "name": "App", "allowed_origins": ["https://app.com"]}]
 }`
 
 func TestDefaultsApplied(t *testing.T) {
@@ -430,7 +431,7 @@ func TestRetentionOverrideMerge(t *testing.T) {
 	c, err := Parse(strings.NewReader(`{
 	  "database": "sqlite:///tmp/a.db",
 	  "projects": [{
-	    "id": "app", "name": "App", "allowed_origins": ["https://app.com"],
+	    "alias": "app", "name": "App", "allowed_origins": ["https://app.com"],
 	    "retention": {"product": {"raw_days": 60}}
 	  }]
 	}`))
@@ -453,8 +454,8 @@ func TestProductAggregationDefaults(t *testing.T) {
 	c, err := Parse(strings.NewReader(`{
 	  "database": "sqlite:///tmp/a.db",
 	  "projects": [
-	    {"id": "a", "name": "A", "allowed_origins": ["https://a.com"]},
-	    {"id": "b", "name": "B", "allowed_origins": ["https://b.com"],
+	    {"alias": "a", "name": "A", "allowed_origins": ["https://a.com"]},
+	    {"alias": "b", "name": "B", "allowed_origins": ["https://b.com"],
 	     "product_aggregation": {"enabled": true, "attributes": {"subscribed": ["plan"]}}}
 	  ]
 	}`))
@@ -472,13 +473,13 @@ func TestProductAggregationDefaults(t *testing.T) {
 
 func TestValidationErrors(t *testing.T) {
 	cases := map[string]string{
-		"no database":      `{"projects":[{"id":"a","name":"A","allowed_origins":["https://a.com"]}]}`,
+		"no database":      `{"projects":[{"alias":"a","name":"A","allowed_origins":["https://a.com"]}]}`,
 		"no projects":      `{"database":"sqlite:///tmp/a.db"}`,
-		"dup project":      `{"database":"sqlite:///tmp/a.db","projects":[{"id":"a","name":"A","allowed_origins":["https://a.com"]},{"id":"a","name":"A2","allowed_origins":["https://b.com"]}]}`,
-		"bad geo scheme":   `{"database":"sqlite:///tmp/a.db","geo":"???","projects":[{"id":"a","name":"A","allowed_origins":["https://a.com"]}]}`,
-		"zero raw_days":    `{"database":"sqlite:///tmp/a.db","retention":{"web":{"raw_days":0,"aggregate_days":365}},"projects":[{"id":"a","name":"A","allowed_origins":["https://a.com"]}]}`,
-		"empty origin":     `{"database":"sqlite:///tmp/a.db","projects":[{"id":"a","name":"A","allowed_origins":[""]}]}`,
-		"invalid duration": `{"database":"sqlite:///tmp/a.db","buffer":{"flush_interval":"fast"},"projects":[{"id":"a","name":"A","allowed_origins":["https://a.com"]}]}`,
+		"dup alias":        `{"database":"sqlite:///tmp/a.db","projects":[{"alias":"a","name":"A","allowed_origins":["https://a.com"]},{"alias":"a","name":"A2","allowed_origins":["https://b.com"]}]}`,
+		"bad geo scheme":   `{"database":"sqlite:///tmp/a.db","geo":"???","projects":[{"alias":"a","name":"A","allowed_origins":["https://a.com"]}]}`,
+		"zero raw_days":    `{"database":"sqlite:///tmp/a.db","retention":{"web":{"raw_days":0,"aggregate_days":365}},"projects":[{"alias":"a","name":"A","allowed_origins":["https://a.com"]}]}`,
+		"empty origin":     `{"database":"sqlite:///tmp/a.db","projects":[{"alias":"a","name":"A","allowed_origins":[""]}]}`,
+		"invalid duration": `{"database":"sqlite:///tmp/a.db","buffer":{"flush_interval":"fast"},"projects":[{"alias":"a","name":"A","allowed_origins":["https://a.com"]}]}`,
 	}
 	for name, in := range cases {
 		if _, err := Parse(strings.NewReader(in)); err == nil {
@@ -561,7 +562,7 @@ type ProductAggregation struct {
 }
 
 type Project struct {
-	ID                 string              `json:"id"`
+	Alias              string              `json:"alias"`
 	Name               string              `json:"name"`
 	AllowedOrigins     []string            `json:"allowed_origins"`
 	Retention          *RetentionOverride  `json:"retention"`
@@ -660,16 +661,16 @@ func (c *Config) validate() error {
 	}
 	seen := map[string]bool{}
 	for _, p := range c.Projects {
-		if p.ID == "" {
-			return fmt.Errorf("config: project with empty id")
+		if p.Alias == "" {
+			return fmt.Errorf("config: project with empty alias")
 		}
-		if seen[p.ID] {
-			return fmt.Errorf("config: duplicate project id %q", p.ID)
+		if seen[p.Alias] {
+			return fmt.Errorf("config: duplicate project alias %q", p.Alias)
 		}
-		seen[p.ID] = true
+		seen[p.Alias] = true
 		for _, o := range p.AllowedOrigins {
 			if o == "" {
-				return fmt.Errorf("config: project %q has an empty allowed_origin", p.ID)
+				return fmt.Errorf("config: project %q has an empty allowed_origin", p.Alias)
 			}
 		}
 	}
@@ -681,18 +682,18 @@ func (c *Config) validate() error {
 	return nil
 }
 
-func (c *Config) Project(id string) *Project {
+func (c *Config) Project(alias string) *Project {
 	for i := range c.Projects {
-		if c.Projects[i].ID == id {
+		if c.Projects[i].Alias == alias {
 			return &c.Projects[i]
 		}
 	}
 	return nil
 }
 
-func (c *Config) RetentionFor(projectID string) Retention {
+func (c *Config) RetentionFor(project string) Retention {
 	r := c.Retention
-	p := c.Project(projectID)
+	p := c.Project(project)
 	if p == nil || p.Retention == nil {
 		return r
 	}
@@ -730,7 +731,7 @@ func (c *Config) RetentionFor(projectID string) Retention {
 
 ```go
 type WebHit struct {
-	ID, ProjectID                       string
+	ID, Project                       string
 	TS                                  time.Time
 	VisitorHash, Path, ReferrerSource   string
 	UTMSource, UTMMedium, UTMCampaign   string
@@ -738,12 +739,12 @@ type WebHit struct {
 }
 
 type ProductEvent struct {
-	ID, ProjectID, EventName, UserID string
+	ID, Project, EventName, UserID string
 	TS                               time.Time
 	Attributes                       map[string]string
 }
 
-type ProjectInfo struct{ ID, Name string }
+type ProjectInfo struct{ Alias, Name string }
 
 // ProductAggSettings mirrors config.ProductAggregation; zero value =
 // aggregation disabled (raw rows deleted without rollup, spec §9).
@@ -758,13 +759,13 @@ type Store interface {
 	SyncProjects(ctx context.Context, ps []ProjectInfo) error
 	WriteWebHits(ctx context.Context, hits []WebHit) error
 	WriteProductEvents(ctx context.Context, evs []ProductEvent) error
-	WebDaysBefore(ctx context.Context, projectID string, before civil.Date) ([]civil.Date, error)
-	ProductDaysBefore(ctx context.Context, projectID string, before civil.Date) ([]civil.Date, error)
-	AggregateWebDay(ctx context.Context, projectID string, day civil.Date) error
-	AggregateProductDay(ctx context.Context, projectID string, day civil.Date, agg ProductAggSettings) error
-	PruneAggregates(ctx context.Context, projectID string, webBefore, productBefore civil.Date) error
+	WebDaysBefore(ctx context.Context, project string, before civil.Date) ([]civil.Date, error)
+	ProductDaysBefore(ctx context.Context, project string, before civil.Date) ([]civil.Date, error)
+	AggregateWebDay(ctx context.Context, project string, day civil.Date) error
+	AggregateProductDay(ctx context.Context, project string, day civil.Date, agg ProductAggSettings) error
+	PruneAggregates(ctx context.Context, project string, webBefore, productBefore civil.Date) error
 	IncrementalVacuum(ctx context.Context) error
-	ProjectIDs(ctx context.Context) ([]string, error) // all rows incl. archived
+	ProjectAliases(ctx context.Context) ([]string, error) // all rows incl. archived
 	KnownAttributeKeys(ctx context.Context) ([]string, error)
 	RebuildFlatView(ctx context.Context, keys []string) error
 	GetMeta(ctx context.Context, key string) (string, error) // "" if absent
@@ -929,7 +930,7 @@ func TestSchemaTablesExist(t *testing.T) {
 
 - [ ] **Step 2: Run — fails.** **Step 3: Implement**
 
-`migrations/001_init.sql` — the exact DDL from spec §8 (copy it verbatim: `meta`, `projects` with `archived_at`, `web_hits` + 2 indexes, `product_events` + 2 indexes, `agg_web_daily`, the seven dimension tables `agg_web_pages/referrers/countries/devices/browsers/os/utm` each `WITHOUT ROWID` with the PKs listed in the spec, `agg_product_daily`, `agg_product_totals`, `agg_product_attrs`). Note: `schema_migrations` is created by the runner, not the migration file. Dimension tables all have columns `(project_id TEXT NOT NULL, day TEXT NOT NULL, <dim> TEXT NOT NULL, visitors INTEGER NOT NULL, pageviews INTEGER NOT NULL)` where `<dim>` is `path`/`source`/`country`/`device`/`browser`/`os`; `agg_web_utm` has the three utm columns.
+`migrations/001_init.sql` — the exact DDL from spec §8 (copy it verbatim: `meta`, `projects` with `archived_at`, `web_hits` + 2 indexes, `product_events` + 2 indexes, `agg_web_daily`, the seven dimension tables `agg_web_pages/referrers/countries/devices/browsers/os/utm` each `WITHOUT ROWID` with the PKs listed in the spec, `agg_product_daily`, `agg_product_totals`, `agg_product_attrs`). Note: `schema_migrations` is created by the runner, not the migration file. Dimension tables all have columns `(project TEXT NOT NULL, day TEXT NOT NULL, <dim> TEXT NOT NULL, visitors INTEGER NOT NULL, pageviews INTEGER NOT NULL)` where `<dim>` is `path`/`source`/`country`/`device`/`browser`/`os`; `agg_web_utm` has the three utm columns.
 
 `sqlite.go`:
 ```go
@@ -1076,9 +1077,9 @@ Add stub methods for every remaining `store.Store` method returning `fmt.Errorf(
 - Create: `internal/store/sqlite/write.go`, `internal/store/sqlite/write_test.go`
 
 **Interfaces:**
-- Produces working: `WriteWebHits`, `WriteProductEvents`, `SyncProjects`, `ProjectIDs`, `GetMeta`, `SetMeta`.
+- Produces working: `WriteWebHits`, `WriteProductEvents`, `SyncProjects`, `ProjectAliases`, `GetMeta`, `SetMeta`.
 - `WriteProductEvents` serializes `Attributes` with `json.Marshal` (empty map → `{}`).
-- `SyncProjects` semantics (spec §8): upsert by ID; present ⇒ `archived_at=NULL`, name updated; absent ⇒ `archived_at=datetime('now')` if not already set.
+- `SyncProjects` semantics (spec §8): match by ALIAS; new alias ⇒ insert with a freshly generated UUIDv7 `id`; present ⇒ `archived_at=NULL`, name updated, id retained; absent from the list ⇒ `archived_at=datetime('now')` if not already set. Uses `github.com/google/uuid` (allowed dependency).
 
 - [ ] **Step 1: Write failing tests**
 
@@ -1105,7 +1106,7 @@ func TestWriteWebHitsRoundTrip(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
 	hits := []store.WebHit{{
-		ID: "h1", ProjectID: "app", TS: ts("2026-08-22T10:00:00Z"),
+		ID: "h1", Project: "app", TS: ts("2026-08-22T10:00:00Z"),
 		VisitorHash: "v1", Path: "/x", ReferrerSource: "google",
 		UTMSource: "hn", Country: "DE", Device: "desktop", Browser: "Firefox", OS: "Linux",
 	}}
@@ -1128,9 +1129,9 @@ func TestWriteProductEventsAttributesJSON(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
 	err := db.WriteProductEvents(ctx, []store.ProductEvent{
-		{ID: "e1", ProjectID: "app", EventName: "sub", UserID: "u1",
+		{ID: "e1", Project: "app", EventName: "sub", UserID: "u1",
 			TS: ts("2026-08-22T10:00:00Z"), Attributes: map[string]string{"plan": "pro"}},
-		{ID: "e2", ProjectID: "app", EventName: "sub", UserID: "u2",
+		{ID: "e2", Project: "app", EventName: "sub", UserID: "u2",
 			TS: ts("2026-08-22T10:01:00Z")}, // nil attributes
 	})
 	if err != nil {
@@ -1155,28 +1156,38 @@ func TestSyncProjectsArchiving(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
 	must := func(err error) { if err != nil { t.Fatal(err) } }
-	must(db.SyncProjects(ctx, []store.ProjectInfo{{ID: "a", Name: "A"}, {ID: "b", Name: "B"}}))
+	must(db.SyncProjects(ctx, []store.ProjectInfo{{Alias: "a", Name: "A"}, {Alias: "b", Name: "B"}}))
+	var idA string
+	must(db.db.QueryRow(`SELECT id FROM projects WHERE alias='a'`).Scan(&idA))
+	if len(idA) != 36 {
+		t.Fatalf("generated id must be a UUID, got %q", idA)
+	}
 	// b disappears from config -> archived
-	must(db.SyncProjects(ctx, []store.ProjectInfo{{ID: "a", Name: "A2"}}))
+	must(db.SyncProjects(ctx, []store.ProjectInfo{{Alias: "a", Name: "A2"}}))
 	var name string
 	var archived *string
-	must(db.db.QueryRow(`SELECT name, archived_at FROM projects WHERE id='a'`).Scan(&name, &archived))
+	must(db.db.QueryRow(`SELECT name, archived_at FROM projects WHERE alias='a'`).Scan(&name, &archived))
 	if name != "A2" || archived != nil {
 		t.Fatalf("a: name=%q archived=%v", name, archived)
 	}
-	must(db.db.QueryRow(`SELECT name, archived_at FROM projects WHERE id='b'`).Scan(&name, &archived))
+	var idA2 string
+	must(db.db.QueryRow(`SELECT id FROM projects WHERE alias='a'`).Scan(&idA2))
+	if idA2 != idA {
+		t.Fatal("re-sync must retain the generated id")
+	}
+	must(db.db.QueryRow(`SELECT name, archived_at FROM projects WHERE alias='b'`).Scan(&name, &archived))
 	if archived == nil {
 		t.Fatal("b must be archived")
 	}
 	// b returns -> unarchived
-	must(db.SyncProjects(ctx, []store.ProjectInfo{{ID: "a", Name: "A2"}, {ID: "b", Name: "B"}}))
-	must(db.db.QueryRow(`SELECT archived_at FROM projects WHERE id='b'`).Scan(&archived))
+	must(db.SyncProjects(ctx, []store.ProjectInfo{{Alias: "a", Name: "A2"}, {Alias: "b", Name: "B"}}))
+	must(db.db.QueryRow(`SELECT archived_at FROM projects WHERE alias='b'`).Scan(&archived))
 	if archived != nil {
 		t.Fatal("b must be unarchived after reappearing")
 	}
-	ids, err := db.ProjectIDs(ctx)
+	ids, err := db.ProjectAliases(ctx)
 	if err != nil || len(ids) != 2 {
-		t.Fatalf("ProjectIDs = %v, %v", ids, err)
+		t.Fatalf("ProjectAliases = %v, %v", ids, err)
 	}
 }
 
@@ -1213,6 +1224,7 @@ import (
 	"time"
 
 	"github.com/dmitry/analytics/internal/store"
+	"github.com/google/uuid"
 )
 
 const tsFormat = "2006-01-02T15:04:05Z"
@@ -1223,7 +1235,7 @@ func (d *DB) WriteWebHits(ctx context.Context, hits []store.WebHit) error {
 	}
 	return d.tx(ctx, func(tx *sql.Tx) error {
 		stmt, err := tx.PrepareContext(ctx, `INSERT INTO web_hits
-			(id, project_id, ts, visitor_hash, path, referrer_source,
+			(id, project, ts, visitor_hash, path, referrer_source,
 			 utm_source, utm_medium, utm_campaign, country, device, browser, os)
 			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 		if err != nil {
@@ -1231,7 +1243,7 @@ func (d *DB) WriteWebHits(ctx context.Context, hits []store.WebHit) error {
 		}
 		defer stmt.Close()
 		for _, h := range hits {
-			if _, err := stmt.ExecContext(ctx, h.ID, h.ProjectID,
+			if _, err := stmt.ExecContext(ctx, h.ID, h.Project,
 				h.TS.UTC().Format(tsFormat), h.VisitorHash, h.Path, h.ReferrerSource,
 				h.UTMSource, h.UTMMedium, h.UTMCampaign, h.Country, h.Device, h.Browser, h.OS); err != nil {
 				return fmt.Errorf("web hit %s: %w", h.ID, err)
@@ -1247,7 +1259,7 @@ func (d *DB) WriteProductEvents(ctx context.Context, evs []store.ProductEvent) e
 	}
 	return d.tx(ctx, func(tx *sql.Tx) error {
 		stmt, err := tx.PrepareContext(ctx, `INSERT INTO product_events
-			(id, project_id, event_name, user_id, ts, attributes) VALUES (?,?,?,?,?,?)`)
+			(id, project, event_name, user_id, ts, attributes) VALUES (?,?,?,?,?,?)`)
 		if err != nil {
 			return err
 		}
@@ -1261,7 +1273,7 @@ func (d *DB) WriteProductEvents(ctx context.Context, evs []store.ProductEvent) e
 			if err != nil {
 				return fmt.Errorf("event %s attributes: %w", e.ID, err)
 			}
-			if _, err := stmt.ExecContext(ctx, e.ID, e.ProjectID, e.EventName,
+			if _, err := stmt.ExecContext(ctx, e.ID, e.Project, e.EventName,
 				e.UserID, e.TS.UTC().Format(tsFormat), string(blob)); err != nil {
 				return fmt.Errorf("event %s: %w", e.ID, err)
 			}
@@ -1272,21 +1284,26 @@ func (d *DB) WriteProductEvents(ctx context.Context, evs []store.ProductEvent) e
 
 func (d *DB) SyncProjects(ctx context.Context, ps []store.ProjectInfo) error {
 	return d.tx(ctx, func(tx *sql.Tx) error {
-		ids := make([]string, 0, len(ps))
+		aliases := make([]string, 0, len(ps))
 		for _, p := range ps {
-			ids = append(ids, p.ID)
-			if _, err := tx.ExecContext(ctx, `INSERT INTO projects (id, name) VALUES (?,?)
-				ON CONFLICT(id) DO UPDATE SET name=excluded.name, archived_at=NULL`,
-				p.ID, p.Name); err != nil {
+			aliases = append(aliases, p.Alias)
+			id, err := uuid.NewV7()
+			if err != nil {
+				return fmt.Errorf("sync projects: %w", err)
+			}
+			// ON CONFLICT(alias) keeps the previously generated id.
+			if _, err := tx.ExecContext(ctx, `INSERT INTO projects (id, alias, name) VALUES (?,?,?)
+				ON CONFLICT(alias) DO UPDATE SET name=excluded.name, archived_at=NULL`,
+				id.String(), p.Alias, p.Name); err != nil {
 				return err
 			}
 		}
 		q := `UPDATE projects SET archived_at=datetime('now') WHERE archived_at IS NULL`
 		args := []any{}
-		if len(ids) > 0 {
-			q += ` AND id NOT IN (?` + strings.Repeat(",?", len(ids)-1) + `)`
-			for _, id := range ids {
-				args = append(args, id)
+		if len(aliases) > 0 {
+			q += ` AND alias NOT IN (?` + strings.Repeat(",?", len(aliases)-1) + `)`
+			for _, a := range aliases {
+				args = append(args, a)
 			}
 		}
 		_, err := tx.ExecContext(ctx, q, args...)
@@ -1294,8 +1311,8 @@ func (d *DB) SyncProjects(ctx context.Context, ps []store.ProjectInfo) error {
 	})
 }
 
-func (d *DB) ProjectIDs(ctx context.Context) ([]string, error) {
-	rows, err := d.db.QueryContext(ctx, `SELECT id FROM projects ORDER BY id`)
+func (d *DB) ProjectAliases(ctx context.Context) ([]string, error) {
+	rows, err := d.db.QueryContext(ctx, `SELECT alias FROM projects ORDER BY alias`)
 	if err != nil {
 		return nil, err
 	}
@@ -1358,7 +1375,7 @@ Remove the corresponding stubs from `sqlite.go`.
 **Interfaces:**
 - Consumes: `store.Store` (only `GetMeta`/`SetMeta`) via local interface `type MetaStore interface { GetMeta(ctx context.Context, key string) (string, error); SetMeta(ctx context.Context, key, value string) error }`.
 - Produces:
-  - `func VisitorHash(salt, ip, userAgent, projectID string) string` — hex SHA-256 of `salt+"\x00"+ip+"\x00"+userAgent+"\x00"+projectID`, first 16 hex chars
+  - `func VisitorHash(salt, ip, userAgent, project string) string` — hex SHA-256 of `salt+"\x00"+ip+"\x00"+userAgent+"\x00"+project`, first 16 hex chars
   - `type Salter struct{ ... }`, `func NewSalter(m MetaStore, now func() time.Time) *Salter`
   - `func (s *Salter) Current(ctx context.Context) (string, error)` — loads from meta; generates+persists if absent or rotated_at older than 24h (old salt is overwritten — destroyed, spec §5.4)
   - `func (s *Salter) Rotate(ctx context.Context) error` — force new salt now
@@ -1462,9 +1479,9 @@ const (
 	rotateEvery  = 24 * time.Hour
 )
 
-func VisitorHash(salt, ip, userAgent, projectID string) string {
+func VisitorHash(salt, ip, userAgent, project string) string {
 	h := sha256.New()
-	for _, part := range []string{salt, ip, userAgent, projectID} {
+	for _, part := range []string{salt, ip, userAgent, project} {
 		h.Write([]byte(part))
 		h.Write([]byte{0})
 	}
@@ -2556,7 +2573,7 @@ func testServer(t *testing.T) (*fakeQueue, http.Handler) {
 	t.Helper()
 	cfg, err := config.Parse(strings.NewReader(`{
 		"database": "sqlite:///tmp/x.db",
-		"projects": [{"id": "app", "name": "App", "allowed_origins": ["https://app.com"]}]
+		"projects": [{"alias": "app", "name": "App", "allowed_origins": ["https://app.com"]}]
 	}`))
 	if err != nil {
 		t.Fatal(err)
@@ -2581,7 +2598,7 @@ func postHit(h http.Handler, origin, body, ua string) *httptest.ResponseRecorder
 func TestHitHappyPath(t *testing.T) {
 	q, h := testServer(t)
 	w := postHit(h, "https://app.com",
-		`{"project_id":"app","url":"https://app.com/pricing?utm_source=hn&secret=x","referrer":"https://news.ycombinator.com/"}`,
+		`{"project":"app","url":"https://app.com/pricing?utm_source=hn&secret=x","referrer":"https://news.ycombinator.com/"}`,
 		chromeUA)
 	if w.Code != 202 {
 		t.Fatalf("code = %d body %s", w.Code, w.Body)
@@ -2604,10 +2621,10 @@ func TestHitHappyPath(t *testing.T) {
 
 func TestHitRejectsBadOrigin(t *testing.T) {
 	q, h := testServer(t)
-	if w := postHit(h, "https://evil.com", `{"project_id":"app","url":"https://app.com/"}`, chromeUA); w.Code != 403 {
+	if w := postHit(h, "https://evil.com", `{"project":"app","url":"https://app.com/"}`, chromeUA); w.Code != 403 {
 		t.Fatalf("evil origin: code = %d", w.Code)
 	}
-	if w := postHit(h, "", `{"project_id":"app","url":"https://app.com/"}`, chromeUA); w.Code != 403 {
+	if w := postHit(h, "", `{"project":"app","url":"https://app.com/"}`, chromeUA); w.Code != 403 {
 		t.Fatalf("missing origin on /api/hit: code = %d", w.Code)
 	}
 	if len(q.hits) != 0 {
@@ -2617,7 +2634,7 @@ func TestHitRejectsBadOrigin(t *testing.T) {
 
 func TestHitUnknownProjectSilentDrop(t *testing.T) {
 	q, h := testServer(t)
-	w := postHit(h, "https://app.com", `{"project_id":"nope","url":"https://app.com/"}`, chromeUA)
+	w := postHit(h, "https://app.com", `{"project":"nope","url":"https://app.com/"}`, chromeUA)
 	if w.Code != 204 {
 		t.Fatalf("code = %d, want 204 (no oracle, spec §5.2)", w.Code)
 	}
@@ -2628,7 +2645,7 @@ func TestHitUnknownProjectSilentDrop(t *testing.T) {
 
 func TestHitDropsBots(t *testing.T) {
 	q, h := testServer(t)
-	w := postHit(h, "https://app.com", `{"project_id":"app","url":"https://app.com/"}`,
+	w := postHit(h, "https://app.com", `{"project":"app","url":"https://app.com/"}`,
 		"Mozilla/5.0 (compatible; Googlebot/2.1)")
 	if w.Code != 202 || len(q.hits) != 0 {
 		t.Fatalf("bots: code=%d hits=%d (want 202, 0)", w.Code, len(q.hits))
@@ -2639,8 +2656,8 @@ func TestHitBadPayloads(t *testing.T) {
 	_, h := testServer(t)
 	for name, body := range map[string]string{
 		"not json":    "{",
-		"no url":      `{"project_id":"app"}`,
-		"relative":    `{"project_id":"app","url":"/x"}`,
+		"no url":      `{"project":"app"}`,
+		"relative":    `{"project":"app","url":"/x"}`,
 		"no project":  `{"url":"https://app.com/"}`,
 	} {
 		if w := postHit(h, "https://app.com", body, chromeUA); w.Code != 400 {
@@ -2651,7 +2668,7 @@ func TestHitBadPayloads(t *testing.T) {
 
 func TestBodyLimit(t *testing.T) {
 	_, h := testServer(t)
-	big := `{"project_id":"app","url":"https://app.com/","referrer":"` + strings.Repeat("x", 17*1024) + `"}`
+	big := `{"project":"app","url":"https://app.com/","referrer":"` + strings.Repeat("x", 17*1024) + `"}`
 	if w := postHit(h, "https://app.com", big, chromeUA); w.Code != 400 && w.Code != 413 {
 		t.Fatalf("oversize body: code = %d", w.Code)
 	}
@@ -2660,7 +2677,7 @@ func TestBodyLimit(t *testing.T) {
 func TestEventNoOriginAllowed(t *testing.T) {
 	q, h := testServer(t)
 	r := httptest.NewRequest("POST", "/api/event", strings.NewReader(
-		`{"project_id":"app","name":"subscribed","user_id":"u1","attributes":{"plan":"pro","n":7}}`))
+		`{"project":"app","name":"subscribed","user_id":"u1","attributes":{"plan":"pro","n":7}}`))
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	if w.Code != 202 || len(q.events) != 1 {
@@ -2675,7 +2692,7 @@ func TestEventNoOriginAllowed(t *testing.T) {
 func TestEventAttributeLimits(t *testing.T) {
 	q, h := testServer(t)
 	attrs := map[string]any{strings.Repeat("k", 65): "dropped-key", "ok": strings.Repeat("v", 600)}
-	body, _ := json.Marshal(map[string]any{"project_id": "app", "name": "e", "user_id": "u", "attributes": attrs})
+	body, _ := json.Marshal(map[string]any{"project": "app", "name": "e", "user_id": "u", "attributes": attrs})
 	r := httptest.NewRequest("POST", "/api/event", strings.NewReader(string(body)))
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
@@ -2759,7 +2776,7 @@ type server struct {
 	salt   Salt
 	logger *slog.Logger
 	// origin -> project index for O(1) allowed-origin checks
-	originOK map[string]map[string]bool // projectID -> set of origins
+	originOK map[string]map[string]bool // project -> set of origins
 }
 
 func New(cfg *config.Config, q Enqueuer, g geo.Provider, salt Salt, logger *slog.Logger) http.Handler {
@@ -2770,7 +2787,7 @@ func New(cfg *config.Config, q Enqueuer, g geo.Provider, salt Salt, logger *slog
 		for _, o := range p.AllowedOrigins {
 			set[strings.TrimSuffix(o, "/")] = true
 		}
-		s.originOK[p.ID] = set
+		s.originOK[p.Alias] = set
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/hit", s.handleHit)
@@ -2787,12 +2804,12 @@ func New(cfg *config.Config, q Enqueuer, g geo.Provider, salt Salt, logger *slog
 
 // originAllowed reports whether the request origin is allowed for the
 // project and emits CORS headers when it is.
-func (s *server) originAllowed(w http.ResponseWriter, r *http.Request, projectID string) bool {
+func (s *server) originAllowed(w http.ResponseWriter, r *http.Request, project string) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
 		return false
 	}
-	set, ok := s.originOK[projectID]
+	set, ok := s.originOK[project]
 	if !ok || !set[strings.TrimSuffix(origin, "/")] {
 		return false
 	}
@@ -2860,13 +2877,13 @@ import (
 )
 
 type hitPayload struct {
-	ProjectID string `json:"project_id"`
+	Project string `json:"project"`
 	URL       string `json:"url"`
 	Referrer  string `json:"referrer"`
 }
 
 type eventPayload struct {
-	ProjectID  string         `json:"project_id"`
+	Project  string         `json:"project"`
 	Name       string         `json:"name"`
 	UserID     string         `json:"user_id"`
 	Attributes map[string]any `json:"attributes"`
@@ -2894,15 +2911,15 @@ func (s *server) handleHit(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &p) {
 		return
 	}
-	if p.ProjectID == "" || p.URL == "" {
-		http.Error(w, "project_id and url required", http.StatusBadRequest)
+	if p.Project == "" || p.URL == "" {
+		http.Error(w, "project and url required", http.StatusBadRequest)
 		return
 	}
-	if s.cfg.Project(p.ProjectID) == nil {
+	if s.cfg.Project(p.Project) == nil {
 		w.WriteHeader(http.StatusNoContent) // silent drop, no oracle
 		return
 	}
-	if !s.originAllowed(w, r, p.ProjectID) {
+	if !s.originAllowed(w, r, p.Project) {
 		http.Error(w, "origin not allowed", http.StatusForbidden)
 		return
 	}
@@ -2929,9 +2946,9 @@ func (s *server) handleHit(w http.ResponseWriter, r *http.Request) {
 	}
 	s.queue.EnqueueHit(store.WebHit{
 		ID:             newID(),
-		ProjectID:      p.ProjectID,
+		Project:      p.Project,
 		TS:             time.Now().UTC(),
-		VisitorHash:    identity.VisitorHash(salt, clientIP(r), ua, p.ProjectID),
+		VisitorHash:    identity.VisitorHash(salt, clientIP(r), ua, p.Project),
 		Path:           page.Path,
 		ReferrerSource: source,
 		UTMSource:      page.UTMSource,
@@ -2950,23 +2967,23 @@ func (s *server) handleEvent(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &p) {
 		return
 	}
-	if p.ProjectID == "" || p.Name == "" || p.UserID == "" {
-		http.Error(w, "project_id, name, user_id required", http.StatusBadRequest)
+	if p.Project == "" || p.Name == "" || p.UserID == "" {
+		http.Error(w, "project, name, user_id required", http.StatusBadRequest)
 		return
 	}
-	if s.cfg.Project(p.ProjectID) == nil {
+	if s.cfg.Project(p.Project) == nil {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	// Origin, when present, must be allowed; absence is permitted here
 	// (server-side SDKs, spec §5.2).
-	if origin := r.Header.Get("Origin"); origin != "" && !s.originAllowed(w, r, p.ProjectID) {
+	if origin := r.Header.Get("Origin"); origin != "" && !s.originAllowed(w, r, p.Project) {
 		http.Error(w, "origin not allowed", http.StatusForbidden)
 		return
 	}
 	s.queue.EnqueueEvent(store.ProductEvent{
 		ID:         newID(),
-		ProjectID:  p.ProjectID,
+		Project:  p.Project,
 		EventName:  p.Name,
 		UserID:     p.UserID,
 		TS:         time.Now().UTC(),
@@ -3113,13 +3130,13 @@ func TestScriptServed(t *testing.T) {
     var current = location.pathname + location.search;
     if (current === lastPage) return;
     lastPage = current;
-    send("/api/hit", { project_id: project, url: location.href, referrer: document.referrer });
+    send("/api/hit", { project: project, url: location.href, referrer: document.referrer });
   }
 
   function track(name, attributes) {
     if (ignored() || !name) return;
     send("/api/event", {
-      project_id: project,
+      project: project,
       name: String(name),
       user_id: userId || anonId,
       attributes: attributes || {}
@@ -3177,7 +3194,7 @@ func (s *server) registerScript(mux *http.ServeMux) {
 - Modify: remove corresponding stubs.
 
 **Interfaces:**
-- Produces working: `AggregateWebDay(ctx, projectID, day)`, `WebDaysBefore(ctx, projectID, before)`.
+- Produces working: `AggregateWebDay(ctx, project, day)`, `WebDaysBefore(ctx, project, before)`.
 - Contract (spec §9): idempotent; skips (no-op) when the day has no raw rows; rollups + raw deletion in ONE transaction; sessions = per-visitor runs split at gaps > 30 min; bounce = single-hit session; duration = per-session `max(t)-min(t)` summed.
 
 - [ ] **Step 1: Write failing tests**
@@ -3203,7 +3220,7 @@ import (
 func seedWebDay(t *testing.T, db *DB) {
 	t.Helper()
 	mk := func(id, vis, path, tsS, source, country, device, browser, osN, us, um, uc string) store.WebHit {
-		return store.WebHit{ID: id, ProjectID: "app", TS: ts(tsS), VisitorHash: vis, Path: path,
+		return store.WebHit{ID: id, Project: "app", TS: ts(tsS), VisitorHash: vis, Path: path,
 			ReferrerSource: source, Country: country, Device: device, Browser: browser, OS: osN,
 			UTMSource: us, UTMMedium: um, UTMCampaign: uc}
 	}
@@ -3235,7 +3252,7 @@ func TestAggregateWebDay(t *testing.T) {
 	}
 	var visitors, pageviews, sessions, bounces, dur int
 	err := db.db.QueryRow(`SELECT visitors, pageviews, sessions, bounces, duration_sec
-		FROM agg_web_daily WHERE project_id='app' AND day='2026-08-10'`).
+		FROM agg_web_daily WHERE project='app' AND day='2026-08-10'`).
 		Scan(&visitors, &pageviews, &sessions, &bounces, &dur)
 	if err != nil {
 		t.Fatal(err)
@@ -3245,16 +3262,16 @@ func TestAggregateWebDay(t *testing.T) {
 	}
 	// Dimensions
 	var pv int
-	if err := db.db.QueryRow(`SELECT pageviews FROM agg_web_pages WHERE project_id='app' AND day='2026-08-10' AND path='/a'`).Scan(&pv); err != nil || pv != 3 {
+	if err := db.db.QueryRow(`SELECT pageviews FROM agg_web_pages WHERE project='app' AND day='2026-08-10' AND path='/a'`).Scan(&pv); err != nil || pv != 3 {
 		t.Fatalf("pages /a pv=%d err=%v", pv, err)
 	}
-	if err := db.db.QueryRow(`SELECT visitors FROM agg_web_countries WHERE project_id='app' AND day='2026-08-10' AND country='DE'`).Scan(&pv); err != nil || pv != 1 {
+	if err := db.db.QueryRow(`SELECT visitors FROM agg_web_countries WHERE project='app' AND day='2026-08-10' AND country='DE'`).Scan(&pv); err != nil || pv != 1 {
 		t.Fatalf("countries DE v=%d err=%v", pv, err)
 	}
-	if err := db.db.QueryRow(`SELECT pageviews FROM agg_web_referrers WHERE project_id='app' AND day='2026-08-10' AND source='google'`).Scan(&pv); err != nil || pv != 1 {
+	if err := db.db.QueryRow(`SELECT pageviews FROM agg_web_referrers WHERE project='app' AND day='2026-08-10' AND source='google'`).Scan(&pv); err != nil || pv != 1 {
 		t.Fatalf("referrers google pv=%d err=%v", pv, err)
 	}
-	if err := db.db.QueryRow(`SELECT pageviews FROM agg_web_utm WHERE project_id='app' AND day='2026-08-10' AND utm_source='hn' AND utm_medium='social' AND utm_campaign='launch'`).Scan(&pv); err != nil || pv != 1 {
+	if err := db.db.QueryRow(`SELECT pageviews FROM agg_web_utm WHERE project='app' AND day='2026-08-10' AND utm_source='hn' AND utm_medium='social' AND utm_campaign='launch'`).Scan(&pv); err != nil || pv != 1 {
 		t.Fatalf("utm pv=%d err=%v", pv, err)
 	}
 	// Empty utm rows are not stored
@@ -3264,7 +3281,7 @@ func TestAggregateWebDay(t *testing.T) {
 		t.Fatal("all-empty utm combination must not be aggregated")
 	}
 	// Raw rows deleted in same tx
-	db.db.QueryRow(`SELECT COUNT(*) FROM web_hits WHERE project_id='app'`).Scan(&n)
+	db.db.QueryRow(`SELECT COUNT(*) FROM web_hits WHERE project='app'`).Scan(&n)
 	if n != 0 {
 		t.Fatalf("raw rows remaining = %d, want 0", n)
 	}
@@ -3282,7 +3299,7 @@ func TestAggregateWebDayIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	var pageviews int
-	db.db.QueryRow(`SELECT pageviews FROM agg_web_daily WHERE project_id='app' AND day='2026-08-10'`).Scan(&pageviews)
+	db.db.QueryRow(`SELECT pageviews FROM agg_web_daily WHERE project='app' AND day='2026-08-10'`).Scan(&pageviews)
 	if pageviews != 4 {
 		t.Fatalf("second run corrupted aggregates: pv=%d", pageviews)
 	}
@@ -3293,8 +3310,8 @@ func TestAggregateWebDayScopesToProjectAndDay(t *testing.T) {
 	ctx := context.Background()
 	seedWebDay(t, db)
 	other := []store.WebHit{
-		{ID: "x1", ProjectID: "other", TS: ts("2026-08-10T10:00:00Z"), VisitorHash: "o1", Path: "/z"},
-		{ID: "x2", ProjectID: "app", TS: ts("2026-08-11T10:00:00Z"), VisitorHash: "v9", Path: "/next-day"},
+		{ID: "x1", Project: "other", TS: ts("2026-08-10T10:00:00Z"), VisitorHash: "o1", Path: "/z"},
+		{ID: "x2", Project: "app", TS: ts("2026-08-11T10:00:00Z"), VisitorHash: "v9", Path: "/next-day"},
 	}
 	if err := db.WriteWebHits(ctx, other); err != nil {
 		t.Fatal(err)
@@ -3314,7 +3331,7 @@ func TestWebDaysBefore(t *testing.T) {
 	ctx := context.Background()
 	seedWebDay(t, db) // 2026-08-10
 	db.WriteWebHits(ctx, []store.WebHit{
-		{ID: "n1", ProjectID: "app", TS: ts("2026-08-15T09:00:00Z"), VisitorHash: "v", Path: "/"},
+		{ID: "n1", Project: "app", TS: ts("2026-08-15T09:00:00Z"), VisitorHash: "v", Path: "/"},
 	})
 	days, err := db.WebDaysBefore(ctx, "app", day("2026-08-12"))
 	if err != nil {
@@ -3346,7 +3363,7 @@ import (
 const sessionsCTE = `
 WITH hits AS (
   SELECT visitor_hash, CAST(strftime('%s', ts) AS INTEGER) AS t
-  FROM web_hits WHERE project_id = :p AND ts >= :from AND ts < :to
+  FROM web_hits WHERE project = :p AND ts >= :from AND ts < :to
 ),
 marked AS (
   SELECT visitor_hash, t,
@@ -3367,18 +3384,18 @@ func dayRange(day civil.Date) (string, string) {
 	return day.String() + "T00:00:00Z", day.AddDays(1).String() + "T00:00:00Z"
 }
 
-func (d *DB) WebDaysBefore(ctx context.Context, projectID string, before civil.Date) ([]civil.Date, error) {
-	return d.daysBefore(ctx, "web_hits", projectID, before)
+func (d *DB) WebDaysBefore(ctx context.Context, project string, before civil.Date) ([]civil.Date, error) {
+	return d.daysBefore(ctx, "web_hits", project, before)
 }
 
-func (d *DB) ProductDaysBefore(ctx context.Context, projectID string, before civil.Date) ([]civil.Date, error) {
-	return d.daysBefore(ctx, "product_events", projectID, before)
+func (d *DB) ProductDaysBefore(ctx context.Context, project string, before civil.Date) ([]civil.Date, error) {
+	return d.daysBefore(ctx, "product_events", project, before)
 }
 
-func (d *DB) daysBefore(ctx context.Context, table, projectID string, before civil.Date) ([]civil.Date, error) {
+func (d *DB) daysBefore(ctx context.Context, table, project string, before civil.Date) ([]civil.Date, error) {
 	rows, err := d.db.QueryContext(ctx,
-		fmt.Sprintf(`SELECT DISTINCT substr(ts,1,10) FROM %s WHERE project_id=? AND ts < ? ORDER BY 1`, table),
-		projectID, before.String()+"T00:00:00Z")
+		fmt.Sprintf(`SELECT DISTINCT substr(ts,1,10) FROM %s WHERE project=? AND ts < ? ORDER BY 1`, table),
+		project, before.String()+"T00:00:00Z")
 	if err != nil {
 		return nil, err
 	}
@@ -3398,22 +3415,22 @@ func (d *DB) daysBefore(ctx context.Context, table, projectID string, before civ
 	return out, rows.Err()
 }
 
-func (d *DB) AggregateWebDay(ctx context.Context, projectID string, day civil.Date) error {
+func (d *DB) AggregateWebDay(ctx context.Context, project string, day civil.Date) error {
 	from, to := dayRange(day)
 	return d.tx(ctx, func(tx *sql.Tx) error {
 		var n int
 		if err := tx.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM web_hits WHERE project_id=? AND ts>=? AND ts<?`,
-			projectID, from, to).Scan(&n); err != nil {
+			`SELECT COUNT(*) FROM web_hits WHERE project=? AND ts>=? AND ts<?`,
+			project, from, to).Scan(&n); err != nil {
 			return err
 		}
 		if n == 0 {
 			return nil // already aggregated (or empty day): no-op keeps idempotency
 		}
-		named := []any{sql.Named("p", projectID), sql.Named("from", from), sql.Named("to", to), sql.Named("day", day.String())}
+		named := []any{sql.Named("p", project), sql.Named("from", from), sql.Named("to", to), sql.Named("day", day.String())}
 		if _, err := tx.ExecContext(ctx, sessionsCTE+`
 			INSERT OR REPLACE INTO agg_web_daily
-			  (project_id, day, visitors, pageviews, sessions, bounces, duration_sec)
+			  (project, day, visitors, pageviews, sessions, bounces, duration_sec)
 			SELECT :p, :day,
 			  (SELECT COUNT(DISTINCT visitor_hash) FROM hits),
 			  (SELECT COUNT(*) FROM hits),
@@ -3435,17 +3452,17 @@ func (d *DB) AggregateWebDay(ctx context.Context, projectID string, day civil.Da
 				"AND NOT (utm_source='' AND utm_medium='' AND utm_campaign='')"},
 		}
 		for _, dm := range dims {
-			q := fmt.Sprintf(`INSERT OR REPLACE INTO %s (project_id, day, %s, visitors, pageviews)
+			q := fmt.Sprintf(`INSERT OR REPLACE INTO %s (project, day, %s, visitors, pageviews)
 				SELECT :p, :day, %s, COUNT(DISTINCT visitor_hash), COUNT(*)
 				FROM web_hits
-				WHERE project_id = :p AND ts >= :from AND ts < :to %s
+				WHERE project = :p AND ts >= :from AND ts < :to %s
 				GROUP BY %s`, dm.table, dm.cols, dm.group, dm.where, dm.group)
 			if _, err := tx.ExecContext(ctx, q, named...); err != nil {
 				return fmt.Errorf("%s: %w", dm.table, err)
 			}
 		}
 		_, err := tx.ExecContext(ctx,
-			`DELETE FROM web_hits WHERE project_id=? AND ts>=? AND ts<?`, projectID, from, to)
+			`DELETE FROM web_hits WHERE project=? AND ts>=? AND ts<?`, project, from, to)
 		return err
 	})
 }
@@ -3463,7 +3480,7 @@ Note the dimension SELECT column list vs group: for the single-column dims `%s` 
 - Create: `internal/store/sqlite/aggregate_product.go`, `internal/store/sqlite/aggregate_product_test.go`
 
 **Interfaces:**
-- Produces working: `AggregateProductDay(ctx, projectID, day, agg store.ProductAggSettings)`.
+- Produces working: `AggregateProductDay(ctx, project, day, agg store.ProductAggSettings)`.
 - Contract (spec §8/§9 + user decision): `agg.Enabled == false` (zero value) ⇒ delete the day's raw rows, write NO aggregates. Enabled ⇒ fill `agg_product_daily` + `agg_product_totals`; for each event's configured attribute keys (union of `agg.Attributes[event]` and `agg.Attributes["*"]`), fill `agg_product_attrs` with top-`agg.TopN` values by count and a `"(other)"` row collapsing the tail (computed with correct distinct-user counts from raw). Raw deletion in the same transaction. Idempotent via the same no-raw-rows no-op guard as web.
 
 - [ ] **Step 1: Write failing tests**
@@ -3485,13 +3502,13 @@ import (
 func seedProductDay(t *testing.T, db *DB) {
 	t.Helper()
 	evs := []store.ProductEvent{
-		{ID: "p1", ProjectID: "app", EventName: "subscribed", UserID: "u1", TS: ts("2026-08-10T10:00:00Z"),
+		{ID: "p1", Project: "app", EventName: "subscribed", UserID: "u1", TS: ts("2026-08-10T10:00:00Z"),
 			Attributes: map[string]string{"plan": "pro", "source": "ads"}},
-		{ID: "p2", ProjectID: "app", EventName: "subscribed", UserID: "u2", TS: ts("2026-08-10T11:00:00Z"),
+		{ID: "p2", Project: "app", EventName: "subscribed", UserID: "u2", TS: ts("2026-08-10T11:00:00Z"),
 			Attributes: map[string]string{"plan": "free", "source": "ads"}},
-		{ID: "p3", ProjectID: "app", EventName: "subscribed", UserID: "u2", TS: ts("2026-08-10T12:00:00Z"),
+		{ID: "p3", Project: "app", EventName: "subscribed", UserID: "u2", TS: ts("2026-08-10T12:00:00Z"),
 			Attributes: map[string]string{"plan": "free"}},
-		{ID: "p4", ProjectID: "app", EventName: "ping", UserID: "u1", TS: ts("2026-08-10T13:00:00Z")},
+		{ID: "p4", Project: "app", EventName: "ping", UserID: "u1", TS: ts("2026-08-10T13:00:00Z")},
 	}
 	if err := db.WriteProductEvents(context.Background(), evs); err != nil {
 		t.Fatal(err)
@@ -3530,14 +3547,14 @@ func TestAggregateProductEnabled(t *testing.T) {
 	}
 	var count, uniq int
 	if err := db.db.QueryRow(`SELECT count, unique_users FROM agg_product_daily
-		WHERE project_id='app' AND day='2026-08-10' AND event_name='subscribed'`).Scan(&count, &uniq); err != nil {
+		WHERE project='app' AND day='2026-08-10' AND event_name='subscribed'`).Scan(&count, &uniq); err != nil {
 		t.Fatal(err)
 	}
 	if count != 3 || uniq != 2 {
 		t.Fatalf("subscribed: c=%d u=%d", count, uniq)
 	}
 	if err := db.db.QueryRow(`SELECT total_events, active_users FROM agg_product_totals
-		WHERE project_id='app' AND day='2026-08-10'`).Scan(&count, &uniq); err != nil {
+		WHERE project='app' AND day='2026-08-10'`).Scan(&count, &uniq); err != nil {
 		t.Fatal(err)
 	}
 	if count != 4 || uniq != 2 {
@@ -3545,7 +3562,7 @@ func TestAggregateProductEnabled(t *testing.T) {
 	}
 	// plan breakdown for subscribed only
 	if err := db.db.QueryRow(`SELECT count, unique_users FROM agg_product_attrs
-		WHERE project_id='app' AND day='2026-08-10' AND event_name='subscribed'
+		WHERE project='app' AND day='2026-08-10' AND event_name='subscribed'
 		AND attr_key='plan' AND attr_value='free'`).Scan(&count, &uniq); err != nil {
 		t.Fatal(err)
 	}
@@ -3577,7 +3594,7 @@ func TestAggregateProductTopNCollapsesTail(t *testing.T) {
 	id := 0
 	add := func(user, val string) {
 		id++
-		evs = append(evs, store.ProductEvent{ID: fmt.Sprintf("e%d", id), ProjectID: "app",
+		evs = append(evs, store.ProductEvent{ID: fmt.Sprintf("e%d", id), Project: "app",
 			EventName: "clicked", UserID: user, TS: ts("2026-08-10T10:00:00Z"),
 			Attributes: map[string]string{"button": val}})
 	}
@@ -3646,47 +3663,47 @@ func attrPath(key string) string {
 	return `$."` + strings.ReplaceAll(key, `"`, `\"`) + `"`
 }
 
-func (d *DB) AggregateProductDay(ctx context.Context, projectID string, day civil.Date, agg store.ProductAggSettings) error {
+func (d *DB) AggregateProductDay(ctx context.Context, project string, day civil.Date, agg store.ProductAggSettings) error {
 	from, to := dayRange(day)
 	return d.tx(ctx, func(tx *sql.Tx) error {
 		var n int
 		if err := tx.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM product_events WHERE project_id=? AND ts>=? AND ts<?`,
-			projectID, from, to).Scan(&n); err != nil {
+			`SELECT COUNT(*) FROM product_events WHERE project=? AND ts>=? AND ts<?`,
+			project, from, to).Scan(&n); err != nil {
 			return err
 		}
 		if n == 0 {
 			return nil
 		}
 		if agg.Enabled {
-			if err := d.rollupProduct(ctx, tx, projectID, day, from, to, agg); err != nil {
+			if err := d.rollupProduct(ctx, tx, project, day, from, to, agg); err != nil {
 				return err
 			}
 		}
 		_, err := tx.ExecContext(ctx,
-			`DELETE FROM product_events WHERE project_id=? AND ts>=? AND ts<?`, projectID, from, to)
+			`DELETE FROM product_events WHERE project=? AND ts>=? AND ts<?`, project, from, to)
 		return err
 	})
 }
 
-func (d *DB) rollupProduct(ctx context.Context, tx *sql.Tx, projectID string, day civil.Date, from, to string, agg store.ProductAggSettings) error {
+func (d *DB) rollupProduct(ctx context.Context, tx *sql.Tx, project string, day civil.Date, from, to string, agg store.ProductAggSettings) error {
 	if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO agg_product_daily
-		(project_id, day, event_name, count, unique_users)
-		SELECT project_id, ?, event_name, COUNT(*), COUNT(DISTINCT user_id)
-		FROM product_events WHERE project_id=? AND ts>=? AND ts<?
-		GROUP BY event_name`, day.String(), projectID, from, to); err != nil {
+		(project, day, event_name, count, unique_users)
+		SELECT project, ?, event_name, COUNT(*), COUNT(DISTINCT user_id)
+		FROM product_events WHERE project=? AND ts>=? AND ts<?
+		GROUP BY event_name`, day.String(), project, from, to); err != nil {
 		return fmt.Errorf("agg_product_daily: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO agg_product_totals
-		(project_id, day, total_events, active_users)
-		SELECT project_id, ?, COUNT(*), COUNT(DISTINCT user_id)
-		FROM product_events WHERE project_id=? AND ts>=? AND ts<?
-		GROUP BY project_id`, day.String(), projectID, from, to); err != nil {
+		(project, day, total_events, active_users)
+		SELECT project, ?, COUNT(*), COUNT(DISTINCT user_id)
+		FROM product_events WHERE project=? AND ts>=? AND ts<?
+		GROUP BY project`, day.String(), project, from, to); err != nil {
 		return fmt.Errorf("agg_product_totals: %w", err)
 	}
 	// Attribute breakdowns: resolve per event name present that day.
 	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT event_name FROM product_events
-		WHERE project_id=? AND ts>=? AND ts<?`, projectID, from, to)
+		WHERE project=? AND ts>=? AND ts<?`, project, from, to)
 	if err != nil {
 		return err
 	}
@@ -3712,7 +3729,7 @@ func (d *DB) rollupProduct(ctx context.Context, tx *sql.Tx, projectID string, da
 			keys[k] = true
 		}
 		for key := range keys {
-			if err := d.rollupAttr(ctx, tx, projectID, day, from, to, event, key, agg.TopN); err != nil {
+			if err := d.rollupAttr(ctx, tx, project, day, from, to, event, key, agg.TopN); err != nil {
 				return fmt.Errorf("attr %s/%s: %w", event, key, err)
 			}
 		}
@@ -3720,10 +3737,10 @@ func (d *DB) rollupProduct(ctx context.Context, tx *sql.Tx, projectID string, da
 	return nil
 }
 
-func (d *DB) rollupAttr(ctx context.Context, tx *sql.Tx, projectID string, day civil.Date, from, to, event, key string, topN int) error {
+func (d *DB) rollupAttr(ctx context.Context, tx *sql.Tx, project string, day civil.Date, from, to, event, key string, topN int) error {
 	path := attrPath(key)
 	named := []any{
-		sql.Named("p", projectID), sql.Named("day", day.String()),
+		sql.Named("p", project), sql.Named("day", day.String()),
 		sql.Named("from", from), sql.Named("to", to),
 		sql.Named("event", event), sql.Named("key", key),
 		sql.Named("path", path), sql.Named("n", topN),
@@ -3733,13 +3750,13 @@ func (d *DB) rollupAttr(ctx context.Context, tx *sql.Tx, projectID string, day c
 		WITH counted AS (
 		  SELECT json_extract(attributes, :path) AS v, COUNT(*) AS c, COUNT(DISTINCT user_id) AS u
 		  FROM product_events
-		  WHERE project_id=:p AND ts>=:from AND ts<:to AND event_name=:event
+		  WHERE project=:p AND ts>=:from AND ts<:to AND event_name=:event
 		    AND json_extract(attributes, :path) IS NOT NULL
 		  GROUP BY v
 		),
 		ranked AS (SELECT v, c, u, ROW_NUMBER() OVER (ORDER BY c DESC, v) AS rn FROM counted)
 		INSERT OR REPLACE INTO agg_product_attrs
-		  (project_id, day, event_name, attr_key, attr_value, count, unique_users)
+		  (project, day, event_name, attr_key, attr_value, count, unique_users)
 		SELECT :p, :day, :event, :key, v, c, u FROM ranked WHERE rn <= :n`, named...); err != nil {
 		return err
 	}
@@ -3748,17 +3765,17 @@ func (d *DB) rollupAttr(ctx context.Context, tx *sql.Tx, projectID string, day c
 		WITH counted AS (
 		  SELECT json_extract(attributes, :path) AS v, COUNT(*) AS c
 		  FROM product_events
-		  WHERE project_id=:p AND ts>=:from AND ts<:to AND event_name=:event
+		  WHERE project=:p AND ts>=:from AND ts<:to AND event_name=:event
 		    AND json_extract(attributes, :path) IS NOT NULL
 		  GROUP BY v
 		),
 		ranked AS (SELECT v, ROW_NUMBER() OVER (ORDER BY c DESC, v) AS rn FROM counted),
 		keep AS (SELECT v FROM ranked WHERE rn <= :n)
 		INSERT OR REPLACE INTO agg_product_attrs
-		  (project_id, day, event_name, attr_key, attr_value, count, unique_users)
+		  (project, day, event_name, attr_key, attr_value, count, unique_users)
 		SELECT :p, :day, :event, :key, '(other)', COUNT(*), COUNT(DISTINCT user_id)
 		FROM product_events
-		WHERE project_id=:p AND ts>=:from AND ts<:to AND event_name=:event
+		WHERE project=:p AND ts>=:from AND ts<:to AND event_name=:event
 		  AND json_extract(attributes, :path) IS NOT NULL
 		  AND json_extract(attributes, :path) NOT IN (SELECT v FROM keep)
 		HAVING COUNT(*) > 0`, named...)
@@ -3776,7 +3793,7 @@ func (d *DB) rollupAttr(ctx context.Context, tx *sql.Tx, projectID string, day c
 - Create: `internal/store/sqlite/prune.go`, `internal/store/sqlite/prune_test.go`
 
 **Interfaces:**
-- Produces working: `PruneAggregates(ctx, projectID, webBefore, productBefore civil.Date)` — deletes rows with `day < webBefore` from all `agg_web_*` tables and `day < productBefore` from all `agg_product_*` tables, scoped to the project; `IncrementalVacuum(ctx)` — `PRAGMA incremental_vacuum(1000)`.
+- Produces working: `PruneAggregates(ctx, project, webBefore, productBefore civil.Date)` — deletes rows with `day < webBefore` from all `agg_web_*` tables and `day < productBefore` from all `agg_product_*` tables, scoped to the project; `IncrementalVacuum(ctx)` — `PRAGMA incremental_vacuum(1000)`.
 
 - [ ] **Step 1: Write failing tests**
 
@@ -3810,7 +3827,7 @@ func TestPruneAggregates(t *testing.T) {
 	counts := map[string]int{}
 	for _, tbl := range []string{"agg_web_daily", "agg_web_pages", "agg_product_daily", "agg_product_attrs"} {
 		var n int
-		db.db.QueryRow(`SELECT COUNT(*) FROM `+tbl+` WHERE project_id='app'`).Scan(&n)
+		db.db.QueryRow(`SELECT COUNT(*) FROM `+tbl+` WHERE project='app'`).Scan(&n)
 		counts[tbl] = n
 	}
 	for tbl, n := range counts {
@@ -3819,7 +3836,7 @@ func TestPruneAggregates(t *testing.T) {
 		}
 	}
 	var n int
-	db.db.QueryRow(`SELECT COUNT(*) FROM agg_web_daily WHERE project_id='other'`).Scan(&n)
+	db.db.QueryRow(`SELECT COUNT(*) FROM agg_web_daily WHERE project='other'`).Scan(&n)
 	if n != 1 {
 		t.Error("other project must be untouched")
 	}
@@ -3853,19 +3870,19 @@ var webAggTables = []string{
 
 var productAggTables = []string{"agg_product_daily", "agg_product_totals", "agg_product_attrs"}
 
-func (d *DB) PruneAggregates(ctx context.Context, projectID string, webBefore, productBefore civil.Date) error {
+func (d *DB) PruneAggregates(ctx context.Context, project string, webBefore, productBefore civil.Date) error {
 	return d.tx(ctx, func(tx *sql.Tx) error {
 		for _, tbl := range webAggTables {
 			if _, err := tx.ExecContext(ctx,
-				fmt.Sprintf(`DELETE FROM %s WHERE project_id=? AND day < ?`, tbl),
-				projectID, webBefore.String()); err != nil {
+				fmt.Sprintf(`DELETE FROM %s WHERE project=? AND day < ?`, tbl),
+				project, webBefore.String()); err != nil {
 				return fmt.Errorf("prune %s: %w", tbl, err)
 			}
 		}
 		for _, tbl := range productAggTables {
 			if _, err := tx.ExecContext(ctx,
-				fmt.Sprintf(`DELETE FROM %s WHERE project_id=? AND day < ?`, tbl),
-				projectID, productBefore.String()); err != nil {
+				fmt.Sprintf(`DELETE FROM %s WHERE project=? AND day < ?`, tbl),
+				project, productBefore.String()); err != nil {
 				return fmt.Errorf("prune %s: %w", tbl, err)
 			}
 		}
@@ -3890,7 +3907,7 @@ func (d *DB) IncrementalVacuum(ctx context.Context) error {
 
 **Interfaces:**
 - Produces working: `KnownAttributeKeys(ctx) ([]string, error)` (distinct keys via `json_each` over `product_events`), `RebuildFlatView(ctx, keys []string) error`.
-- Sanitization contract (spec §8.1): alias = key with `[^a-zA-Z0-9_]` stripped; prefixed with `attr_` always (avoids clashing with base columns and digit-leading names); collisions after sanitizing get `_2`, `_3`... suffixes; empty-after-sanitizing keys are skipped; the JSON path embeds the ORIGINAL key with `"` escaped. View columns: `id, project_id, event_name, user_id, ts` + one per key. DROP+CREATE in one transaction.
+- Sanitization contract (spec §8.1): alias = key with `[^a-zA-Z0-9_]` stripped; prefixed with `attr_` always (avoids clashing with base columns and digit-leading names); collisions after sanitizing get `_2`, `_3`... suffixes; empty-after-sanitizing keys are skipped; the JSON path embeds the ORIGINAL key with `"` escaped. View columns: `id, project, event_name, user_id, ts` + one per key. DROP+CREATE in one transaction.
 
 - [ ] **Step 1: Write failing tests**
 
@@ -3909,9 +3926,9 @@ func TestKnownAttributeKeys(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
 	evs := []store.ProductEvent{
-		{ID: "1", ProjectID: "app", EventName: "e", UserID: "u", TS: ts("2026-08-10T10:00:00Z"),
+		{ID: "1", Project: "app", EventName: "e", UserID: "u", TS: ts("2026-08-10T10:00:00Z"),
 			Attributes: map[string]string{"plan": "pro", "weird key!": "x"}},
-		{ID: "2", ProjectID: "app", EventName: "e", UserID: "u", TS: ts("2026-08-10T11:00:00Z"),
+		{ID: "2", Project: "app", EventName: "e", UserID: "u", TS: ts("2026-08-10T11:00:00Z"),
 			Attributes: map[string]string{"plan": "free", "source": "ads"}},
 	}
 	if err := db.WriteProductEvents(ctx, evs); err != nil {
@@ -3932,7 +3949,7 @@ func TestRebuildFlatView(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
 	evs := []store.ProductEvent{
-		{ID: "1", ProjectID: "app", EventName: "e", UserID: "u1", TS: ts("2026-08-10T10:00:00Z"),
+		{ID: "1", Project: "app", EventName: "e", UserID: "u1", TS: ts("2026-08-10T10:00:00Z"),
 			Attributes: map[string]string{"plan": "pro"}},
 	}
 	if err := db.WriteProductEvents(ctx, evs); err != nil {
@@ -4042,7 +4059,7 @@ func sanitizeAlias(key string) string {
 func (d *DB) RebuildFlatView(ctx context.Context, keys []string) error {
 	sorted := append([]string(nil), keys...)
 	sort.Strings(sorted) // deterministic column order
-	cols := []string{"id", "project_id", "event_name", "user_id", "ts"}
+	cols := []string{"id", "project", "event_name", "user_id", "ts"}
 	used := map[string]bool{}
 	for _, key := range sorted {
 		alias := sanitizeAlias(key)
@@ -4109,7 +4126,7 @@ func TestStitchViewsInvariantWeb(t *testing.T) {
 
 	read := func() (v, pv, s, b, d int) {
 		err := db.db.QueryRow(`SELECT visitors, pageviews, sessions, bounces, duration_sec
-			FROM v_web_daily WHERE project_id='app' AND day='2026-08-10'`).Scan(&v, &pv, &s, &b, &d)
+			FROM v_web_daily WHERE project='app' AND day='2026-08-10'`).Scan(&v, &pv, &s, &b, &d)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -4126,7 +4143,7 @@ func TestStitchViewsInvariantWeb(t *testing.T) {
 	}
 	var pages int
 	if err := db.db.QueryRow(`SELECT pageviews FROM v_web_pages
-		WHERE project_id='app' AND day='2026-08-10' AND path='/a'`).Scan(&pages); err != nil {
+		WHERE project='app' AND day='2026-08-10' AND path='/a'`).Scan(&pages); err != nil {
 		t.Fatal(err)
 	}
 	if pages != 3 {
@@ -4140,7 +4157,7 @@ func TestStitchViewsInvariantProduct(t *testing.T) {
 	seedProductDay(t, db)
 	read := func() (c, u int) {
 		err := db.db.QueryRow(`SELECT count, unique_users FROM v_product_daily
-			WHERE project_id='app' AND day='2026-08-10' AND event_name='subscribed'`).Scan(&c, &u)
+			WHERE project='app' AND day='2026-08-10' AND event_name='subscribed'`).Scan(&c, &u)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -4157,7 +4174,7 @@ func TestStitchViewsInvariantProduct(t *testing.T) {
 	}
 	var dau int
 	if err := db.db.QueryRow(`SELECT active_users FROM v_product_totals
-		WHERE project_id='app' AND day='2026-08-10'`).Scan(&dau); err != nil {
+		WHERE project='app' AND day='2026-08-10'`).Scan(&dau); err != nil {
 		t.Fatal(err)
 	}
 	if dau != 2 {
@@ -4176,97 +4193,97 @@ func TestStitchViewsInvariantProduct(t *testing.T) {
 -- so no day is double counted.
 
 CREATE VIEW v_web_daily AS
-SELECT project_id, day, visitors, pageviews, sessions, bounces, duration_sec FROM agg_web_daily
+SELECT project, day, visitors, pageviews, sessions, bounces, duration_sec FROM agg_web_daily
 UNION ALL
-SELECT c.project_id, c.day, c.visitors, c.pageviews, p.sessions, p.bounces, p.duration_sec
+SELECT c.project, c.day, c.visitors, c.pageviews, p.sessions, p.bounces, p.duration_sec
 FROM (
-  SELECT project_id, substr(ts,1,10) AS day,
+  SELECT project, substr(ts,1,10) AS day,
          COUNT(DISTINCT visitor_hash) AS visitors, COUNT(*) AS pageviews
-  FROM web_hits GROUP BY project_id, substr(ts,1,10)
+  FROM web_hits GROUP BY project, substr(ts,1,10)
 ) c
 JOIN (
   WITH base AS (
-    SELECT project_id, substr(ts,1,10) AS day, visitor_hash,
+    SELECT project, substr(ts,1,10) AS day, visitor_hash,
            CAST(strftime('%s', ts) AS INTEGER) AS t
     FROM web_hits
   ),
   marked AS (
-    SELECT project_id, day, visitor_hash, t,
+    SELECT project, day, visitor_hash, t,
            CASE WHEN LAG(t) OVER w IS NULL OR t - LAG(t) OVER w > 1800 THEN 1 ELSE 0 END AS new_session
-    FROM base WINDOW w AS (PARTITION BY project_id, day, visitor_hash ORDER BY t)
+    FROM base WINDOW w AS (PARTITION BY project, day, visitor_hash ORDER BY t)
   ),
   numbered AS (
-    SELECT project_id, day, visitor_hash, t,
-           SUM(new_session) OVER (PARTITION BY project_id, day, visitor_hash ORDER BY t) AS session_no
+    SELECT project, day, visitor_hash, t,
+           SUM(new_session) OVER (PARTITION BY project, day, visitor_hash ORDER BY t) AS session_no
     FROM marked
   ),
   per_session AS (
-    SELECT project_id, day, visitor_hash, session_no,
+    SELECT project, day, visitor_hash, session_no,
            COUNT(*) AS hit_count, MAX(t) - MIN(t) AS duration
-    FROM numbered GROUP BY project_id, day, visitor_hash, session_no
+    FROM numbered GROUP BY project, day, visitor_hash, session_no
   )
-  SELECT project_id, day, COUNT(*) AS sessions,
+  SELECT project, day, COUNT(*) AS sessions,
          SUM(CASE WHEN hit_count = 1 THEN 1 ELSE 0 END) AS bounces,
          COALESCE(SUM(duration), 0) AS duration_sec
-  FROM per_session GROUP BY project_id, day
-) p ON p.project_id = c.project_id AND p.day = c.day;
+  FROM per_session GROUP BY project, day
+) p ON p.project = c.project AND p.day = c.day;
 
 CREATE VIEW v_web_pages AS
-SELECT project_id, day, path, visitors, pageviews FROM agg_web_pages
+SELECT project, day, path, visitors, pageviews FROM agg_web_pages
 UNION ALL
-SELECT project_id, substr(ts,1,10), path, COUNT(DISTINCT visitor_hash), COUNT(*)
-FROM web_hits GROUP BY project_id, substr(ts,1,10), path;
+SELECT project, substr(ts,1,10), path, COUNT(DISTINCT visitor_hash), COUNT(*)
+FROM web_hits GROUP BY project, substr(ts,1,10), path;
 
 CREATE VIEW v_web_referrers AS
-SELECT project_id, day, source, visitors, pageviews FROM agg_web_referrers
+SELECT project, day, source, visitors, pageviews FROM agg_web_referrers
 UNION ALL
-SELECT project_id, substr(ts,1,10), referrer_source, COUNT(DISTINCT visitor_hash), COUNT(*)
-FROM web_hits GROUP BY project_id, substr(ts,1,10), referrer_source;
+SELECT project, substr(ts,1,10), referrer_source, COUNT(DISTINCT visitor_hash), COUNT(*)
+FROM web_hits GROUP BY project, substr(ts,1,10), referrer_source;
 
 CREATE VIEW v_web_countries AS
-SELECT project_id, day, country, visitors, pageviews FROM agg_web_countries
+SELECT project, day, country, visitors, pageviews FROM agg_web_countries
 UNION ALL
-SELECT project_id, substr(ts,1,10), country, COUNT(DISTINCT visitor_hash), COUNT(*)
-FROM web_hits GROUP BY project_id, substr(ts,1,10), country;
+SELECT project, substr(ts,1,10), country, COUNT(DISTINCT visitor_hash), COUNT(*)
+FROM web_hits GROUP BY project, substr(ts,1,10), country;
 
 CREATE VIEW v_web_devices AS
-SELECT project_id, day, device, visitors, pageviews FROM agg_web_devices
+SELECT project, day, device, visitors, pageviews FROM agg_web_devices
 UNION ALL
-SELECT project_id, substr(ts,1,10), device, COUNT(DISTINCT visitor_hash), COUNT(*)
-FROM web_hits GROUP BY project_id, substr(ts,1,10), device;
+SELECT project, substr(ts,1,10), device, COUNT(DISTINCT visitor_hash), COUNT(*)
+FROM web_hits GROUP BY project, substr(ts,1,10), device;
 
 CREATE VIEW v_web_browsers AS
-SELECT project_id, day, browser, visitors, pageviews FROM agg_web_browsers
+SELECT project, day, browser, visitors, pageviews FROM agg_web_browsers
 UNION ALL
-SELECT project_id, substr(ts,1,10), browser, COUNT(DISTINCT visitor_hash), COUNT(*)
-FROM web_hits GROUP BY project_id, substr(ts,1,10), browser;
+SELECT project, substr(ts,1,10), browser, COUNT(DISTINCT visitor_hash), COUNT(*)
+FROM web_hits GROUP BY project, substr(ts,1,10), browser;
 
 CREATE VIEW v_web_os AS
-SELECT project_id, day, os, visitors, pageviews FROM agg_web_os
+SELECT project, day, os, visitors, pageviews FROM agg_web_os
 UNION ALL
-SELECT project_id, substr(ts,1,10), os, COUNT(DISTINCT visitor_hash), COUNT(*)
-FROM web_hits GROUP BY project_id, substr(ts,1,10), os;
+SELECT project, substr(ts,1,10), os, COUNT(DISTINCT visitor_hash), COUNT(*)
+FROM web_hits GROUP BY project, substr(ts,1,10), os;
 
 CREATE VIEW v_web_utm AS
-SELECT project_id, day, utm_source, utm_medium, utm_campaign, visitors, pageviews FROM agg_web_utm
+SELECT project, day, utm_source, utm_medium, utm_campaign, visitors, pageviews FROM agg_web_utm
 UNION ALL
-SELECT project_id, substr(ts,1,10), utm_source, utm_medium, utm_campaign,
+SELECT project, substr(ts,1,10), utm_source, utm_medium, utm_campaign,
        COUNT(DISTINCT visitor_hash), COUNT(*)
 FROM web_hits
 WHERE NOT (utm_source='' AND utm_medium='' AND utm_campaign='')
-GROUP BY project_id, substr(ts,1,10), utm_source, utm_medium, utm_campaign;
+GROUP BY project, substr(ts,1,10), utm_source, utm_medium, utm_campaign;
 
 CREATE VIEW v_product_daily AS
-SELECT project_id, day, event_name, count, unique_users FROM agg_product_daily
+SELECT project, day, event_name, count, unique_users FROM agg_product_daily
 UNION ALL
-SELECT project_id, substr(ts,1,10), event_name, COUNT(*), COUNT(DISTINCT user_id)
-FROM product_events GROUP BY project_id, substr(ts,1,10), event_name;
+SELECT project, substr(ts,1,10), event_name, COUNT(*), COUNT(DISTINCT user_id)
+FROM product_events GROUP BY project, substr(ts,1,10), event_name;
 
 CREATE VIEW v_product_totals AS
-SELECT project_id, day, total_events, active_users FROM agg_product_totals
+SELECT project, day, total_events, active_users FROM agg_product_totals
 UNION ALL
-SELECT project_id, substr(ts,1,10), COUNT(*), COUNT(DISTINCT user_id)
-FROM product_events GROUP BY project_id, substr(ts,1,10);
+SELECT project, substr(ts,1,10), COUNT(*), COUNT(DISTINCT user_id)
+FROM product_events GROUP BY project, substr(ts,1,10);
 ```
 
 - [ ] **Step 4: Run tests — PASS** (the invariant test is the point: identical numbers pre/post aggregation). **Step 5: Commit** — `git commit -m "feat: stitch views hiding the raw/aggregate boundary"`
@@ -4327,7 +4344,7 @@ func setup(t *testing.T, cfgJSON string) (store.Store, *config.Config, *Runner) 
 const jobsCfg = `{
   "database": "sqlite:///unused",
   "retention": {"web": {"raw_days": 7, "aggregate_days": 365}, "product": {"raw_days": 7, "aggregate_days": 365}},
-  "projects": [{"id": "app", "name": "App", "allowed_origins": ["https://a.com"],
+  "projects": [{"alias": "app", "name": "App", "allowed_origins": ["https://a.com"],
     "product_aggregation": {"enabled": true, "attributes": {"*": ["plan"]}, "top_n": 50}}]
 }`
 
@@ -4341,13 +4358,13 @@ func TestRunDailyPassAggregatesOldDays(t *testing.T) {
 	ctx := context.Background()
 	// Old day (beyond 7-day raw window relative to fake now 2026-08-22).
 	st.WriteWebHits(ctx, []store.WebHit{
-		{ID: "1", ProjectID: "app", TS: mustTime("2026-08-10T10:00:00Z"), VisitorHash: "v", Path: "/"}})
+		{ID: "1", Project: "app", TS: mustTime("2026-08-10T10:00:00Z"), VisitorHash: "v", Path: "/"}})
 	st.WriteProductEvents(ctx, []store.ProductEvent{
-		{ID: "2", ProjectID: "app", EventName: "e", UserID: "u", TS: mustTime("2026-08-10T10:00:00Z"),
+		{ID: "2", Project: "app", EventName: "e", UserID: "u", TS: mustTime("2026-08-10T10:00:00Z"),
 			Attributes: map[string]string{"plan": "pro"}}})
 	// Recent day (inside window) must survive raw.
 	st.WriteWebHits(ctx, []store.WebHit{
-		{ID: "3", ProjectID: "app", TS: mustTime("2026-08-21T10:00:00Z"), VisitorHash: "v", Path: "/"}})
+		{ID: "3", Project: "app", TS: mustTime("2026-08-21T10:00:00Z"), VisitorHash: "v", Path: "/"}})
 	if err := r.RunDailyPass(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -4422,7 +4439,7 @@ func aggSettingsFor(p *config.Project) store.ProductAggSettings {
 
 func (r *Runner) RunDailyPass(ctx context.Context) error {
 	today := civil.Today(r.now())
-	ids, err := r.store.ProjectIDs(ctx)
+	ids, err := r.store.ProjectAliases(ctx)
 	if err != nil {
 		return err
 	}
@@ -4432,8 +4449,8 @@ func (r *Runner) RunDailyPass(ctx context.Context) error {
 		seen[id] = true
 	}
 	for _, p := range r.cfg.Projects {
-		if !seen[p.ID] {
-			ids = append(ids, p.ID)
+		if !seen[p.Alias] {
+			ids = append(ids, p.Alias)
 		}
 	}
 	for _, id := range ids {
@@ -4564,7 +4581,7 @@ func TestServeEndToEnd(t *testing.T) {
 		"listen": %q,
 		"database": "sqlite://%s",
 		"buffer": {"flush_max_events": 2, "flush_interval": "50ms", "capacity": 100},
-		"projects": [{"id": "app", "name": "App", "allowed_origins": ["https://app.com"]}]
+		"projects": [{"alias": "app", "name": "App", "allowed_origins": ["https://app.com"]}]
 	}`, addr, dbPath)))
 	if err != nil {
 		t.Fatal(err)
@@ -4590,15 +4607,15 @@ func TestServeEndToEnd(t *testing.T) {
 		return resp
 	}
 	if r := post("/api/hit", "https://app.com",
-		`{"project_id":"app","url":"https://app.com/pricing","referrer":""}`); r.StatusCode != 202 {
+		`{"project":"app","url":"https://app.com/pricing","referrer":""}`); r.StatusCode != 202 {
 		t.Fatalf("hit: %d", r.StatusCode)
 	}
 	if r := post("/api/event", "",
-		`{"project_id":"app","name":"signup","user_id":"u1","attributes":{"plan":"pro"}}`); r.StatusCode != 202 {
+		`{"project":"app","name":"signup","user_id":"u1","attributes":{"plan":"pro"}}`); r.StatusCode != 202 {
 		t.Fatalf("event: %d", r.StatusCode)
 	}
 	if r := post("/api/hit", "https://evil.com",
-		`{"project_id":"app","url":"https://app.com/"}`); r.StatusCode != 403 {
+		`{"project":"app","url":"https://app.com/"}`); r.StatusCode != 403 {
 		t.Fatalf("evil origin: %d", r.StatusCode)
 	}
 
@@ -4710,7 +4727,7 @@ func Serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	}
 	infos := make([]store.ProjectInfo, 0, len(cfg.Projects))
 	for _, p := range cfg.Projects {
-		infos = append(infos, store.ProjectInfo{ID: p.ID, Name: p.Name})
+		infos = append(infos, store.ProjectInfo{Alias: p.Alias, Name: p.Name})
 	}
 	if err := st.SyncProjects(ctx, infos); err != nil {
 		return err
@@ -5376,7 +5393,7 @@ build/
 # Analytics
 
 ```sql projects
-select id, name, archived_at is not null as archived
+select alias, name, archived_at is not null as archived
 from analytics.projects
 order by archived, name
 ```
@@ -5385,7 +5402,7 @@ order by archived, name
 
 {#each projects.filter(p => !p.archived) as p}
 
-- [{p.name} — web](/web/{p.id}) · [product](/product/{p.id})
+- [{p.name} — web](/web/{p.alias}) · [product](/product/{p.alias})
 
 {/each}
 
@@ -5395,7 +5412,7 @@ order by archived, name
 
 {#each projects.filter(p => p.archived) as p}
 
-- [{p.name} — web](/web/{p.id}) · [product](/product/{p.id})
+- [{p.name} — web](/web/{p.alias}) · [product](/product/{p.alias})
 
 {/each}
 
@@ -5411,7 +5428,7 @@ select day, visitors, pageviews, sessions,
        case when sessions > 0 then bounces * 1.0 / sessions else 0 end as bounce_rate,
        case when sessions > 0 then duration_sec * 1.0 / sessions else 0 end as avg_session_sec
 from analytics.v_web_daily
-where project_id = '${params.project}' and day >= date('now', '-90 days')
+where project = '${params.project}' and day >= date('now', '-90 days')
 order by day
 ```
 
@@ -5424,46 +5441,46 @@ order by day
 ```sql pages
 select path, sum(visitors) as visitors, sum(pageviews) as pageviews
 from analytics.v_web_pages
-where project_id = '${params.project}' and day >= date('now', '-30 days')
+where project = '${params.project}' and day >= date('now', '-30 days')
 group by path order by pageviews desc limit 20
 ```
 
 ```sql referrers
 select source, sum(visitors) as visitors, sum(pageviews) as pageviews
 from analytics.v_web_referrers
-where project_id = '${params.project}' and day >= date('now', '-30 days') and source != ''
+where project = '${params.project}' and day >= date('now', '-30 days') and source != ''
 group by source order by visitors desc limit 20
 ```
 
 ```sql countries
 select country, sum(visitors) as visitors
 from analytics.v_web_countries
-where project_id = '${params.project}' and day >= date('now', '-30 days') and country != ''
+where project = '${params.project}' and day >= date('now', '-30 days') and country != ''
 group by country order by visitors desc limit 20
 ```
 
 ```sql devices
 select device, sum(visitors) as visitors from analytics.v_web_devices
-where project_id = '${params.project}' and day >= date('now', '-30 days')
+where project = '${params.project}' and day >= date('now', '-30 days')
 group by device order by visitors desc
 ```
 
 ```sql browsers
 select browser, sum(visitors) as visitors from analytics.v_web_browsers
-where project_id = '${params.project}' and day >= date('now', '-30 days') and browser != ''
+where project = '${params.project}' and day >= date('now', '-30 days') and browser != ''
 group by browser order by visitors desc limit 10
 ```
 
 ```sql oses
 select os, sum(visitors) as visitors from analytics.v_web_os
-where project_id = '${params.project}' and day >= date('now', '-30 days') and os != ''
+where project = '${params.project}' and day >= date('now', '-30 days') and os != ''
 group by os order by visitors desc limit 10
 ```
 
 ```sql campaigns
 select utm_source, utm_medium, utm_campaign, sum(visitors) as visitors, sum(pageviews) as pageviews
 from analytics.v_web_utm
-where project_id = '${params.project}' and day >= date('now', '-30 days')
+where project = '${params.project}' and day >= date('now', '-30 days')
 group by utm_source, utm_medium, utm_campaign order by visitors desc limit 20
 ```
 
@@ -5492,7 +5509,7 @@ group by utm_source, utm_medium, utm_campaign order by visitors desc limit 20
 ```sql totals
 select day, total_events, active_users
 from analytics.v_product_totals
-where project_id = '${params.project}' and day >= date('now', '-90 days')
+where project = '${params.project}' and day >= date('now', '-90 days')
 order by day
 ```
 
@@ -5504,7 +5521,7 @@ order by day
 ```sql events
 select day, event_name, count, unique_users
 from analytics.v_product_daily
-where project_id = '${params.project}' and day >= date('now', '-90 days')
+where project = '${params.project}' and day >= date('now', '-90 days')
 order by day
 ```
 
@@ -5513,7 +5530,7 @@ order by day
 ```sql event_summary
 select event_name, sum(count) as total, max(unique_users) as peak_daily_uniques
 from analytics.v_product_daily
-where project_id = '${params.project}' and day >= date('now', '-30 days')
+where project = '${params.project}' and day >= date('now', '-30 days')
 group by event_name order by total desc
 ```
 
@@ -5523,7 +5540,7 @@ group by event_name order by total desc
 ```sql attr_breakdowns
 select day, event_name, attr_key, attr_value, count, unique_users
 from analytics.agg_product_attrs
-where project_id = '${params.project}' and day >= date('now', '-90 days')
+where project = '${params.project}' and day >= date('now', '-90 days')
 order by day
 ```
 
@@ -5566,7 +5583,7 @@ order by day
   },
   "projects": [
     {
-      "id": "myapp",
+      "alias": "myapp",
       "name": "My App",
       "allowed_origins": ["https://myapp.com"]
     }
@@ -5773,5 +5790,5 @@ go vet ./...
 
 - **Spec coverage:** §2 dependency budget → Task 1/global constraints (maxminddb flagged); §4 config → Task 3; §5 API/limits/auth/pipeline/enrichment/script → Tasks 8, 9, 12, 13, 14; §5.4/§5.4a privacy → Tasks 7, 9, 13, 14, 26; §6 geo → Tasks 10, 11; §7 store abstraction → Tasks 4, 5; §8 schema/views → Tasks 5, 18, 19; §9 jobs → Task 20; §10 replication/topologies/Evidence → Tasks 22, 23, 24; §11 ops → Task 25; §12 layout → all; §12a low-resource → Tasks 1 (multi-arch), 5 (cache_size), 23/25 (GOMEMLIMIT); §13 future work → none needed (registry seams exist); §14 testing/coverage → Task 1 gate + every task's tests + Task 26 verification.
 - **Known deviations from spec (accepted):** (1) `oschwald/maxminddb-golang/v2` instead of a hand-rolled MMDB reader — spec §6 contingency, declared in the header; (2) tracking script lives at `internal/server/script.js` (go:embed constraint) instead of `web/script.js` — repo-layout note updated in README task.
-- **Type consistency check:** `store.Store` methods match between Task 4 (definition), Tasks 5–19 (implementations), Task 20 (consumer), Task 21 (wiring): `Migrate`, `SyncProjects`, `WriteWebHits`, `WriteProductEvents`, `WebDaysBefore`, `ProductDaysBefore`, `AggregateWebDay`, `AggregateProductDay`, `PruneAggregates`, `IncrementalVacuum`, `ProjectIDs`, `KnownAttributeKeys`, `RebuildFlatView`, `GetMeta`, `SetMeta`, `Close`. `config.BufferConfig{FlushMaxEvents, FlushInterval, Capacity}` consistent across Tasks 3, 12, 21. `civil.Date` API consistent across Tasks 2, 15–22.
+- **Type consistency check:** `store.Store` methods match between Task 4 (definition), Tasks 5–19 (implementations), Task 20 (consumer), Task 21 (wiring): `Migrate`, `SyncProjects`, `WriteWebHits`, `WriteProductEvents`, `WebDaysBefore`, `ProductDaysBefore`, `AggregateWebDay`, `AggregateProductDay`, `PruneAggregates`, `IncrementalVacuum`, `ProjectAliases`, `KnownAttributeKeys`, `RebuildFlatView`, `GetMeta`, `SetMeta`, `Close`. `config.BufferConfig{FlushMaxEvents, FlushInterval, Capacity}` consistent across Tasks 3, 12, 21. `civil.Date` API consistent across Tasks 2, 15–22.
 - **Sequencing:** Tasks 1–4 are foundations; 5–6 sqlite base; 7–12 independent of each other (parallelizable); 13–14 need 7–12; 15–19 need 6; 20 needs 15–19; 21 needs everything Go; 22 needs 3+5; 23–25 need 21–22; 24 needs 19; 26 last.

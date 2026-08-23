@@ -104,7 +104,7 @@ exec it.
   },
   "projects": [
     {
-      "id": "myapp",
+      "alias": "myapp",
       "name": "My App",
       "allowed_origins": ["https://myapp.com", "https://www.myapp.com"],
       "retention": { "product": { "raw_days": 60 } },
@@ -120,6 +120,11 @@ exec it.
 
 Rules:
 
+- `alias` is each project's unique, stable key: it appears in the tracking
+  snippet (`data-project`), in API payloads (`"project"`), and in the
+  `project` column of every event/aggregate row. The `projects` table's
+  UUIDv7 `id` is generated at first registration and is not referenced by
+  config or payloads.
 - `database` and `geo` are DSNs; the URL scheme selects the implementation.
 - Per-project `retention` overrides the global block (deep-merged).
 - `product_aggregation` absent or `enabled: false` (the default) ⇒ **no product
@@ -144,10 +149,10 @@ Rules:
 
 ```jsonc
 // POST /api/hit  (sent by script.js)
-{ "project_id": "myapp", "url": "https://myapp.com/pricing?utm_source=hn", "referrer": "https://news.ycombinator.com/" }
+{ "project": "myapp", "url": "https://myapp.com/pricing?utm_source=hn", "referrer": "https://news.ycombinator.com/" }
 
 // POST /api/event
-{ "project_id": "myapp", "name": "subscribed", "user_id": "u_123", "attributes": { "plan": "pro" } }
+{ "project": "myapp", "name": "subscribed", "user_id": "u_123", "attributes": { "plan": "pro" } }
 ```
 
 Limits: body ≤ 16 KB; ≤ 50 attributes; attribute keys ≤ 64 chars; values
@@ -164,7 +169,7 @@ truncated, not rejected, to avoid data loss).
   origin checking deters casual browser abuse; a scripted client can spoof or
   omit it. Acceptable per the auth decision (low-stakes data, obscure URL);
   upgrading to an API key later is a small, isolated change.
-- Unknown `project_id` → `204 No Content` and the event is dropped (no oracle
+- Unknown `project` → `204 No Content` and the event is dropped (no oracle
   for probers).
 
 ### 5.3 Ingestion pipeline
@@ -195,7 +200,7 @@ never blocks on the DB.
   matcher (~most common patterns, not a full UA DB). Known bots/crawlers/
   headless UAs are dropped before buffering.
 - `country`: from the geo provider.
-- `visitor_hash = SHA-256(daily_salt ‖ ip ‖ user_agent ‖ project_id)[:16]`.
+- `visitor_hash = SHA-256(daily_salt ‖ ip ‖ user_agent ‖ project)[:16]`.
   The salt lives in the `meta` table, rotates every 24 h (boot + daily job);
   the IP is used only in this computation and never stored or logged. Salt
   rotation **replaces** the salt — the previous salt is destroyed, never
@@ -295,21 +300,26 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 -- keys: visitor_salt, visitor_salt_rotated_at
 
 CREATE TABLE projects (
-    id          TEXT PRIMARY KEY,
+    id          TEXT PRIMARY KEY,                       -- UUIDv7, generated at first registration
+    alias       TEXT NOT NULL UNIQUE,                   -- the config/tracking key
     name        TEXT NOT NULL,
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     archived_at TEXT                                    -- NULL = active
 );
--- Registered/upserted from config on boot (source of truth = config).
--- Projects that disappear from the config are marked archived
--- (archived_at set); if they reappear, archived_at is cleared. Historical
--- data is never deleted by archiving; retention rules still apply.
--- Archived projects reject new events implicitly (not in config ⇒ 204-drop).
+-- Registered/upserted from config on boot, matched by alias (source of
+-- truth = config; the id is generated once — UUIDv7 — and never changes).
+-- Config and tracking payloads use the alias everywhere; event and
+-- aggregate rows store the alias in their `project` column. Projects that
+-- disappear from the config are marked archived (archived_at set); if they
+-- reappear (same alias), archived_at is cleared and the id is retained.
+-- Historical data is never deleted by archiving; retention rules still
+-- apply. Archived projects reject new events implicitly (not in config ⇒
+-- 204-drop).
 
 -- ===== raw: web (retained retention.web.raw_days) =====
 CREATE TABLE web_hits (
     id              TEXT PRIMARY KEY,               -- UUIDv7
-    project_id      TEXT NOT NULL,
+    project      TEXT NOT NULL,
     ts              TEXT NOT NULL,                  -- UTC ISO-8601
     visitor_hash    TEXT NOT NULL,
     path            TEXT NOT NULL,
@@ -322,60 +332,60 @@ CREATE TABLE web_hits (
     browser         TEXT NOT NULL DEFAULT '',
     os              TEXT NOT NULL DEFAULT ''
 );
-CREATE INDEX idx_web_hits_project_ts ON web_hits(project_id, ts);
-CREATE INDEX idx_web_hits_visitor    ON web_hits(project_id, visitor_hash, ts);
+CREATE INDEX idx_web_hits_project_ts ON web_hits(project, ts);
+CREATE INDEX idx_web_hits_visitor    ON web_hits(project, visitor_hash, ts);
 
 -- ===== raw: product (retained retention.product.raw_days) =====
 CREATE TABLE product_events (
     id         TEXT PRIMARY KEY,                    -- UUIDv7
-    project_id TEXT NOT NULL,
+    project TEXT NOT NULL,
     event_name TEXT NOT NULL,
     user_id    TEXT NOT NULL,
     ts         TEXT NOT NULL,
     attributes TEXT NOT NULL DEFAULT '{}'           -- JSON
 );
-CREATE INDEX idx_events_project_name_ts ON product_events(project_id, event_name, ts);
-CREATE INDEX idx_events_project_user_ts ON product_events(project_id, user_id, ts);
+CREATE INDEX idx_events_project_name_ts ON product_events(project, event_name, ts);
+CREATE INDEX idx_events_project_user_ts ON product_events(project, user_id, ts);
 
 -- ===== web aggregates (retained retention.web.aggregate_days) =====
 -- Counts, not rates: rates derive in queries; days re-aggregate safely.
 CREATE TABLE agg_web_daily (
-    project_id TEXT NOT NULL, day TEXT NOT NULL,    -- 'YYYY-MM-DD'
+    project TEXT NOT NULL, day TEXT NOT NULL,    -- 'YYYY-MM-DD'
     visitors INTEGER NOT NULL, pageviews INTEGER NOT NULL,
     sessions INTEGER NOT NULL, bounces INTEGER NOT NULL,
     duration_sec INTEGER NOT NULL,
-    PRIMARY KEY (project_id, day)
+    PRIMARY KEY (project, day)
 ) WITHOUT ROWID;
 
 -- One table per dimension, identical shape:
-agg_web_pages     (project_id, day, path,    visitors, pageviews, PK(project_id, day, path))
-agg_web_referrers (project_id, day, source,  visitors, pageviews, PK(project_id, day, source))
-agg_web_countries (project_id, day, country, visitors, pageviews, PK(project_id, day, country))
-agg_web_devices   (project_id, day, device,  visitors, pageviews, PK(project_id, day, device))
-agg_web_browsers  (project_id, day, browser, visitors, pageviews, PK(project_id, day, browser))
-agg_web_os        (project_id, day, os,      visitors, pageviews, PK(project_id, day, os))
-agg_web_utm       (project_id, day, utm_source, utm_medium, utm_campaign,
-                   visitors, pageviews, PK(project_id, day, utm_source, utm_medium, utm_campaign))
+agg_web_pages     (project, day, path,    visitors, pageviews, PK(project, day, path))
+agg_web_referrers (project, day, source,  visitors, pageviews, PK(project, day, source))
+agg_web_countries (project, day, country, visitors, pageviews, PK(project, day, country))
+agg_web_devices   (project, day, device,  visitors, pageviews, PK(project, day, device))
+agg_web_browsers  (project, day, browser, visitors, pageviews, PK(project, day, browser))
+agg_web_os        (project, day, os,      visitors, pageviews, PK(project, day, os))
+agg_web_utm       (project, day, utm_source, utm_medium, utm_campaign,
+                   visitors, pageviews, PK(project, day, utm_source, utm_medium, utm_campaign))
 -- all WITHOUT ROWID
 
 -- ===== product aggregates (opt-in; retained retention.product.aggregate_days) =====
 CREATE TABLE agg_product_daily (
-    project_id TEXT NOT NULL, day TEXT NOT NULL, event_name TEXT NOT NULL,
+    project TEXT NOT NULL, day TEXT NOT NULL, event_name TEXT NOT NULL,
     count INTEGER NOT NULL, unique_users INTEGER NOT NULL,
-    PRIMARY KEY (project_id, day, event_name)
+    PRIMARY KEY (project, day, event_name)
 ) WITHOUT ROWID;
 
 CREATE TABLE agg_product_totals (                    -- preserves true DAU
-    project_id TEXT NOT NULL, day TEXT NOT NULL,
+    project TEXT NOT NULL, day TEXT NOT NULL,
     total_events INTEGER NOT NULL, active_users INTEGER NOT NULL,
-    PRIMARY KEY (project_id, day)
+    PRIMARY KEY (project, day)
 ) WITHOUT ROWID;
 
 CREATE TABLE agg_product_attrs (                     -- long format, opt-in keys
-    project_id TEXT NOT NULL, day TEXT NOT NULL, event_name TEXT NOT NULL,
+    project TEXT NOT NULL, day TEXT NOT NULL, event_name TEXT NOT NULL,
     attr_key TEXT NOT NULL, attr_value TEXT NOT NULL,
     count INTEGER NOT NULL, unique_users INTEGER NOT NULL,
-    PRIMARY KEY (project_id, day, event_name, attr_key, attr_value)
+    PRIMARY KEY (project, day, event_name, attr_key, attr_value)
 ) WITHOUT ROWID;
 ```
 
