@@ -93,13 +93,8 @@ Ingestion, litestream and Evidence in one compose stack:
 
 ```bash
 cd backoffice
-cp ../deploy/projects.example.json projects.json    # edit projects
-cat > .env <<'EOF'
-R2_BUCKET=analytics-backup
-R2_ENDPOINT=https://ACCOUNT_ID.r2.cloudflarestorage.com
-LITESTREAM_ACCESS_KEY_ID=…
-LITESTREAM_SECRET_ACCESS_KEY=…
-EOF
+cp ../projects.example.json projects.json    # edit projects
+cp ../.env.example .env    # fill in the R2 credentials from step 1
 docker compose -f docker-compose.aio.yml up -d
 ```
 
@@ -112,13 +107,8 @@ On the backoffice machine, only sync and Evidence run:
 
 ```bash
 cd backoffice
-cp ../deploy/projects.example.json projects.json
-cat > .env <<'EOF'
-R2_BUCKET=analytics-backup
-R2_ENDPOINT=https://ACCOUNT_ID.r2.cloudflarestorage.com
-LITESTREAM_ACCESS_KEY_ID=…
-LITESTREAM_SECRET_ACCESS_KEY=…
-EOF
+cp ../projects.example.json projects.json
+cp ../.env.example .env    # fill in the R2 credentials from step 1
 ```
 
 Then `docker compose up -d` (the default `docker-compose.yml`); the compose

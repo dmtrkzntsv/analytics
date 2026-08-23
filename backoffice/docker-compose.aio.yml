@@ -1,7 +1,7 @@
 # All-in-one: ingestion + backup + dashboards on one machine.
 #   docker compose -f docker-compose.aio.yml up -d
 # Put a `.env` next to this file (R2 credentials + any infra overrides) and
-# a `projects.json` (copy ../deploy/projects.example.json).
+# a `projects.json` (copy ../projects.example.json).
 services:
   analytics:
     image: analytics:latest

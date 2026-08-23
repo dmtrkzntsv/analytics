@@ -13,12 +13,12 @@ import (
 // with commented lines documenting defaults — those are uncommented here so
 // every documented key round-trips through FromEnv.
 func TestExamplesLoad(t *testing.T) {
-	f, err := os.Open("../../deploy/analytics.example.env")
+	f, err := os.Open("../../.env.example")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	vars := map[string]string{"PROJECTS_FILE": "../../deploy/projects.example.json"}
+	vars := map[string]string{"PROJECTS_FILE": "../../projects.example.json"}
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())

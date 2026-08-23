@@ -119,16 +119,12 @@ install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" /var/lib/analytics
 install -d -m 0755 /etc/analytics
 
 if [ ! -f /etc/analytics/analytics.env ]; then
-  install -m 0640 -g "$SERVICE_USER" "$here/analytics.example.env" /etc/analytics/analytics.env
+  install -m 0640 -g "$SERVICE_USER" "$here/../.env.example" /etc/analytics/analytics.env
   echo "Installed /etc/analytics/analytics.env — EDIT IT (R2 credentials, geo)."
 fi
 if [ ! -f /etc/analytics/projects.json ]; then
-  install -m 0640 -g "$SERVICE_USER" "$here/projects.example.json" /etc/analytics/projects.json
+  install -m 0640 -g "$SERVICE_USER" "$here/../projects.example.json" /etc/analytics/projects.json
   echo "Installed /etc/analytics/projects.json — EDIT IT (projects, origins)."
-fi
-if [ -f /etc/analytics/config.json ]; then
-  echo "WARNING: /etc/analytics/config.json is no longer read. Move its infra"
-  echo "  settings into analytics.env and its projects array into projects.json."
 fi
 if [ ! -f /etc/litestream.yml ] && [ -f "$here/litestream/litestream.yml" ]; then
   install -m 0644 "$here/litestream/litestream.yml" /etc/litestream.yml

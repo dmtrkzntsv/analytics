@@ -6,3 +6,4 @@ coverage.out
 node_modules/
 local/
 dist/
+.env

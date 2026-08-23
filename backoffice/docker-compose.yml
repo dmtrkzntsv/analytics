@@ -2,7 +2,7 @@
 # The VPS runs `analytics serve` + litestream via deploy/install.sh.
 #
 # Put a `.env` next to this file (LITESTREAM_* credentials, R2_BUCKET,
-# R2_ENDPOINT) and a `projects.json` (copy ../deploy/projects.example.json).
+# R2_ENDPOINT) and a `projects.json` (copy ../projects.example.json).
 services:
   sync:
     image: analytics:latest

@@ -33,6 +33,7 @@ dist: build-all
 		stage=dist/stage-$$arch; rm -rf $$stage; mkdir -p $$stage; \
 		cp dist/$(BIN)-linux-$$arch $$stage/$(BIN); \
 		cp -r deploy $$stage/deploy; \
+		cp .env.example projects.example.json $$stage/; \
 		tar -czf dist/$(BIN)-linux-$$arch.tar.gz -C $$stage .; \
 		rm -rf $$stage; \
 		echo "packaged dist/$(BIN)-linux-$$arch.tar.gz"; \

@@ -8,9 +8,10 @@ printf '#!/bin/sh\necho "systemctl $*"\n' > /usr/local/bin/systemctl
 chmod +x /usr/local/bin/systemctl
 mkdir -p /etc/logrotate.d
 
-# Copy out of the read-only mount, mimicking an unpacked checkout.
+# Copy out of the read-only mount, mimicking an unpacked checkout: the
+# installer resolves the examples and binary relative to its own directory.
 cp -r /src/deploy /tmp/deploy
-cp /src/analytics /tmp/analytics
+cp /src/analytics /src/.env.example /src/projects.example.json /tmp/
 
 /tmp/deploy/install.sh --yes
 

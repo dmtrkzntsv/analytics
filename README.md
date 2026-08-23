@@ -19,8 +19,8 @@ Ingestion, backup and dashboards on one machine (a Raspberry Pi is enough):
 
 ```bash
 git clone <this repo> && cd analytics/backoffice
-cp ../deploy/projects.example.json projects.json   # edit: projects, allowed_origins
-printf 'R2_BUCKET=…\nR2_ENDPOINT=…\nLITESTREAM_ACCESS_KEY_ID=…\nLITESTREAM_SECRET_ACCESS_KEY=…\n' > .env
+cp ../projects.example.json projects.json   # edit: projects, allowed_origins
+cp ../.env.example .env                     # fill in the R2 credentials
 docker compose -f docker-compose.aio.yml up -d
 open http://localhost:3000        # dashboards; ingestion is on :8080
 ```
@@ -65,8 +65,8 @@ On the backoffice machine:
 
 ```bash
 cd backoffice
-cp ../deploy/projects.example.json projects.json
-printf 'R2_BUCKET=…\nR2_ENDPOINT=…\nLITESTREAM_ACCESS_KEY_ID=…\nLITESTREAM_SECRET_ACCESS_KEY=…\n' > .env
+cp ../projects.example.json projects.json
+cp ../.env.example .env                     # fill in the R2 credentials
 docker compose up -d   # compose sets SYNC_REPLICA_PATH=/data/replica.db itself
 ```
 
@@ -117,7 +117,7 @@ capped at 16 KiB.
 Infra settings are environment variables. On installed hosts both systemd
 units load them from `/etc/analytics/analytics.env` (`EnvironmentFile=`);
 the binary itself only reads the real environment. See
-`deploy/analytics.example.env`.
+`.env.example` at the repo root.
 
 | Variable | Meaning |
 | --- | --- |
@@ -144,7 +144,7 @@ The litestream credentials (`LITESTREAM_ACCESS_KEY_ID`,
 `analytics.env`, so secrets never sit in a JSON file.
 
 Projects live in `projects.json` — a JSON array (see
-`deploy/projects.example.json`):
+`projects.example.json` at the repo root):
 
 | Key | Meaning |
 | --- | --- |
