@@ -184,7 +184,10 @@ never blocks on the DB.
 
 ### 5.4 Web hit enrichment (at ingest)
 
-- `path`, `utm_source/medium/campaign` parsed from `url`.
+- `path`, `utm_source/medium/campaign` parsed from `url`. **All other query
+  parameters are discarded at ingest** (never stored) — only `utm_*` and
+  `ref` survive, matching Plausible's privacy rule; `ref=` acts as a
+  referrer_source fallback when the Referer header is empty.
 - `referrer_source`: cleaned referrer — own-domain referrers → `""`, known
   engines/socials normalized (`google`, `bing`, `twitter`, …, small embedded
   map), otherwise the referrer's hostname.
@@ -195,8 +198,28 @@ never blocks on the DB.
 - `visitor_hash = SHA-256(daily_salt ‖ ip ‖ user_agent ‖ project_id)[:16]`.
   The salt lives in the `meta` table, rotates every 24 h (boot + daily job);
   the IP is used only in this computation and never stored or logged. Salt
-  rotation causes a visitor-identity discontinuity at midnight UTC — accepted,
-  same trade-off as Plausible.
+  rotation **replaces** the salt — the previous salt is destroyed, never
+  archived — so cross-day visitor linking is cryptographically impossible
+  (Plausible's model). The resulting identity discontinuity at rotation is
+  the accepted trade-off.
+
+### 5.4a Privacy / GDPR posture (verified against Plausible & Matomo)
+
+- No cookies, no localStorage/sessionStorage identifiers, no fingerprinting
+  beyond the 24h salted hash; no cross-day or cross-site profiles; no PII
+  fields collected. This matches the model Plausible operates without cookie
+  banners.
+- Full User-Agent and IP are processed transiently in memory only; stored
+  data is limited to: path, cleaned referrer source, utm tags, country,
+  device class, browser family, OS family, daily visitor hash.
+- Opt-out: the script no-ops when `localStorage.analytics_ignore === "true"`.
+- DNT header: not implemented — deprecated (dropped by Firefox in 2025);
+  documented decision, mirrors Plausible.
+- Operator responsibility (documented in README): keep PII out of URL paths
+  (`/users/123/…`) and out of product-event `user_id`/attributes if GDPR
+  minimization matters to you; product analytics with a real `user_id` is
+  pseudonymous personal data and is the operator's lawful-basis call, not the
+  tool's.
 
 ### 5.5 Tracking script
 
@@ -206,7 +229,9 @@ via its script tag: `<script defer src="https://a.example.com/js/script.js"
 data-project="myapp"></script>`. Ignores `localhost` and
 `navigator.webdriver`. Exposes `window.analytics = { track(name, attrs) }`
 which posts to `/api/event` with an anonymous per-page `user_id` unless the
-site sets one via `data-user` or `analytics.identify(id)`.
+site sets one via `data-user` or `analytics.identify(id)`. The script no-ops
+entirely when `localStorage.analytics_ignore === "true"` (self-exclusion,
+same mechanism as Plausible's `plausible_ignore`).
 
 ## 6. Geo providers (DSN-selected)
 
