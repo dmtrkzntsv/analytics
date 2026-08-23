@@ -88,7 +88,11 @@ exec it.
   "database": "sqlite:///var/lib/analytics/analytics.db",
   "geo": "cloudflare://",
   "log": { "level": "info", "format": "json" },
-  "batch": { "max_events": 1000, "flush_interval": "5s" },
+  "buffer": {
+    "flush_max_events": 1000,
+    "flush_interval": "5s",
+    "capacity": 10000
+  },
   "retention": {
     "web":     { "raw_days": 7,  "aggregate_days": 365 },
     "product": { "raw_days": 30, "aggregate_days": 365 }
@@ -165,10 +169,13 @@ truncated, not rejected, to avoid data loss).
 
 ### 5.3 Ingestion pipeline
 
-HTTP handler → validation/enrichment → buffered channel (ring, size 10k;
-overflow drops oldest with a counter log) → batch worker flushing every
-`flush_interval` or `max_events`, whichever first → `Store.Write*` in one
-transaction. Graceful shutdown flushes the buffer (SIGTERM handler,
+HTTP handler → validation/enrichment → buffered channel (`buffer.capacity`,
+default 10k; overflow drops oldest with a counter log) → batch worker that
+flushes when either condition is met — `buffer.flush_max_events` accumulated
+(default 1,000) or `buffer.flush_interval` elapsed since the last flush
+(default 5 s) — → `Store.Write*` in one transaction. Events therefore live in
+memory at most `flush_interval` (plus retry time on DB errors); raising it on
+SD-card hardware trades that window for fewer write bursts (§12a). Graceful shutdown flushes the buffer (SIGTERM handler,
 `systemd TimeoutStopSec=30`).
 
 Flush errors: retried 3× with backoff (1s/5s/25s); then the batch is dropped
@@ -485,7 +492,7 @@ storage), which mostly means bounded memory and minimized write amplification:
   systemd unit (128 MiB) as a backstop.
 - **SD-card write mindfulness**: all writes are batched transactions (never
   per-request fsync); `synchronous=NORMAL` (one fsync per checkpoint, not per
-  commit); `batch.flush_interval` may be raised (e.g. `30s`) to trade
+  commit); `buffer.flush_interval` may be raised (e.g. `30s`) to trade
   freshness for fewer write bursts; litestream `sync-interval` likewise.
   WAL auto-checkpoint left at default (1000 pages) so checkpoints are chunky
   rather than constant. Aggregation prunes raw data promptly, keeping the DB
