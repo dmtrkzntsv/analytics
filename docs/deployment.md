@@ -45,16 +45,17 @@ every `v*` tag.
 
 The installer creates a system account, installs the binary to
 `/usr/local/bin/analytics`, creates `/var/lib/analytics` (0750, owned by the
-service account), installs the example config and a credentials file, renders
+service account), installs example `analytics.env` (infra settings + R2 credentials, loaded
+by both units via `EnvironmentFile=`) and `projects.json` files, renders
 both systemd units with the chosen user, and enables them. It never
-overwrites an existing config or credentials file, so re-running it to deploy
-a new binary is safe.
+overwrites an existing analytics.env or projects.json, so re-running it to
+deploy a new binary is safe.
 
 Then edit the two files it flagged:
 
 ```bash
-sudo vi /etc/analytics/config.json      # projects, allowed_origins, geo
-sudo vi /etc/analytics/litestream.env   # R2 credentials from step 1
+sudo vi /etc/analytics/projects.json    # projects, allowed_origins
+sudo vi /etc/analytics/analytics.env    # R2 credentials from step 1, geo
 ```
 
 Install litestream (<https://litestream.io/install/>) if the installer
@@ -92,12 +93,12 @@ Ingestion, litestream and Evidence in one compose stack:
 
 ```bash
 cd backoffice
-cp ../deploy/config.example.json config.json    # edit projects
+cp ../deploy/projects.example.json projects.json    # edit projects
 cat > .env <<'EOF'
 R2_BUCKET=analytics-backup
 R2_ENDPOINT=https://ACCOUNT_ID.r2.cloudflarestorage.com
-R2_ACCESS_KEY=…
-R2_SECRET_KEY=…
+LITESTREAM_ACCESS_KEY_ID=…
+LITESTREAM_SECRET_ACCESS_KEY=…
 EOF
 docker compose -f docker-compose.aio.yml up -d
 ```
@@ -111,20 +112,18 @@ On the backoffice machine, only sync and Evidence run:
 
 ```bash
 cd backoffice
-cp ../deploy/config.example.json config.json
+cp ../deploy/projects.example.json projects.json
+cat > .env <<'EOF'
+R2_BUCKET=analytics-backup
+R2_ENDPOINT=https://ACCOUNT_ID.r2.cloudflarestorage.com
+LITESTREAM_ACCESS_KEY_ID=…
+LITESTREAM_SECRET_ACCESS_KEY=…
+EOF
 ```
 
-Set the sync block to match the container mounts:
-
-```json
-"sync": {
-  "interval": "5m",
-  "litestream_config": "/etc/litestream.yml",
-  "replica_path": "/data/replica.db"
-}
-```
-
-Then `docker compose up -d` (the default `docker-compose.yml`). The `sync`
+Then `docker compose up -d` (the default `docker-compose.yml`); the compose
+file itself sets `SYNC_REPLICA_PATH=/data/replica.db` and
+`SYNC_LITESTREAM_CONFIG=/etc/litestream.yml` to match its mounts. The `sync`
 service restores from R2 into `/data/replica.db.tmp`, verifies it with
 `PRAGMA quick_check`, swaps it into place and touches `/data/.last_sync`.
 Evidence watches that marker and rebuilds when it changes.
@@ -151,9 +150,9 @@ rm /tmp/check.db
 ```
 
 Without `sqlite3` installed, `analytics sync` performs the same
-restore-and-verify against a scratch path — point `sync.replica_path` at
-`/tmp/check.db` in a throwaway config and run `analytics sync -config` it
-once.
+restore-and-verify against a scratch path — run it once with
+`SYNC_REPLICA_PATH=/tmp/check.db` (plus the usual env) and inspect the
+result.
 
 Check the max day is recent. A restore that succeeds but is days stale means
 litestream is not replicating: inspect `journalctl -u litestream`.
@@ -181,8 +180,8 @@ against the source directory, not the project root.
 # On a fresh host:
 git clone <repo> && cd analytics && make build
 sudo ./deploy/install.sh --user analytics --yes
-sudo vi /etc/analytics/config.json
-sudo vi /etc/analytics/litestream.env      # same R2 credentials
+sudo vi /etc/analytics/projects.json
+sudo vi /etc/analytics/analytics.env       # same R2 credentials
 
 # Restore before starting the collector, so it does not create an empty db:
 sudo -u analytics litestream restore -config /etc/litestream.yml \
@@ -198,7 +197,7 @@ empty database over the good backup.
 
 Two things do not survive: the visitor salt (already rotated daily by design,
 so at most one day of visitor continuity is lost) and any events still
-buffered in memory when the host died — bounded by `buffer.flush_interval`.
+buffered in memory when the host died — bounded by `BUFFER_FLUSH_INTERVAL`.
 
 ---
 
@@ -209,7 +208,7 @@ buffered in memory when the host died — bounded by `buffer.flush_interval`.
 | Logs | `journalctl -u analytics -f` |
 | Restart | `systemctl restart analytics` |
 | Upgrade | `curl -fsSL …/deploy/install.sh \| sudo bash -s -- --yes && sudo systemctl restart analytics` (or `make build && sudo ./deploy/install.sh --yes` from a checkout) |
-| Apply migrations only | `analytics migrate -config /etc/analytics/config.json` |
+| Apply migrations only | `sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics migrate'` |
 | Database size | `du -h /var/lib/analytics/analytics.db` |
 | Replication status | `journalctl -u litestream --since -1h` |
 

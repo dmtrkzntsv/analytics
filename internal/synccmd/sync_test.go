@@ -175,7 +175,7 @@ func TestRunCyclesImmediatelyAndStops(t *testing.T) {
 	replica := filepath.Join(dir, "replica.db")
 	calls := stubLitestream(t, fixture, false)
 	cfg := config.SyncConfig{ReplicaPath: replica}
-	cfg.Interval.Duration = time.Hour // long enough that only the first cycle runs
+	cfg.Interval = time.Hour // long enough that only the first cycle runs
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -205,7 +205,7 @@ func TestRunSurvivesFailingCycle(t *testing.T) {
 	dir := t.TempDir()
 	calls := stubLitestream(t, "", true)
 	cfg := config.SyncConfig{ReplicaPath: filepath.Join(dir, "replica.db")}
-	cfg.Interval.Duration = 10 * time.Millisecond
+	cfg.Interval = 10 * time.Millisecond
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -19,8 +19,8 @@ Ingestion, backup and dashboards on one machine (a Raspberry Pi is enough):
 
 ```bash
 git clone <this repo> && cd analytics/backoffice
-cp ../deploy/config.example.json config.json   # edit: projects, allowed_origins
-printf 'R2_BUCKET=…\nR2_ENDPOINT=…\nR2_ACCESS_KEY=…\nR2_SECRET_KEY=…\n' > .env
+cp ../deploy/projects.example.json projects.json   # edit: projects, allowed_origins
+printf 'R2_BUCKET=…\nR2_ENDPOINT=…\nLITESTREAM_ACCESS_KEY_ID=…\nLITESTREAM_SECRET_ACCESS_KEY=…\n' > .env
 docker compose -f docker-compose.aio.yml up -d
 open http://localhost:3000        # dashboards; ingestion is on :8080
 ```
@@ -51,8 +51,8 @@ sudo ./deploy/install.sh              # prompts for a service account
 then in both cases:
 
 ```bash
-sudo vi /etc/analytics/config.json    # projects, allowed_origins
-sudo vi /etc/analytics/litestream.env # R2 credentials
+sudo vi /etc/analytics/projects.json  # projects, allowed_origins
+sudo vi /etc/analytics/analytics.env  # R2 credentials, geo
 sudo systemctl start analytics litestream
 ```
 
@@ -65,8 +65,9 @@ On the backoffice machine:
 
 ```bash
 cd backoffice
-cp ../deploy/config.example.json config.json   # set sync.replica_path=/data/replica.db
-docker compose up -d
+cp ../deploy/projects.example.json projects.json
+printf 'R2_BUCKET=…\nR2_ENDPOINT=…\nLITESTREAM_ACCESS_KEY_ID=…\nLITESTREAM_SECRET_ACCESS_KEY=…\n' > .env
+docker compose up -d   # compose sets SYNC_REPLICA_PATH=/data/replica.db itself
 ```
 
 `analytics sync` restores the database from R2 into a temporary file, runs
@@ -113,32 +114,45 @@ capped at 16 KiB.
 
 ## Configuration
 
-All keys live in one JSON file (`/etc/analytics/config.json`); see
-`deploy/config.example.json`.
+Infra settings are environment variables. On installed hosts both systemd
+units load them from `/etc/analytics/analytics.env` (`EnvironmentFile=`);
+the binary itself only reads the real environment. See
+`deploy/analytics.example.env`.
+
+| Variable | Meaning |
+| --- | --- |
+| `LISTEN_ADDR` | Address to bind. Default `127.0.0.1:8080` (the docker image sets `0.0.0.0:8080`). |
+| `DATABASE_URL` | Store DSN. Only `sqlite://<path>` today. Required. |
+| `GEO_URL` | Country lookup: `cloudflare://` (header), `maxmind://<license-key>`, or `none://`. |
+| `PROJECTS_FILE` | Path of the projects file. Default `/etc/analytics/projects.json`. |
+| `LOG_LEVEL` | `debug`, `info`, `warn`, `error`. Default `info`. |
+| `LOG_FORMAT` | `json` or `text`. Default `json`. |
+| `LOG_FILE` | Log to this path instead of stdout. |
+| `BUFFER_FLUSH_MAX_EVENTS` | Flush once this many events are buffered. Default 1000. |
+| `BUFFER_FLUSH_INTERVAL` | Flush at least this often. Default `5s`. |
+| `BUFFER_CAPACITY` | Bounded queue size; excess is dropped rather than growing memory. Default 10000. |
+| `RETENTION_WEB_RAW_DAYS` | Days raw hits are kept before rollup. Default 7. |
+| `RETENTION_WEB_AGGREGATE_DAYS` | Days aggregates are kept. Default 365. |
+| `RETENTION_PRODUCT_RAW_DAYS` | Days raw events are kept before rollup. Default 30. |
+| `RETENTION_PRODUCT_AGGREGATE_DAYS` | Days product aggregates are kept. Default 365. |
+| `SYNC_INTERVAL` | Replica refresh cadence for the `sync` command. Default `5m`. |
+| `SYNC_LITESTREAM_CONFIG` | Litestream config passed to `litestream restore`. Default `/etc/litestream.yml`. |
+| `SYNC_REPLICA_PATH` | Where the verified replica is swapped into place. |
+
+The litestream credentials (`LITESTREAM_ACCESS_KEY_ID`,
+`LITESTREAM_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_ENDPOINT`) live in the same
+`analytics.env`, so secrets never sit in a JSON file.
+
+Projects live in `projects.json` — a JSON array (see
+`deploy/projects.example.json`):
 
 | Key | Meaning |
 | --- | --- |
-| `listen` | Address to bind. Default `127.0.0.1:8080`. |
-| `database` | Store DSN. Only `sqlite://<path>` today. |
-| `geo` | Country lookup: `cloudflare://` (header), `maxmind://<license-key>`, or `none://`. |
-| `log.level` | `debug`, `info`, `warn`, `error`. Default `info`. |
-| `log.format` | `json` or `text`. Default `json`. |
-| `log.file` | Log to this path instead of stdout. |
-| `buffer.flush_max_events` | Flush once this many events are buffered. Default 1000. |
-| `buffer.flush_interval` | Flush at least this often. Default `5s`. |
-| `buffer.capacity` | Bounded queue size; excess is dropped rather than growing memory. Default 10000. |
-| `retention.web.raw_days` | Days raw hits are kept before rollup. Default 7. |
-| `retention.web.aggregate_days` | Days aggregates are kept. Default 365. |
-| `retention.product.raw_days` | Days raw events are kept before rollup. Default 30. |
-| `retention.product.aggregate_days` | Days product aggregates are kept. Default 365. |
-| `sync.interval` | Replica refresh cadence for the `sync` command. Default `5m`. |
-| `sync.litestream_config` | Litestream config passed to `litestream restore`. |
-| `sync.replica_path` | Where the verified replica is swapped into place. |
-| `projects[].alias` | Stable key used in `data-project`, payloads and every stored row. |
-| `projects[].name` | Display name. |
-| `projects[].allowed_origins` | Origins allowed to post hits for this project. |
-| `projects[].retention` | Per-project override of any `retention` field. |
-| `projects[].product_aggregation` | Opt-in product rollup, see below. |
+| `alias` | Stable key used in `data-project`, payloads and every stored row. |
+| `name` | Display name. |
+| `allowed_origins` | Origins allowed to post hits for this project. |
+| `retention` | Per-project override of any retention window. |
+| `product_aggregation` | Opt-in product rollup, see below. |
 
 Product aggregation is off unless enabled. Attribute breakdowns are opt-in per
 key, `"*"` applies to every event, and only the top `top_n` values per
@@ -187,12 +201,12 @@ erasure obligations that follow.
 
 The defaults suit a small VPS. On a Pi or anything memory-constrained:
 
-- Raise `buffer.flush_interval` (for example `30s`) to trade latency for
+- Raise `BUFFER_FLUSH_INTERVAL` (for example `30s`) to trade latency for
   fewer, larger writes.
 - Raise litestream's `sync-interval` in `deploy/litestream/litestream.yml`.
 - Set `GOMEMLIMIT` (the systemd unit and compose files ship `128MiB`).
-- Keep `geo` on `cloudflare://` or `none://`; the MaxMind provider downloads
-  and holds a database in memory.
+- Keep `GEO_URL` on `cloudflare://` or `none://`; the MaxMind provider
+  downloads and holds a database in memory.
 
 Maintenance is bounded on purpose: aggregation and pruning run once a day at
 03:00 UTC, and free pages are reclaimed with incremental vacuum rather than a
@@ -227,16 +241,17 @@ green.
 ### Testing the service locally
 
 ```bash
-make run          # build and serve on 127.0.0.1:8080 with local/config.json
+make run          # build and serve on 127.0.0.1:8080 with local/.env + local/projects.json
 make smoke        # boot the real binary, POST a hit + an event, verify rows land
 make test-install # run deploy/install.sh in a Debian container, assert artifacts
 make dashboards   # Evidence dev server against local/analytics.db (port 3000)
 make clean        # remove binary, dist/, local/ state
 ```
 
-`make run` writes a dev config on first use (`local/config.json`: project
-`dev`, localhost origins, `geo: none`, debug text logs, database at
-`local/analytics.db`) — edit it freely, it is never overwritten. Exercise it
+`make run` writes a dev config on first use (`local/.env` +
+`local/projects.json`: project `dev`, localhost origins, `GEO_URL=none://`,
+debug text logs, database at `local/analytics.db`) — edit both freely, they
+are never overwritten. Exercise it
 with a browser UA (curl's default is classified as a bot and dropped):
 
 ```bash

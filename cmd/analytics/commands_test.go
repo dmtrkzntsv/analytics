@@ -2,34 +2,30 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func writeConfig(t *testing.T, dbPath string) string {
+// setEnv points the process environment at a scratch database and a valid
+// projects file; commands read config from the environment only.
+func setEnv(t *testing.T, dbPath string) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "config.json")
-	body := fmt.Sprintf(`{
-		"database": "sqlite://%s",
-		"projects": [{"alias": "app", "name": "App", "allowed_origins": ["https://app.com"]}]
-	}`, dbPath)
-	if !json.Valid([]byte(body)) {
-		t.Fatal("test fixture is not valid JSON")
-	}
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+	projects := filepath.Join(t.TempDir(), "projects.json")
+	body := `[{"alias": "app", "name": "App", "allowed_origins": ["https://app.com"]}]`
+	if err := os.WriteFile(projects, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return path
+	t.Setenv("DATABASE_URL", "sqlite://"+dbPath)
+	t.Setenv("PROJECTS_FILE", projects)
 }
 
 func TestMigrateSubcommand(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "m.db")
+	setEnv(t, dbPath)
 	var out bytes.Buffer
-	if code := run([]string{"migrate", "-config", writeConfig(t, dbPath)}, &out); code != 0 {
+	if code := run([]string{"migrate"}, &out); code != 0 {
 		t.Fatalf("exit code = %d, want 0 (%s)", code, out.String())
 	}
 	if !strings.Contains(out.String(), "migrations applied") {
@@ -40,22 +36,31 @@ func TestMigrateSubcommand(t *testing.T) {
 	}
 	// Re-running must stay clean.
 	out.Reset()
-	if code := run([]string{"migrate", "-config", writeConfig(t, dbPath)}, &out); code != 0 {
+	if code := run([]string{"migrate"}, &out); code != 0 {
 		t.Fatalf("second migrate exit = %d (%s)", code, out.String())
 	}
 }
 
-// A missing or unusable config must fail loudly rather than starting with
-// defaults.
+// A missing or unusable configuration must fail loudly rather than starting
+// with defaults.
 func TestSubcommandsRejectBadConfig(t *testing.T) {
 	for _, cmd := range []string{"serve", "migrate"} {
-		t.Run(cmd+" missing config", func(t *testing.T) {
+		t.Run(cmd+" missing DATABASE_URL", func(t *testing.T) {
+			t.Setenv("DATABASE_URL", "")
 			var out bytes.Buffer
-			if code := run([]string{cmd, "-config", "/nonexistent/config.json"}, &out); code != 1 {
+			if code := run([]string{cmd}, &out); code != 1 {
 				t.Fatalf("exit code = %d, want 1", code)
 			}
 			if out.Len() == 0 {
 				t.Error("want an error message on stdout")
+			}
+		})
+		t.Run(cmd+" missing projects file", func(t *testing.T) {
+			t.Setenv("DATABASE_URL", "sqlite://"+filepath.Join(t.TempDir(), "a.db"))
+			t.Setenv("PROJECTS_FILE", "/nonexistent/projects.json")
+			var out bytes.Buffer
+			if code := run([]string{cmd}, &out); code != 1 {
+				t.Fatalf("exit code = %d, want 1", code)
 			}
 		})
 		t.Run(cmd+" bad flag", func(t *testing.T) {
@@ -68,15 +73,10 @@ func TestSubcommandsRejectBadConfig(t *testing.T) {
 }
 
 func TestMigrateRejectsBadDSN(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(path, []byte(`{
-		"database": "bogus://nope",
-		"projects": [{"alias": "app", "name": "App", "allowed_origins": ["https://app.com"]}]
-	}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	setEnv(t, "unused.db")
+	t.Setenv("DATABASE_URL", "bogus://nope")
 	var out bytes.Buffer
-	if code := run([]string{"migrate", "-config", path}, &out); code != 1 {
+	if code := run([]string{"migrate"}, &out); code != 1 {
 		t.Fatalf("exit code = %d, want 1 (%s)", code, out.String())
 	}
 }

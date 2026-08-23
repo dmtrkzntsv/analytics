@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/dmitry/analytics/internal/config"
+	"github.com/dmitry/analytics/internal/config/configtest"
 	"github.com/dmitry/analytics/internal/geo"
 	"github.com/dmitry/analytics/internal/store"
 )
@@ -40,13 +40,8 @@ const chromeUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (
 
 func testServer(t *testing.T) (*fakeQueue, http.Handler) {
 	t.Helper()
-	cfg, err := config.Parse(strings.NewReader(`{
-		"database": "sqlite:///tmp/x.db",
-		"projects": [{"alias": "app", "name": "App", "allowed_origins": ["https://app.com"]}]
-	}`))
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := configtest.Load(t, nil,
+		`[{"alias": "app", "name": "App", "allowed_origins": ["https://app.com"]}]`)
 	g, _ := geo.New("cloudflare://", t.TempDir(), slog.Default())
 	q := &fakeQueue{}
 	return q, New(cfg, q, g, fixedSalt{}, slog.Default())

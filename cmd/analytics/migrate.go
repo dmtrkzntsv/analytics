@@ -18,11 +18,10 @@ func init() {
 func cmdMigrate(args []string, stdout io.Writer) int {
 	fs := flag.NewFlagSet("migrate", flag.ContinueOnError)
 	fs.SetOutput(stdout)
-	cfgPath := fs.String("config", "/etc/analytics/config.json", "path to config.json")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	cfg, err := config.Load(*cfgPath)
+	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintln(stdout, err)
 		return 1

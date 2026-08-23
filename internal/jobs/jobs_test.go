@@ -6,25 +6,27 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/dmitry/analytics/internal/civil"
 	"github.com/dmitry/analytics/internal/config"
+	"github.com/dmitry/analytics/internal/config/configtest"
 	"github.com/dmitry/analytics/internal/identity"
 	"github.com/dmitry/analytics/internal/store"
 	_ "github.com/dmitry/analytics/internal/store/sqlite"
 	_ "modernc.org/sqlite"
 )
 
-const jobsCfg = `{
-  "database": "sqlite:///unused",
-  "retention": {"web": {"raw_days": 7, "aggregate_days": 365}, "product": {"raw_days": 7, "aggregate_days": 365}},
-  "projects": [{"alias": "app", "name": "App", "allowed_origins": ["https://a.com"],
-    "product_aggregation": {"enabled": true, "attributes": {"*": ["plan"]}, "top_n": 50}}]
-}`
+const jobsProjects = `[{"alias": "app", "name": "App", "allowed_origins": ["https://a.com"],
+  "product_aggregation": {"enabled": true, "attributes": {"*": ["plan"]}, "top_n": 50}}]`
+
+// jobsVars pins the retention windows the assertions below rely on.
+var jobsVars = map[string]string{
+	"RETENTION_WEB_RAW_DAYS": "7", "RETENTION_WEB_AGGREGATE_DAYS": "365",
+	"RETENTION_PRODUCT_RAW_DAYS": "7", "RETENTION_PRODUCT_AGGREGATE_DAYS": "365",
+}
 
 // countingStore counts daily passes; IncrementalVacuum runs exactly once per
 // pass, which makes it a reliable proxy.
@@ -68,12 +70,9 @@ func openStore(t *testing.T) store.Store {
 	return st
 }
 
-func setup(t *testing.T, cfgJSON string) (store.Store, *config.Config, *Runner) {
+func setup(t *testing.T, projectsJSON string) (store.Store, *config.Config, *Runner) {
 	t.Helper()
-	cfg, err := config.Parse(strings.NewReader(cfgJSON))
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := configtest.Load(t, jobsVars, projectsJSON)
 	st, path := openStoreAt(t)
 	t.Setenv("JOBS_TEST_DB", path)
 	now := func() time.Time { return time.Date(2026, 8, 22, 4, 0, 0, 0, time.UTC) }
@@ -88,7 +87,7 @@ func mustTime(s string) time.Time {
 func mustDay(s string) civil.Date { d, _ := civil.Parse(s); return d }
 
 func TestRunDailyPassAggregatesOldDays(t *testing.T) {
-	st, _, r := setup(t, jobsCfg)
+	st, _, r := setup(t, jobsProjects)
 	ctx := context.Background()
 	// Old day (beyond the 7-day raw window relative to fake now 2026-08-22).
 	if err := st.WriteWebHits(ctx, []store.WebHit{
@@ -141,7 +140,7 @@ func TestRunDailyPassAggregatesOldDays(t *testing.T) {
 // The pass must rebuild v_events_flat from the keys actually present, so a
 // newly seen attribute becomes queryable without a restart.
 func TestRunDailyPassRebuildsFlatView(t *testing.T) {
-	st, _, r := setup(t, jobsCfg)
+	st, _, r := setup(t, jobsProjects)
 	ctx := context.Background()
 	// Inside the raw window, so it survives to be discovered.
 	if err := st.WriteProductEvents(ctx, []store.ProductEvent{
@@ -171,7 +170,7 @@ func TestRunDailyPassRebuildsFlatView(t *testing.T) {
 // A project that exists in the database but has been removed from config
 // (archived) must still be maintained, using global retention.
 func TestRunDailyPassCoversArchivedProjects(t *testing.T) {
-	st, _, r := setup(t, jobsCfg)
+	st, _, r := setup(t, jobsProjects)
 	ctx := context.Background()
 	if err := st.SyncProjects(ctx, []store.ProjectInfo{{Alias: "app", Name: "App"}, {Alias: "gone", Name: "Gone"}}); err != nil {
 		t.Fatal(err)
@@ -194,15 +193,11 @@ func TestRunDailyPassCoversArchivedProjects(t *testing.T) {
 
 // A per-project retention override must win over the global window.
 func TestRunDailyPassHonoursProjectRetention(t *testing.T) {
-	const cfgJSON = `{
-      "database": "sqlite:///unused",
-      "retention": {"web": {"raw_days": 7, "aggregate_days": 365}, "product": {"raw_days": 7, "aggregate_days": 365}},
-      "projects": [
+	const projectsJSON = `[
         {"alias": "app", "name": "App", "allowed_origins": ["https://a.com"]},
         {"alias": "keep", "name": "Keep", "allowed_origins": ["https://b.com"],
-         "retention": {"web": {"raw_days": 90}}}]
-    }`
-	st, _, r := setup(t, cfgJSON)
+         "retention": {"web": {"raw_days": 90}}}]`
+	st, _, r := setup(t, projectsJSON)
 	ctx := context.Background()
 	hits := []store.WebHit{
 		{ID: "1", Project: "app", TS: mustTime("2026-08-10T10:00:00Z"), VisitorHash: "v", Path: "/"},
@@ -248,10 +243,7 @@ func TestAggSettingsFor(t *testing.T) {
 // The scheduler must fire salt rotation at 00:00 and the daily pass at 03:00,
 // each at most once per day, and neither at other hours.
 func TestScheduleFiresOncePerDay(t *testing.T) {
-	cfg, err := config.Parse(strings.NewReader(jobsCfg))
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := configtest.Load(t, jobsVars, jobsProjects)
 	clock := time.Date(2026, 8, 22, 0, 0, 0, 0, time.UTC)
 	now := func() time.Time { return clock }
 	st := &countingStore{Store: openStore(t)}
@@ -295,10 +287,7 @@ func TestScheduleFiresOncePerDay(t *testing.T) {
 // Boot must run a catch-up pass immediately so downtime never skips a day,
 // and Run must return when the context is cancelled.
 func TestRunBootCatchUpAndCancel(t *testing.T) {
-	cfg, err := config.Parse(strings.NewReader(jobsCfg))
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := configtest.Load(t, jobsVars, jobsProjects)
 	now := func() time.Time { return time.Date(2026, 8, 22, 4, 0, 0, 0, time.UTC) }
 	st := &countingStore{Store: openStore(t)}
 	rot := &countingRotator{Salter: identity.NewSalter(st, now)}

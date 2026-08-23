@@ -3,7 +3,6 @@ package app
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/dmitry/analytics/internal/civil"
 	"github.com/dmitry/analytics/internal/config"
+	"github.com/dmitry/analytics/internal/config/configtest"
 	"github.com/dmitry/analytics/internal/store"
 	_ "github.com/dmitry/analytics/internal/store/sqlite"
 )
@@ -36,16 +36,13 @@ func mustDay(s string) civil.Date { d, _ := civil.Parse(s); return d }
 
 func testConfig(t *testing.T, addr, dbPath string) *config.Config {
 	t.Helper()
-	cfg, err := config.Parse(strings.NewReader(fmt.Sprintf(`{
-		"listen": %q,
-		"database": "sqlite://%s",
-		"buffer": {"flush_max_events": 2, "flush_interval": "50ms", "capacity": 100},
-		"projects": [{"alias": "app", "name": "App", "allowed_origins": ["https://app.com"]}]
-	}`, addr, dbPath)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return cfg
+	return configtest.Load(t, map[string]string{
+		"LISTEN_ADDR":             addr,
+		"DATABASE_URL":            "sqlite://" + dbPath,
+		"BUFFER_FLUSH_MAX_EVENTS": "2",
+		"BUFFER_FLUSH_INTERVAL":   "50ms",
+		"BUFFER_CAPACITY":         "100",
+	}, `[{"alias": "app", "name": "App", "allowed_origins": ["https://app.com"]}]`)
 }
 
 func waitHealthy(t *testing.T, base string) {

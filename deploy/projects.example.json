@@ -1,0 +1,7 @@
+[
+  {
+    "alias": "myapp",
+    "name": "My App",
+    "allowed_origins": ["https://myapp.com"]
+  }
+]

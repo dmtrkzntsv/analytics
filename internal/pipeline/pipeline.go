@@ -60,7 +60,7 @@ func (b *Buffer) enqueue(it item) {
 }
 
 func (b *Buffer) Run(ctx context.Context) {
-	ticker := time.NewTicker(b.cfg.FlushInterval.Duration)
+	ticker := time.NewTicker(b.cfg.FlushInterval)
 	defer ticker.Stop()
 	var hits []store.WebHit
 	var events []store.ProductEvent

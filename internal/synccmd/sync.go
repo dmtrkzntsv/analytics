@@ -85,7 +85,7 @@ func Run(ctx context.Context, cfg config.SyncConfig, dbDSN string, logger *slog.
 	if err := RunOnce(ctx, cfg, dbDSN, logger); err != nil {
 		logger.Error("sync cycle failed", "error", err)
 	}
-	interval := cfg.Interval.Duration
+	interval := cfg.Interval
 	if interval <= 0 {
 		interval = defaultInterval
 	}

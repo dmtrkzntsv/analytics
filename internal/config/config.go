@@ -1,4 +1,6 @@
-// Package config loads and validates /etc/analytics/config.json (spec §4).
+// Package config loads infra settings from the environment (12-factor; the
+// process reads real env vars — systemd/compose/make load the env *file*)
+// and the project list from the JSON file named by PROJECTS_FILE (spec §4).
 // stdlib only: encoding/json + net/url for DSN scheme checks.
 package config
 
@@ -11,31 +13,16 @@ import (
 	"time"
 )
 
-type Duration struct{ time.Duration }
-
-func (d *Duration) UnmarshalJSON(b []byte) error {
-	var s string
-	if err := json.Unmarshal(b, &s); err != nil {
-		return err
-	}
-	v, err := time.ParseDuration(s)
-	if err != nil {
-		return fmt.Errorf("config: invalid duration %q: %w", s, err)
-	}
-	d.Duration = v
-	return nil
-}
-
 type LogConfig struct {
-	Level  string `json:"level"`
-	Format string `json:"format"`
-	File   string `json:"file"`
+	Level  string
+	Format string
+	File   string
 }
 
 type BufferConfig struct {
-	FlushMaxEvents int      `json:"flush_max_events"`
-	FlushInterval  Duration `json:"flush_interval"`
-	Capacity       int      `json:"capacity"`
+	FlushMaxEvents int
+	FlushInterval  time.Duration
+	Capacity       int
 }
 
 type RetentionClass struct {
@@ -73,36 +60,121 @@ type Project struct {
 }
 
 type SyncConfig struct {
-	Interval         Duration `json:"interval"`
-	LitestreamConfig string   `json:"litestream_config"`
-	ReplicaPath      string   `json:"replica_path"`
+	Interval         time.Duration
+	LitestreamConfig string
+	ReplicaPath      string
 }
 
 type Config struct {
-	Listen    string       `json:"listen"`
-	Database  string       `json:"database"`
-	Geo       string       `json:"geo"`
-	Log       LogConfig    `json:"log"`
-	Buffer    BufferConfig `json:"buffer"`
-	Retention Retention    `json:"retention"`
-	Sync      SyncConfig   `json:"sync"`
-	Projects  []Project    `json:"projects"`
+	Listen    string
+	Database  string
+	Geo       string
+	Log       LogConfig
+	Buffer    BufferConfig
+	Retention Retention
+	Sync      SyncConfig
+	Projects  []Project
 }
 
-func Load(path string) (*Config, error) {
+// DefaultProjectsFile is where the installer puts projects.json; override
+// with PROJECTS_FILE.
+const DefaultProjectsFile = "/etc/analytics/projects.json"
+
+// Load builds the configuration from the process environment and the
+// projects file. This is the only entry point the commands use.
+func Load() (*Config, error) {
+	return FromEnv(os.LookupEnv)
+}
+
+// env reads typed values from a lookup function, remembering the first error.
+type env struct {
+	lookup func(string) (string, bool)
+	err    error
+}
+
+func (e *env) str(key, def string) string {
+	if v, ok := e.lookup(key); ok && v != "" {
+		return v
+	}
+	return def
+}
+
+func (e *env) num(key string, def int) int {
+	v, ok := e.lookup(key)
+	if !ok || v == "" {
+		return def
+	}
+	var n int
+	if _, err := fmt.Sscanf(v, "%d", &n); err != nil {
+		if e.err == nil {
+			e.err = fmt.Errorf("config: %s: invalid integer %q", key, v)
+		}
+		return def
+	}
+	return n
+}
+
+func (e *env) dur(key string, def time.Duration) time.Duration {
+	v, ok := e.lookup(key)
+	if !ok || v == "" {
+		return def
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		if e.err == nil {
+			e.err = fmt.Errorf("config: %s: invalid duration %q", key, v)
+		}
+		return def
+	}
+	return d
+}
+
+// FromEnv parses the environment via lookup (os.LookupEnv in production,
+// a map lookup in tests) and loads the projects file it names.
+func FromEnv(lookup func(string) (string, bool)) (*Config, error) {
+	e := &env{lookup: lookup}
+	c := &Config{
+		Listen:   e.str("LISTEN_ADDR", "127.0.0.1:8080"),
+		Database: e.str("DATABASE_URL", ""),
+		Geo:      e.str("GEO_URL", "cloudflare://"),
+		Log: LogConfig{
+			Level:  e.str("LOG_LEVEL", "info"),
+			Format: e.str("LOG_FORMAT", "json"),
+			File:   e.str("LOG_FILE", ""),
+		},
+		Buffer: BufferConfig{
+			FlushMaxEvents: e.num("BUFFER_FLUSH_MAX_EVENTS", 1000),
+			FlushInterval:  e.dur("BUFFER_FLUSH_INTERVAL", 5*time.Second),
+			Capacity:       e.num("BUFFER_CAPACITY", 10000),
+		},
+		Retention: Retention{
+			Web: RetentionClass{
+				RawDays:       e.num("RETENTION_WEB_RAW_DAYS", 7),
+				AggregateDays: e.num("RETENTION_WEB_AGGREGATE_DAYS", 365),
+			},
+			Product: RetentionClass{
+				RawDays:       e.num("RETENTION_PRODUCT_RAW_DAYS", 30),
+				AggregateDays: e.num("RETENTION_PRODUCT_AGGREGATE_DAYS", 365),
+			},
+		},
+		Sync: SyncConfig{
+			Interval:         e.dur("SYNC_INTERVAL", 5*time.Minute),
+			LitestreamConfig: e.str("SYNC_LITESTREAM_CONFIG", "/etc/litestream.yml"),
+			ReplicaPath:      e.str("SYNC_REPLICA_PATH", ""),
+		},
+	}
+	if e.err != nil {
+		return nil, e.err
+	}
+	path := e.str("PROJECTS_FILE", DefaultProjectsFile)
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("config: %w", err)
+		return nil, fmt.Errorf("config: projects file: %w", err)
 	}
 	defer f.Close()
-	return Parse(f)
-}
-
-func Parse(r io.Reader) (*Config, error) {
-	c := &Config{}
-	dec := json.NewDecoder(r)
-	if err := dec.Decode(c); err != nil {
-		return nil, fmt.Errorf("config: %w", err)
+	c.Projects, err = ParseProjects(f)
+	if err != nil {
+		return nil, fmt.Errorf("config: %s: %w", path, err)
 	}
 	c.applyDefaults()
 	if err := c.validate(); err != nil {
@@ -111,44 +183,18 @@ func Parse(r io.Reader) (*Config, error) {
 	return c, nil
 }
 
+// ParseProjects reads a projects.json: a bare JSON array of projects.
+func ParseProjects(r io.Reader) ([]Project, error) {
+	var ps []Project
+	dec := json.NewDecoder(r)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&ps); err != nil {
+		return nil, fmt.Errorf("projects: %w", err)
+	}
+	return ps, nil
+}
+
 func (c *Config) applyDefaults() {
-	if c.Listen == "" {
-		c.Listen = "127.0.0.1:8080"
-	}
-	if c.Geo == "" {
-		c.Geo = "cloudflare://"
-	}
-	if c.Log.Level == "" {
-		c.Log.Level = "info"
-	}
-	if c.Log.Format == "" {
-		c.Log.Format = "json"
-	}
-	if c.Buffer.FlushMaxEvents == 0 {
-		c.Buffer.FlushMaxEvents = 1000
-	}
-	if c.Buffer.FlushInterval.Duration == 0 {
-		c.Buffer.FlushInterval.Duration = 5 * time.Second
-	}
-	if c.Buffer.Capacity == 0 {
-		c.Buffer.Capacity = 10000
-	}
-	// Field-level retention defaults (zero means use default)
-	if c.Retention.Web.RawDays == 0 {
-		c.Retention.Web.RawDays = 7
-	}
-	if c.Retention.Web.AggregateDays == 0 {
-		c.Retention.Web.AggregateDays = 365
-	}
-	if c.Retention.Product.RawDays == 0 {
-		c.Retention.Product.RawDays = 30
-	}
-	if c.Retention.Product.AggregateDays == 0 {
-		c.Retention.Product.AggregateDays = 365
-	}
-	if c.Sync.Interval.Duration == 0 {
-		c.Sync.Interval.Duration = 5 * time.Minute
-	}
 	for i := range c.Projects {
 		if pa := c.Projects[i].ProductAggregation; pa != nil && pa.TopN == 0 {
 			pa.TopN = 50
@@ -158,7 +204,7 @@ func (c *Config) applyDefaults() {
 
 func (c *Config) validate() error {
 	if c.Database == "" {
-		return fmt.Errorf("config: database DSN is required")
+		return fmt.Errorf("config: DATABASE_URL is required")
 	}
 	for _, dsn := range []string{c.Database, c.Geo} {
 		u, err := url.Parse(dsn)

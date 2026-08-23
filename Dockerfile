@@ -22,5 +22,11 @@ COPY --from=litestream /usr/local/bin/litestream /usr/local/bin/litestream
 RUN mkdir -p /var/lib/analytics && chown analytics:analytics /var/lib/analytics
 VOLUME ["/var/lib/analytics"]
 USER analytics
+# Container defaults; override per-deployment via compose env_file/environment.
+# LISTEN_ADDR binds all interfaces here (unlike the bare-metal loopback
+# default) because published ports reach the container's own IP, not lo.
+ENV LISTEN_ADDR=0.0.0.0:8080 \
+    DATABASE_URL=sqlite:///var/lib/analytics/analytics.db \
+    PROJECTS_FILE=/etc/analytics/projects.json
 ENTRYPOINT ["/usr/local/bin/analytics"]
-CMD ["serve", "-config", "/etc/analytics/config.json"]
+CMD ["serve"]

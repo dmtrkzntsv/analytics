@@ -118,21 +118,17 @@ install -m 0755 "$bin" /usr/local/bin/analytics
 install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" /var/lib/analytics
 install -d -m 0755 /etc/analytics
 
-if [ ! -f /etc/analytics/config.json ]; then
-  install -m 0640 -g "$SERVICE_USER" "$here/config.example.json" /etc/analytics/config.json
-  echo "Installed /etc/analytics/config.json — EDIT IT (projects, origins)."
+if [ ! -f /etc/analytics/analytics.env ]; then
+  install -m 0640 -g "$SERVICE_USER" "$here/analytics.example.env" /etc/analytics/analytics.env
+  echo "Installed /etc/analytics/analytics.env — EDIT IT (R2 credentials, geo)."
 fi
-if [ ! -f /etc/analytics/litestream.env ]; then
-  cat > /etc/analytics/litestream.env <<'EOF_ENV'
-# R2/S3 credentials for litestream (referenced by litestream.service)
-LITESTREAM_ACCESS_KEY_ID=CHANGE_ME
-LITESTREAM_SECRET_ACCESS_KEY=CHANGE_ME
-R2_BUCKET=CHANGE_ME
-R2_ENDPOINT=https://ACCOUNT_ID.r2.cloudflarestorage.com
-EOF_ENV
-  chmod 0640 /etc/analytics/litestream.env
-  chgrp "$SERVICE_USER" /etc/analytics/litestream.env
-  echo "Installed /etc/analytics/litestream.env — EDIT IT (R2 credentials)."
+if [ ! -f /etc/analytics/projects.json ]; then
+  install -m 0640 -g "$SERVICE_USER" "$here/projects.example.json" /etc/analytics/projects.json
+  echo "Installed /etc/analytics/projects.json — EDIT IT (projects, origins)."
+fi
+if [ -f /etc/analytics/config.json ]; then
+  echo "WARNING: /etc/analytics/config.json is no longer read. Move its infra"
+  echo "  settings into analytics.env and its projects array into projects.json."
 fi
 if [ ! -f /etc/litestream.yml ] && [ -f "$here/litestream/litestream.yml" ]; then
   install -m 0644 "$here/litestream/litestream.yml" /etc/litestream.yml
@@ -156,8 +152,8 @@ fi
 cat <<EOF_DONE
 
 Installed. Next steps:
-  1. Edit /etc/analytics/config.json (projects, allowed_origins, geo)
-  2. Edit /etc/analytics/litestream.env (R2 credentials)
+  1. Edit /etc/analytics/projects.json (projects, allowed_origins)
+  2. Edit /etc/analytics/analytics.env (R2 credentials, geo)
   3. systemctl start analytics   (and litestream once installed)
   4. Put Cloudflare/Caddy/nginx in front of 127.0.0.1:8080 for TLS
   5. Embed: <script defer src="https://YOUR_DOMAIN/js/script.js" data-project="myapp"></script>

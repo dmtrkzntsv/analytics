@@ -16,20 +16,17 @@ trap cleanup EXIT
 
 fail() { echo "SMOKE FAIL: $*" >&2; sed 's/^/  server: /' "$dir/log" >&2 || true; exit 1; }
 
-cat > "$dir/config.json" <<EOF
-{
-  "listen": "127.0.0.1:$port",
-  "database": "sqlite://$dir/smoke.db",
-  "geo": "none://",
-  "log": { "level": "debug", "format": "text" },
-  "buffer": { "flush_max_events": 100, "flush_interval": "200ms", "capacity": 1000 },
-  "projects": [
-    { "alias": "dev", "name": "Smoke", "allowed_origins": ["http://localhost"] }
-  ]
-}
+cat > "$dir/projects.json" <<'EOF'
+[{ "alias": "dev", "name": "Smoke", "allowed_origins": ["http://localhost"] }]
 EOF
 
-./analytics serve -config "$dir/config.json" > "$dir/log" 2>&1 &
+env LISTEN_ADDR="127.0.0.1:$port" \
+    DATABASE_URL="sqlite://$dir/smoke.db" \
+    GEO_URL="none://" \
+    LOG_LEVEL=debug LOG_FORMAT=text \
+    BUFFER_FLUSH_INTERVAL=200ms \
+    PROJECTS_FILE="$dir/projects.json" \
+    ./analytics serve > "$dir/log" 2>&1 &
 pid=$!
 
 for _ in $(seq 1 50); do

@@ -42,7 +42,7 @@ func (f *fakeSink) WriteProductEvents(_ context.Context, e []store.ProductEvent)
 }
 
 func cfg(max int, interval time.Duration, cap int) config.BufferConfig {
-	return config.BufferConfig{FlushMaxEvents: max, FlushInterval: config.Duration{Duration: interval}, Capacity: cap}
+	return config.BufferConfig{FlushMaxEvents: max, FlushInterval: interval, Capacity: cap}
 }
 
 func TestFlushBySize(t *testing.T) {

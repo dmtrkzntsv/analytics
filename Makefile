@@ -44,31 +44,42 @@ docker:
 
 # ---- local development / testing ----
 
-define LOCAL_CONFIG
-{
-  "listen": "127.0.0.1:8080",
-  "database": "sqlite://local/analytics.db",
-  "geo": "none://",
-  "log": { "level": "debug", "format": "text" },
-  "buffer": { "flush_max_events": 100, "flush_interval": "1s", "capacity": 10000 },
-  "projects": [
-    {
-      "alias": "dev",
-      "name": "Local Dev",
-      "allowed_origins": ["http://localhost:8080", "http://localhost:5173", "http://localhost:3000"]
-    }
-  ]
-}
+define LOCAL_ENV
+LISTEN_ADDR=127.0.0.1:8080
+DATABASE_URL=sqlite://local/analytics.db
+GEO_URL=none://
+LOG_LEVEL=debug
+LOG_FORMAT=text
+BUFFER_FLUSH_INTERVAL=1s
+PROJECTS_FILE=local/projects.json
 endef
-export LOCAL_CONFIG
+export LOCAL_ENV
 
-local/config.json:
+define LOCAL_PROJECTS
+[
+  {
+    "alias": "dev",
+    "name": "Local Dev",
+    "allowed_origins": ["http://localhost:8080", "http://localhost:5173", "http://localhost:3000"]
+  }
+]
+endef
+export LOCAL_PROJECTS
+
+local/.env:
 	@mkdir -p local
-	@printf '%s\n' "$$LOCAL_CONFIG" > $@
+	@printf '%s\n' "$$LOCAL_ENV" > $@
 	@echo "wrote $@"
 
-run: build local/config.json
-	./$(BIN) serve -config local/config.json
+local/projects.json:
+	@mkdir -p local
+	@printf '%s\n' "$$LOCAL_PROJECTS" > $@
+	@echo "wrote $@"
+
+# The binary reads plain env vars; the launcher loads the env file (same
+# division of labour as systemd's EnvironmentFile= in production).
+run: build local/.env local/projects.json
+	set -a; . ./local/.env; set +a; ./$(BIN) serve
 
 smoke: build
 	./scripts/smoke.sh
@@ -76,7 +87,7 @@ smoke: build
 test-install: build
 	./scripts/test-install.sh
 
-dashboards: local/config.json
+dashboards:
 	cd backoffice/evidence && npm install \
 		&& EVIDENCE_SOURCE__analytics__filename=../../../../local/analytics.db npm run sources \
 		&& EVIDENCE_SOURCE__analytics__filename=../../../../local/analytics.db npm run dev
