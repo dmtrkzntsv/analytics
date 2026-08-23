@@ -81,13 +81,13 @@ func TestProductAggregationDefaults(t *testing.T) {
 
 func TestValidationErrors(t *testing.T) {
 	cases := map[string]string{
-		"no database":        `{"projects":[{"alias":"a","name":"A","allowed_origins":["https://a.com"]}]}`,
-		"no projects":        `{"database":"sqlite:///tmp/a.db"}`,
-		"dup alias":          `{"database":"sqlite:///tmp/a.db","projects":[{"alias":"a","name":"A","allowed_origins":["https://a.com"]},{"alias":"a","name":"A2","allowed_origins":["https://b.com"]}]}`,
-		"bad geo scheme":     `{"database":"sqlite:///tmp/a.db","geo":"???","projects":[{"alias":"a","name":"A","allowed_origins":["https://a.com"]}]}`,
-		"negative raw_days":  `{"database":"sqlite:///tmp/a.db","retention":{"web":{"raw_days":-1,"aggregate_days":365}},"projects":[{"alias":"a","name":"A","allowed_origins":["https://a.com"]}]}`,
-		"empty origin":       `{"database":"sqlite:///tmp/a.db","projects":[{"alias":"a","name":"A","allowed_origins":[""]}]}`,
-		"invalid duration":   `{"database":"sqlite:///tmp/a.db","buffer":{"flush_interval":"fast"},"projects":[{"alias":"a","name":"A","allowed_origins":["https://a.com"]}]}`,
+		"no database":               `{"projects":[{"alias":"a","name":"A","allowed_origins":["https://a.com"]}]}`,
+		"no projects":               `{"database":"sqlite:///tmp/a.db"}`,
+		"dup alias":                 `{"database":"sqlite:///tmp/a.db","projects":[{"alias":"a","name":"A","allowed_origins":["https://a.com"]},{"alias":"a","name":"A2","allowed_origins":["https://b.com"]}]}`,
+		"bad geo scheme":            `{"database":"sqlite:///tmp/a.db","geo":"???","projects":[{"alias":"a","name":"A","allowed_origins":["https://a.com"]}]}`,
+		"negative raw_days":         `{"database":"sqlite:///tmp/a.db","retention":{"web":{"raw_days":-1,"aggregate_days":365}},"projects":[{"alias":"a","name":"A","allowed_origins":["https://a.com"]}]}`,
+		"empty origin":              `{"database":"sqlite:///tmp/a.db","projects":[{"alias":"a","name":"A","allowed_origins":[""]}]}`,
+		"invalid duration":          `{"database":"sqlite:///tmp/a.db","buffer":{"flush_interval":"fast"},"projects":[{"alias":"a","name":"A","allowed_origins":["https://a.com"]}]}`,
 		"project negative override": `{"database":"sqlite:///tmp/a.db","projects":[{"alias":"a","name":"A","allowed_origins":["https://a.com"],"retention":{"web":{"raw_days":-2}}}]}`,
 	}
 	for name, in := range cases {

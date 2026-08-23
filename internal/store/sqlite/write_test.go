@@ -69,7 +69,11 @@ func TestWriteProductEventsAttributesJSON(t *testing.T) {
 func TestSyncProjectsArchiving(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
-	must := func(err error) { if err != nil { t.Fatal(err) } }
+	must := func(err error) {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	must(db.SyncProjects(ctx, []store.ProjectInfo{{Alias: "a", Name: "A"}, {Alias: "b", Name: "B"}}))
 	var idA string
 	must(db.db.QueryRow(`SELECT id FROM projects WHERE alias='a'`).Scan(&idA))
