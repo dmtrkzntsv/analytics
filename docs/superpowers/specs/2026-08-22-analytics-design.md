@@ -21,11 +21,22 @@ Topology (unchanged from the original concept):
                               [ Cloudflare R2 / S3 ]      ← the only bridge
                                      │  litestream restore (loop)
                                      ▼
-        [ homelab: analytics sync + Evidence.dev (docker compose) ]
+        [ backoffice: analytics sync + Evidence.dev (docker compose) ]
 ```
 
-The VPS never serves queries; the homelab never accepts writes. S3/R2 is the
-only channel between them (outbound HTTPS both sides).
+The VPS never serves queries; the backoffice never accepts writes. S3/R2 is
+the only channel between them (outbound HTTPS both sides).
+
+### Deployment topologies
+
+1. **Split (default)** — ingestion on a public VPS, backoffice (dashboards)
+   on a private machine, bridged only by S3/R2 as diagrammed above.
+2. **All-in-one** — both parts on one machine in a single docker compose:
+   `serve` + `litestream` (backup only) + `evidence`. Evidence reads the
+   **live** database directly with `mode=ro` (WAL allows concurrent readers),
+   so there is no `sync` service and no restore loop; S3 remains as backup.
+   The compose file ships with the `sync` variant commented, so switching to
+   the split topology is uncommenting one service and changing one path.
 
 ### Non-goals
 
@@ -52,7 +63,7 @@ One binary, `analytics`, with subcommands:
 | Command | Role |
 |---|---|
 | `analytics serve` | VPS: HTTP ingestion + aggregation scheduler + retention pruning |
-| `analytics sync` | Homelab: restore-from-R2 loop that maintains the read replica |
+| `analytics sync` | Backoffice (split topology): restore-from-R2 loop that maintains the read replica |
 | `analytics migrate` | Apply pending migrations and exit (serve also migrates on boot) |
 | `analytics version` | Build info |
 
@@ -367,13 +378,13 @@ Aggregation state is derivable (a day is "done" when it has no raw rows and
 is older than the window), so no bookkeeping table is needed; re-running is
 safe by construction.
 
-## 10. Replication & homelab
+## 10. Replication & backoffice
 
 ### VPS
 litestream (own systemd unit) replicates the DB to R2, `sync-interval: 5s`
 (config identical to the original spec).
 
-### Homelab (`analytics sync` + Evidence, docker compose)
+### Backoffice, split topology (`analytics sync` + Evidence, docker compose)
 `analytics sync` loop, every `sync.interval` (default 5 m):
 
 1. `litestream restore -config … -o /data/.analytics.tmp.db <db>` (exec)
@@ -386,7 +397,7 @@ Compose services (two): `sync` (our image, command `analytics sync`) and
 marker file's mtime changes, checked once a minute; serves the built site).
 Evidence connects to the replica with SQLite `mode=ro`.
 
-A starter Evidence project ships in `homelab/evidence/`: web dashboard
+A starter Evidence project ships in `backoffice/evidence/`: web dashboard
 (visitors/pageviews trend, top pages, referrers, countries, devices, browsers,
 OS, UTM campaigns — all reading `v_web_*`), product dashboard (event trends,
 DAU from `v_product_totals`, per-event uniques, attribute breakdowns where
@@ -434,14 +445,15 @@ internal/identity/        visitor hashing + salt lifecycle
 internal/store/           Store interface, registry, models, date type
 internal/store/sqlite/    driver, migrations (embedded), aggregation SQL, views
 internal/jobs/            scheduler (aggregate, prune, salt, geo refresh)
-internal/synccmd/         homelab restore loop
+internal/synccmd/         backoffice restore loop
 web/script.js             tracking snippet (embedded)
 deploy/install.sh
 deploy/systemd/           analytics.service, litestream.service
 deploy/litestream/        litestream.yml example (VPS + restore config)
 deploy/logrotate/
-homelab/docker-compose.yml
-homelab/evidence/         starter Evidence project
+backoffice/docker-compose.yml          split topology (sync + evidence)
+backoffice/docker-compose.aio.yml      all-in-one (serve + litestream + evidence)
+backoffice/evidence/                   starter Evidence project
 Dockerfile                multi-stage; includes litestream binary
 docs/                     this spec, deployment guide
 ```
