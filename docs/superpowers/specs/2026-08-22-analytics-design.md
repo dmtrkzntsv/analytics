@@ -246,8 +246,9 @@ backend are future work (§13). Aggregation SQL lives inside each backend.
 
 - DSN: path from `sqlite:///abs/path`; opened via `modernc.org/sqlite` with
   pragmas applied on connect: `journal_mode=WAL`, `synchronous=NORMAL`,
-  `busy_timeout=5000`, `cache_size=-64000`, `temp_store=MEMORY`,
-  `auto_vacuum=INCREMENTAL` (set before first table creation).
+  `busy_timeout=5000`, `cache_size=-16000` (16 MB default, configurable —
+  see §12a), `temp_store=MEMORY`, `auto_vacuum=INCREMENTAL` (set before
+  first table creation).
 - `db.SetMaxOpenConns(1)` — single-writer pipeline, no lock contention.
 - Never full `VACUUM` (would force litestream to re-upload the whole DB);
   daily `PRAGMA incremental_vacuum(1000)` instead.
@@ -469,6 +470,30 @@ Dockerfile                multi-stage; includes litestream binary
 docs/                     this spec, deployment guide
 ```
 
+## 12a. Low-resource hardware (Raspberry Pi class)
+
+The system must run comfortably on a Pi or equivalent (1 GB RAM, SD-card
+storage), which mostly means bounded memory and minimized write amplification:
+
+- **Builds**: no CGO (already the case) ⇒ trivial cross-compilation; release
+  artifacts and Docker images for `linux/amd64`, `linux/arm64`,
+  `linux/arm/v7`.
+- **Memory**: page cache default lowered to 16 MB (`cache_size` configurable);
+  ingest buffer is bounded (10k events ≈ a few MB); no unbounded maps —
+  the flat-view key set is the only growing in-memory structure and is
+  string-key-only. Target RSS < 50 MB at defaults. `GOMEMLIMIT` set in the
+  systemd unit (128 MiB) as a backstop.
+- **SD-card write mindfulness**: all writes are batched transactions (never
+  per-request fsync); `synchronous=NORMAL` (one fsync per checkpoint, not per
+  commit); `batch.flush_interval` may be raised (e.g. `30s`) to trade
+  freshness for fewer write bursts; litestream `sync-interval` likewise.
+  WAL auto-checkpoint left at default (1000 pages) so checkpoints are chunky
+  rather than constant. Aggregation prunes raw data promptly, keeping the DB
+  and its WAL small. No temp files (temp_store=MEMORY); logs are summary
+  lines, not per-request.
+- **CPU**: enrichment is string matching (no regex per hit on the hot path);
+  aggregation runs once daily at off-peak.
+
 ## 13. Future work (explicitly out of scope now)
 
 - **Parquet/S3 storage backend** — `parquet://bucket/prefix` Store
@@ -478,7 +503,13 @@ docs/                     this spec, deployment guide
 - Additional geo providers (`ipinfo://` etc.).
 - Real-time dashboard endpoint, funnels, retention cohorts.
 
-## 14. Testing strategy (TDD throughout)
+## 14. Testing strategy (TDD throughout; coverage gate ≥ 80%)
+
+Coverage is enforced, not aspirational: `make check` runs
+`go test -race -coverprofile` across all packages and fails below **80%**
+total; per-package floors for the core logic (store, enrich, pipeline,
+identity, config: 85%). Excluded from the denominator: `cmd/` wiring and
+generated/embedded assets. CI (GitHub Actions) runs the same target.
 
 - **Unit**: config parsing/validation/DSN schemes; visitor hash + salt
   rotation; UA/referrer/UTM parsing; bot filter; origin/CORS matcher;
