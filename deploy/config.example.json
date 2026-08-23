@@ -1,0 +1,23 @@
+{
+  "listen": "127.0.0.1:8080",
+  "database": "sqlite:///var/lib/analytics/analytics.db",
+  "geo": "cloudflare://",
+  "log": { "level": "info", "format": "json" },
+  "buffer": { "flush_max_events": 1000, "flush_interval": "5s", "capacity": 10000 },
+  "retention": {
+    "web": { "raw_days": 7, "aggregate_days": 365 },
+    "product": { "raw_days": 30, "aggregate_days": 365 }
+  },
+  "sync": {
+    "interval": "5m",
+    "litestream_config": "/etc/litestream.yml",
+    "replica_path": "/data/replica.db"
+  },
+  "projects": [
+    {
+      "alias": "myapp",
+      "name": "My App",
+      "allowed_origins": ["https://myapp.com"]
+    }
+  ]
+}

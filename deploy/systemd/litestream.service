@@ -1,0 +1,20 @@
+[Unit]
+Description=Litestream replication for analytics
+After=network-online.target analytics.service
+Wants=network-online.target
+
+[Service]
+User=__USER__
+Group=__USER__
+ExecStart=/usr/local/bin/litestream replicate -config /etc/litestream.yml
+EnvironmentFile=/etc/analytics/litestream.env
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/analytics
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
