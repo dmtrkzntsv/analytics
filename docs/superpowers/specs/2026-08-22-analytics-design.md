@@ -31,12 +31,17 @@ the only channel between them (outbound HTTPS both sides).
 
 1. **Split (default)** — ingestion on a public VPS, backoffice (dashboards)
    on a private machine, bridged only by S3/R2 as diagrammed above.
-2. **All-in-one** — both parts on one machine in a single docker compose:
-   `serve` + `litestream` (backup only) + `evidence`. Evidence reads the
-   **live** database directly with `mode=ro` (WAL allows concurrent readers),
-   so there is no `sync` service and no restore loop; S3 remains as backup.
-   The compose file ships with the `sync` variant commented, so switching to
-   the split topology is uncommenting one service and changing one path.
+2. **All-in-one** — the entire system on one machine in a single docker
+   compose, three services:
+   - `analytics` — our image running `analytics serve` (the ingestion server
+     itself; port published, config + data dir mounted)
+   - `litestream` — replicating the shared DB volume to R2 (backup only)
+   - `evidence` — dashboards, reading the **live** database from the shared
+     volume with `mode=ro` (WAL allows concurrent readers)
+
+   No `sync` service and no restore loop; S3 remains as off-site backup. The
+   compose file ships with the split-topology `sync` service commented, so
+   splitting later is uncommenting one block and changing the DB path.
 
 ### Non-goals
 
@@ -397,7 +402,13 @@ Compose services (two): `sync` (our image, command `analytics sync`) and
 marker file's mtime changes, checked once a minute; serves the built site).
 Evidence connects to the replica with SQLite `mode=ro`.
 
-A starter Evidence project ships in `backoffice/evidence/`: web dashboard
+### Preconfigured Evidence dashboards (zero-setup)
+
+The Evidence project in `backoffice/evidence/` is fully preconfigured — the
+SQLite source connection, all queries, and all pages ship ready-made; the DB
+path comes from an env var set by compose. `docker compose up` on a machine
+with data yields working dashboards with no Evidence configuration steps.
+Pages: web dashboard
 (visitors/pageviews trend, top pages, referrers, countries, devices, browsers,
 OS, UTM campaigns — all reading `v_web_*`), product dashboard (event trends,
 DAU from `v_product_totals`, per-event uniques, attribute breakdowns where
