@@ -1,0 +1,11 @@
+# Litestream replication config (spec §4.1 of the original concept).
+# R2 credentials come from the environment: LITESTREAM_ACCESS_KEY_ID,
+# LITESTREAM_SECRET_ACCESS_KEY.
+dbs:
+  - path: /var/lib/analytics/analytics.db
+    replicas:
+      - type: s3
+        bucket: ${R2_BUCKET}
+        path: litestream
+        endpoint: ${R2_ENDPOINT}   # https://<account_id>.r2.cloudflarestorage.com
+        sync-interval: 5s

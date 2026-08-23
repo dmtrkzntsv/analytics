@@ -1,0 +1,6 @@
+.git
+dist/
+coverage.out
+*.db
+docs/
+backoffice/evidence/node_modules
