@@ -64,13 +64,13 @@ func (b *Buffer) Run(ctx context.Context) {
 	defer ticker.Stop()
 	var hits []store.WebHit
 	var events []store.ProductEvent
-	flush := func() {
+	flush := func(ctx context.Context) {
 		if len(hits) > 0 {
-			b.write(func(c context.Context) error { return b.sink.WriteWebHits(c, hits) }, len(hits), "web_hits")
+			b.write(ctx, func(c context.Context) error { return b.sink.WriteWebHits(c, hits) }, len(hits), "web_hits")
 			hits = nil
 		}
 		if len(events) > 0 {
-			b.write(func(c context.Context) error { return b.sink.WriteProductEvents(c, events) }, len(events), "product_events")
+			b.write(ctx, func(c context.Context) error { return b.sink.WriteProductEvents(c, events) }, len(events), "product_events")
 			events = nil
 		}
 	}
@@ -91,7 +91,7 @@ func (b *Buffer) Run(ctx context.Context) {
 				}
 				break
 			}
-			flush()
+			flush(ctx)
 			return
 		case it := <-b.ch:
 			if it.hit != nil {
@@ -100,21 +100,30 @@ func (b *Buffer) Run(ctx context.Context) {
 				events = append(events, *it.event)
 			}
 			if len(hits)+len(events) >= b.cfg.FlushMaxEvents {
-				flush()
+				flush(ctx)
 			}
 		case <-ticker.C:
-			flush()
+			flush(ctx)
 		}
 	}
 }
 
 // write retries per spec §5.3 (3 attempts, then drop with an error log).
-// Uses context.Background(): shutdown must still flush.
-func (b *Buffer) write(fn func(context.Context) error, n int, kind string) {
+// The sink call itself always uses context.Background(): shutdown must
+// still be able to flush. The backoff sleep between attempts, however, is
+// cancellation-aware — if ctx is done (e.g. the process is shutting down)
+// the sleep is aborted immediately and remaining attempts fire back-to-back
+// without delay, so a failing flush can't stall shutdown past the retry
+// writes themselves. Normal (non-shutdown) operation keeps the full
+// 1s/5s/25s backoff.
+func (b *Buffer) write(ctx context.Context, fn func(context.Context) error, n int, kind string) {
 	var err error
 	for attempt := 0; attempt <= len(retryDelays); attempt++ {
 		if attempt > 0 {
-			time.Sleep(retryDelays[attempt-1])
+			select {
+			case <-time.After(retryDelays[attempt-1]):
+			case <-ctx.Done():
+			}
 		}
 		if err = fn(context.Background()); err == nil {
 			return

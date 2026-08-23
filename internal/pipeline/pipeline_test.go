@@ -1,9 +1,11 @@
 package pipeline
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -109,6 +111,80 @@ func TestFlushRetriesThenDrops(t *testing.T) {
 	waitFor(t, func() bool { sink.mu.Lock(); defer sink.mu.Unlock(); return len(sink.hits) == 1 })
 	cancel()
 	<-done
+}
+
+func TestFlushExhaustedRetriesDropsAndWorkerContinues(t *testing.T) {
+	old := retryDelays
+	retryDelays = []time.Duration{time.Millisecond, time.Millisecond, time.Millisecond}
+	defer func() { retryDelays = old }()
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+
+	sink := &fakeSink{fail: 10} // more failures than attempts: always fails
+	b := New(cfg(1, time.Hour, 10), sink, logger)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { b.Run(ctx); close(done) }()
+
+	b.EnqueueHit(store.WebHit{ID: "dropped"})
+	// Wait for all 4 attempts (1 + 3 retries) to have been made, i.e. the
+	// batch has been given up on.
+	waitFor(t, func() bool { sink.mu.Lock(); defer sink.mu.Unlock(); return sink.calls == 4 })
+	// The batch must never land, even after the retries are exhausted, and
+	// must not be requeued/resurrected by a later successful flush.
+	sink.mu.Lock()
+	if len(sink.hits) != 0 {
+		t.Fatalf("dropped batch must not be written; got %d hits", len(sink.hits))
+	}
+	sink.fail = 0 // clear failures so the next flush succeeds
+	sink.mu.Unlock()
+
+	// Worker must still be running and able to flush a subsequent hit.
+	b.EnqueueHit(store.WebHit{ID: "ok"})
+	waitFor(t, func() bool { sink.mu.Lock(); defer sink.mu.Unlock(); return len(sink.hits) == 1 })
+	sink.mu.Lock()
+	if sink.hits[0].ID != "ok" {
+		t.Fatalf("expected surviving hit to be %q, got %q", "ok", sink.hits[0].ID)
+	}
+	sink.mu.Unlock()
+
+	cancel()
+	<-done
+
+	if !strings.Contains(buf.String(), "batch dropped") {
+		t.Fatalf("expected error log to contain %q, got: %s", "batch dropped", buf.String())
+	}
+}
+
+func TestShutdownDuringRetriesDoesNotStall(t *testing.T) {
+	old := retryDelays
+	// Large delays: if the backoff sleep weren't cancellation-aware, a
+	// cancel during the first sleep would stall shutdown for ~30s.
+	retryDelays = []time.Duration{10 * time.Second, 10 * time.Second, 10 * time.Second}
+	defer func() { retryDelays = old }()
+
+	sink := &fakeSink{fail: 10} // always fails, forcing the worker into backoff
+	b := New(cfg(1, time.Hour, 10), sink, slog.Default())
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { b.Run(ctx); close(done) }()
+
+	b.EnqueueHit(store.WebHit{ID: "h"})
+	// Let the worker pick up the item and enter its first (long) backoff
+	// sleep before we cancel.
+	waitFor(t, func() bool { sink.mu.Lock(); defer sink.mu.Unlock(); return sink.calls >= 1 })
+
+	start := time.Now()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return within 2s of cancellation; backoff sleep is not cancellation-aware")
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("shutdown took %s, want well under configured backoff", elapsed)
+	}
 }
 
 func waitFor(t *testing.T, cond func() bool) {
