@@ -81,18 +81,38 @@ func TestProductAggregationDefaults(t *testing.T) {
 
 func TestValidationErrors(t *testing.T) {
 	cases := map[string]string{
-		"no database":      `{"projects":[{"alias":"a","name":"A","allowed_origins":["https://a.com"]}]}`,
-		"no projects":      `{"database":"sqlite:///tmp/a.db"}`,
-		"dup alias":        `{"database":"sqlite:///tmp/a.db","projects":[{"alias":"a","name":"A","allowed_origins":["https://a.com"]},{"alias":"a","name":"A2","allowed_origins":["https://b.com"]}]}`,
-		"bad geo scheme":   `{"database":"sqlite:///tmp/a.db","geo":"???","projects":[{"alias":"a","name":"A","allowed_origins":["https://a.com"]}]}`,
-		"zero raw_days":    `{"database":"sqlite:///tmp/a.db","retention":{"web":{"raw_days":0,"aggregate_days":365}},"projects":[{"alias":"a","name":"A","allowed_origins":["https://a.com"]}]}`,
-		"empty origin":     `{"database":"sqlite:///tmp/a.db","projects":[{"alias":"a","name":"A","allowed_origins":[""]}]}`,
-		"invalid duration": `{"database":"sqlite:///tmp/a.db","buffer":{"flush_interval":"fast"},"projects":[{"alias":"a","name":"A","allowed_origins":["https://a.com"]}]}`,
+		"no database":        `{"projects":[{"alias":"a","name":"A","allowed_origins":["https://a.com"]}]}`,
+		"no projects":        `{"database":"sqlite:///tmp/a.db"}`,
+		"dup alias":          `{"database":"sqlite:///tmp/a.db","projects":[{"alias":"a","name":"A","allowed_origins":["https://a.com"]},{"alias":"a","name":"A2","allowed_origins":["https://b.com"]}]}`,
+		"bad geo scheme":     `{"database":"sqlite:///tmp/a.db","geo":"???","projects":[{"alias":"a","name":"A","allowed_origins":["https://a.com"]}]}`,
+		"negative raw_days":  `{"database":"sqlite:///tmp/a.db","retention":{"web":{"raw_days":-1,"aggregate_days":365}},"projects":[{"alias":"a","name":"A","allowed_origins":["https://a.com"]}]}`,
+		"empty origin":       `{"database":"sqlite:///tmp/a.db","projects":[{"alias":"a","name":"A","allowed_origins":[""]}]}`,
+		"invalid duration":   `{"database":"sqlite:///tmp/a.db","buffer":{"flush_interval":"fast"},"projects":[{"alias":"a","name":"A","allowed_origins":["https://a.com"]}]}`,
+		"project negative override": `{"database":"sqlite:///tmp/a.db","projects":[{"alias":"a","name":"A","allowed_origins":["https://a.com"],"retention":{"web":{"raw_days":-2}}}]}`,
 	}
 	for name, in := range cases {
 		if _, err := Parse(strings.NewReader(in)); err == nil {
 			t.Errorf("%s: expected error", name)
 		}
+	}
+}
+
+func TestPartialRetentionOverride(t *testing.T) {
+	c, err := Parse(strings.NewReader(`{
+	  "database": "sqlite:///tmp/a.db",
+	  "retention": {"web": {"raw_days": 5}},
+	  "projects": [{"alias": "a", "name": "A", "allowed_origins": ["https://a.com"]}]
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Partial override: web.raw_days=5 set, but web.aggregate_days should default to 365
+	if c.Retention.Web.RawDays != 5 || c.Retention.Web.AggregateDays != 365 {
+		t.Errorf("Partial override failed: Web=%+v, want {5, 365}", c.Retention.Web)
+	}
+	// Product should use all defaults
+	if c.Retention.Product.RawDays != 30 || c.Retention.Product.AggregateDays != 365 {
+		t.Errorf("Product defaults failed: %+v, want {30, 365}", c.Retention.Product)
 	}
 }
 

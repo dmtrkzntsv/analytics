@@ -133,11 +133,18 @@ func (c *Config) applyDefaults() {
 	if c.Buffer.Capacity == 0 {
 		c.Buffer.Capacity = 10000
 	}
-	if c.Retention.Web == (RetentionClass{}) {
-		c.Retention.Web = RetentionClass{RawDays: 7, AggregateDays: 365}
+	// Field-level retention defaults (zero means use default)
+	if c.Retention.Web.RawDays == 0 {
+		c.Retention.Web.RawDays = 7
 	}
-	if c.Retention.Product == (RetentionClass{}) {
-		c.Retention.Product = RetentionClass{RawDays: 30, AggregateDays: 365}
+	if c.Retention.Web.AggregateDays == 0 {
+		c.Retention.Web.AggregateDays = 365
+	}
+	if c.Retention.Product.RawDays == 0 {
+		c.Retention.Product.RawDays = 30
+	}
+	if c.Retention.Product.AggregateDays == 0 {
+		c.Retention.Product.AggregateDays = 365
 	}
 	if c.Sync.Interval.Duration == 0 {
 		c.Sync.Interval.Duration = 5 * time.Minute
@@ -162,6 +169,12 @@ func (c *Config) validate() error {
 	if len(c.Projects) == 0 {
 		return fmt.Errorf("config: at least one project is required")
 	}
+	// Validate global retention (negative values only)
+	for _, rc := range []RetentionClass{c.Retention.Web, c.Retention.Product} {
+		if rc.RawDays < 0 || rc.AggregateDays < 0 {
+			return fmt.Errorf("config: retention days must not be negative: %+v", rc)
+		}
+	}
 	seen := map[string]bool{}
 	for _, p := range c.Projects {
 		if p.Alias == "" {
@@ -176,10 +189,10 @@ func (c *Config) validate() error {
 				return fmt.Errorf("config: project %q has an empty allowed_origin", p.Alias)
 			}
 		}
-	}
-	for _, rc := range []RetentionClass{c.Retention.Web, c.Retention.Product} {
-		if rc.RawDays <= 0 || rc.AggregateDays < 0 {
-			return fmt.Errorf("config: retention days out of range: %+v", rc)
+		// Validate merged retention for project
+		r := c.RetentionFor(p.Alias)
+		if r.Web.RawDays < 0 || r.Web.AggregateDays < 0 || r.Product.RawDays < 0 || r.Product.AggregateDays < 0 {
+			return fmt.Errorf("config: project %q has invalid merged retention (negative values): web=%+v product=%+v", p.Alias, r.Web, r.Product)
 		}
 	}
 	return nil
