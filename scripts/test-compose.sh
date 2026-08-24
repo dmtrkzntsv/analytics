@@ -32,24 +32,31 @@ sed -e 's|ghcr.io/dmtrkzntsv/analytics:${ANALYTICS_VERSION:-latest}|analytics:co
     -e 's|"3000:3000"|"13000:3000"|' \
     deploy/compose/docker-compose.yml > "$dir/docker-compose.yml"
 cat > "$dir/projects.json" <<'JSON'
-[{"alias": "dev", "name": "Dev", "allowed_origins": ["http://localhost:18080"]}]
+[{"alias": "dev", "name": "Dev", "allowed_origins": ["http://localhost:18080"],
+  "ingest_keys": [{"key": "ak_composetest", "label": "web"}]}]
 JSON
 
 docker compose -p "$project" -f "$dir/docker-compose.yml" up -d > /dev/null
 
 echo "waiting for ingestion..."
 for _ in $(seq 1 30); do
-  curl -fsS -o /dev/null "http://127.0.0.1:18080/js/script.js" && break
+  curl -fsS -o /dev/null "http://127.0.0.1:18080/js/script.js" 2>/dev/null && break
   sleep 1
 done
 
-# curl's default User-Agent is classified as a bot and dropped, so the hit
-# has to look like a browser or nothing ever reaches the database.
-ua='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36'
-code="$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:18080/api/hit" \
-  -A "$ua" -H 'Origin: http://localhost:18080' -H 'Content-Type: application/json' \
-  -d '{"project":"dev","url":"http://localhost:18080/pricing"}')"
-[ "$code" = "202" ] || fail "hit returned $code, want 202"
+# curl's default User-Agent is classified as a bot and the pageview would be
+# accepted but never stored, so the request has to look like a browser.
+ua='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36'
+# shellcheck disable=SC2016  # the $-prefixed names are JSON keys, not shell
+code="$(curl -s -o "$dir/events.out" -w '%{http_code}' -A "$ua" -X POST "http://127.0.0.1:18080/api/events" \
+  -H 'Origin: http://localhost:18080' -H 'Content-Type: application/json' \
+  -H 'X-Analytics-Key: ak_composetest' \
+  -d '{"attributes":{"$platform":"ios","$app_version":"1.0","$install_id":"install-1"},
+       "events":[
+         {"name":"$pageview","attributes":{"$url":"http://localhost:18080/pricing"}},
+         {"name":"$screen_view","attributes":{"$screen":"/settings"}},
+         {"name":"signup","attributes":{"plan":"pro"}}]}')"
+[ "$code" = "202" ] || fail "/api/events returned $code: $(cat "$dir/events.out")"
 
 echo "waiting for the first Evidence build (this takes about a minute)..."
 status=""
@@ -61,9 +68,18 @@ done
 [ "$status" = "200" ] || fail "dashboards never left $status"
 
 curl -fsS "http://127.0.0.1:13000/" | grep -q "<title>" || fail "index is not a rendered page"
-for page in /web/ /product/; do
+
+# Every templated route, including the drill-down that only prerenders when
+# its query-string read is guarded for the prerender pass.
+for page in /web/dev/ /app/dev/ /product/dev/ /users/dev/ /groups/dev/ /retention/dev/ /web/dev/page/; do
   code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:13000$page")"
   [ "$code" = "200" ] || fail "$page returned $code"
 done
+
+# A rendered page is not enough: sources must have produced data. The parquet
+# extracts are what the browser queries, and an empty build still serves 200.
+docker compose -p "$project" -f "$dir/docker-compose.yml" exec -T dashboards \
+  sh -c 'find /opt/evidence/site.* -name "*.parquet" -size +1k | head -1' | grep -q parquet \
+  || fail "no non-trivial parquet extracts in the served site"
 
 echo "PASS: ingestion on :18080, dashboards rendered on :13000"

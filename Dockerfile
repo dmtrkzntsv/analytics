@@ -71,7 +71,7 @@ USER analytics
 # image build — rather than a deployment — if a source query does not match
 # the migrations.
 RUN set -eu; \
-    printf '[{"alias":"warm","name":"Warm","allowed_origins":["http://localhost"]}]' > /tmp/warm.json; \
+    printf '[{"alias":"warm","name":"Warm","allowed_origins":["http://localhost"],"ingest_keys":[{"key":"ak_warm","label":"warm"}]}]' > /tmp/warm.json; \
     DATABASE_URL=sqlite:///tmp/warm.db PROJECTS_FILE=/tmp/warm.json analytics migrate; \
     cd /opt/evidence; \
     EVIDENCE_SOURCE__analytics__filename=../../../../tmp/warm.db npm run sources; \
