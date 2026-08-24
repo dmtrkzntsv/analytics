@@ -91,14 +91,25 @@ func Serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	pipeDone := make(chan struct{})
 	go func() { buf.Run(pipeCtx); close(pipeDone) }()
 
+	// A project whose keys are all disabled can receive nothing. That is a
+	// legitimate retired state, so warn rather than refuse to start.
+	for _, alias := range cfg.DisabledKeyProjects() {
+		logger.Warn("project has no active ingest keys and can receive nothing", "project", alias)
+	}
+
 	runner := jobs.New(st, cfg, salter, logger, time.Now)
 	jobsCtx, stopJobs := context.WithCancel(context.Background())
 	jobsDone := make(chan struct{})
 	go func() { runner.Run(jobsCtx); close(jobsDone) }()
 
+	handler := server.New(cfg, buf, geoProvider, salter, st, logger)
+	sumCtx, stopSummary := context.WithCancel(context.Background())
+	summaryDone := make(chan struct{})
+	go func() { logIngestSummary(sumCtx, handler, logger); close(summaryDone) }()
+
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           server.New(cfg, buf, geoProvider, salter, logger),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	errCh := make(chan error, 1)
@@ -108,6 +119,8 @@ func Serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	select {
 	case <-ctx.Done():
 	case err := <-errCh:
+		stopSummary()
+		<-summaryDone
 		stopJobs()
 		<-jobsDone
 		stopPipe()
@@ -119,6 +132,8 @@ func Serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	if err := srv.Shutdown(shutCtx); err != nil {
 		logger.Error("http shutdown", "error", err)
 	}
+	stopSummary()
+	<-summaryDone
 	stopJobs()
 	<-jobsDone
 	stopPipe() // triggers final flush
@@ -133,4 +148,23 @@ func Serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 // the data dir (GeoLite2 DB lives next to the database).
 func databasePath(dsn string) string {
 	return strings.TrimPrefix(dsn, "sqlite://")
+}
+
+// logIngestSummary emits one line per active key label each minute instead
+// of logging per request. Labels, never keys — and this is what tells an
+// operator an old key has gone idle and is safe to retire.
+func logIngestSummary(ctx context.Context, srv *server.Server, logger *slog.Logger) {
+	t := time.NewTicker(time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			for label, c := range srv.Counters().Drain() {
+				logger.Info("ingest summary", "key_label", label,
+					"accepted", c[0], "rejected", c[1])
+			}
+		}
+	}
 }

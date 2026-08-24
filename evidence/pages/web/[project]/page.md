@@ -36,15 +36,23 @@ where project = '${params.project}'
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')
 ```
 
+<!--
+  emptySet=pass on every component: `path` comes from the query string, and
+  the prerender pass visits this route without one, so every query here
+  returns nothing at build time. The default (error) turns that into a 500
+  and fails `evidence build`. The page is a shell that the browser fills in
+  from the query string, so an empty build-time render is the correct one.
+-->
+
 <Grid cols=3>
-    <BigValue data={page_totals} value=visitors fmt=num0 title="Visitors" />
-    <BigValue data={page_totals} value=pageviews fmt=num0 title="Pageviews" />
-    <BigValue data={page_totals} value=views_per_visitor fmt=num1 title="Views per visitor" />
+    <BigValue data={page_totals} value=visitors fmt=num0 title="Visitors" emptySet=pass />
+    <BigValue data={page_totals} value=pageviews fmt=num0 title="Pageviews" emptySet=pass />
+    <BigValue data={page_totals} value=views_per_visitor fmt=num1 title="Views per visitor" emptySet=pass />
 </Grid>
 
-<LineChart data={page_daily} x=day y={["visitors","pageviews"]} title="Traffic to this page" yFmt=num0 />
+<LineChart data={page_daily} x=day y={["visitors","pageviews"]} title="Traffic to this page" yFmt=num0 emptySet=pass />
 
-<DataTable data={page_daily} rows=15>
+<DataTable data={page_daily} rows=15 emptySet=pass>
     <Column id=day title="Day" />
     <Column id=visitors title="Visitors" fmt=num0 contentType=colorscale />
     <Column id=pageviews title="Pageviews" fmt=num0 />

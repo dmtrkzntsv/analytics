@@ -59,8 +59,23 @@ COPY --from=go-build /out/analytics /usr/local/bin/analytics
 # Ownership is set by COPY: a `chown -R` afterwards would write a second,
 # full-size copy of the tree into its own layer and double the image.
 COPY --from=evidence-build --chown=analytics:analytics /opt/evidence /opt/evidence
-RUN install -d -o analytics -g analytics /var/lib/dashboards
+# DuckDB-wasm caches its autoloaded extensions under $HOME. The user has no
+# home directory of its own, and without a writable one the parquet extension
+# fails to install — leaving `evidence sources` to exit 0 having written no
+# tables at all, so the build fails later with "Table does not exist".
+ENV HOME=/opt/evidence/.home
+RUN install -d -o analytics -g analytics /var/lib/dashboards "$HOME"
 USER analytics
+# Warm the extension cache against the real schema. This turns a runtime
+# dependency on extensions.duckdb.org into a build-time one, and fails the
+# image build — rather than a deployment — if a source query does not match
+# the migrations.
+RUN set -eu; \
+    printf '[{"alias":"warm","name":"Warm","allowed_origins":["http://localhost"]}]' > /tmp/warm.json; \
+    DATABASE_URL=sqlite:///tmp/warm.db PROJECTS_FILE=/tmp/warm.json analytics migrate; \
+    cd /opt/evidence; \
+    EVIDENCE_SOURCE__analytics__filename=../../../../tmp/warm.db npm run sources; \
+    rm -f /tmp/warm.db /tmp/warm.json
 ENV DASHBOARDS_ADDR=0.0.0.0:3000 \
     DASHBOARDS_PROJECT_DIR=/opt/evidence \
     DASHBOARDS_WORK_DIR=/var/lib/dashboards \

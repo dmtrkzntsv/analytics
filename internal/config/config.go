@@ -5,6 +5,7 @@
 package config
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +13,14 @@ import (
 	"os"
 	"strings"
 	"time"
+)
+
+// Identity modes. anonymous salts and rotates whatever identifier the
+// client supplies; identified stores it as given. The server is always the
+// enforcement point: a client hint never overrides this.
+const (
+	IdentityAnonymous  = "anonymous"
+	IdentityIdentified = "identified"
 )
 
 type LogConfig struct {
@@ -34,6 +43,7 @@ type RetentionClass struct {
 type Retention struct {
 	Web     RetentionClass `json:"web"`
 	Product RetentionClass `json:"product"`
+	App     RetentionClass `json:"app"`
 }
 
 type RetentionClassOverride struct {
@@ -44,6 +54,7 @@ type RetentionClassOverride struct {
 type RetentionOverride struct {
 	Web     *RetentionClassOverride `json:"web"`
 	Product *RetentionClassOverride `json:"product"`
+	App     *RetentionClassOverride `json:"app"`
 }
 
 type ProductAggregation struct {
@@ -52,9 +63,21 @@ type ProductAggregation struct {
 	TopN       int                 `json:"top_n"`
 }
 
+// IngestKey is one client credential. Multiple keys per project let a
+// website, an iOS app and a desktop app be retired independently. Disabled
+// rather than deleted: retirement is reversible during a botched rollout
+// without regenerating and redistributing.
+type IngestKey struct {
+	Key      string `json:"key"`
+	Label    string `json:"label"`
+	Disabled bool   `json:"disabled"`
+}
+
 type Project struct {
 	Alias              string              `json:"alias"`
 	Name               string              `json:"name"`
+	Identity           string              `json:"identity"`
+	IngestKeys         []IngestKey         `json:"ingest_keys"`
 	AllowedOrigins     []string            `json:"allowed_origins"`
 	Retention          *RetentionOverride  `json:"retention"`
 	ProductAggregation *ProductAggregation `json:"product_aggregation"`
@@ -79,6 +102,17 @@ type Config struct {
 	Retention  Retention
 	Dashboards DashboardsConfig
 	Projects   []Project
+
+	// keys is a flat list of non-disabled ingest keys. A slice rather than
+	// a map because lookup uses subtle.ConstantTimeCompare: a map index on
+	// a credential is not constant time.
+	keys []keyOwner
+}
+
+type keyOwner struct {
+	key     string
+	project *Project
+	label   string
 }
 
 // DefaultProjectsFile is where the installer puts projects.json; override
@@ -177,6 +211,10 @@ func parse(lookup func(string) (string, bool), withProjects bool) (*Config, erro
 				RawDays:       e.num("RETENTION_PRODUCT_RAW_DAYS", 30),
 				AggregateDays: e.num("RETENTION_PRODUCT_AGGREGATE_DAYS", 365),
 			},
+			App: RetentionClass{
+				RawDays:       e.num("RETENTION_APP_RAW_DAYS", 30),
+				AggregateDays: e.num("RETENTION_APP_AGGREGATE_DAYS", 365),
+			},
 		},
 		Dashboards: DashboardsConfig{
 			DBPath:     e.str("DASHBOARDS_DB_PATH", ""),
@@ -227,9 +265,19 @@ func ParseProjects(r io.Reader) ([]Project, error) {
 }
 
 func (c *Config) applyDefaults() {
+	c.keys = nil
 	for i := range c.Projects {
-		if pa := c.Projects[i].ProductAggregation; pa != nil && pa.TopN == 0 {
+		p := &c.Projects[i]
+		if pa := p.ProductAggregation; pa != nil && pa.TopN == 0 {
 			pa.TopN = 50
+		}
+		if p.Identity == "" {
+			p.Identity = IdentityAnonymous
+		}
+		for _, k := range p.IngestKeys {
+			if !k.Disabled && k.Key != "" {
+				c.keys = append(c.keys, keyOwner{key: k.Key, project: p, label: k.Label})
+			}
 		}
 	}
 }
@@ -248,12 +296,13 @@ func (c *Config) validate() error {
 		return fmt.Errorf("config: at least one project is required")
 	}
 	// Validate global retention (negative values only)
-	for _, rc := range []RetentionClass{c.Retention.Web, c.Retention.Product} {
+	for _, rc := range []RetentionClass{c.Retention.Web, c.Retention.Product, c.Retention.App} {
 		if rc.RawDays < 0 || rc.AggregateDays < 0 {
 			return fmt.Errorf("config: retention days must not be negative: %+v", rc)
 		}
 	}
 	seen := map[string]bool{}
+	seenKey := map[string]string{}
 	for _, p := range c.Projects {
 		if p.Alias == "" {
 			return fmt.Errorf("config: project with empty alias")
@@ -262,6 +311,24 @@ func (c *Config) validate() error {
 			return fmt.Errorf("config: duplicate project alias %q", p.Alias)
 		}
 		seen[p.Alias] = true
+		switch p.Identity {
+		case IdentityAnonymous, IdentityIdentified:
+		default:
+			return fmt.Errorf("config: project %q: identity must be %q or %q, got %q",
+				p.Alias, IdentityAnonymous, IdentityIdentified, p.Identity)
+		}
+		if len(p.IngestKeys) == 0 {
+			return fmt.Errorf("config: project %q has no ingest_keys; run `analytics keygen`", p.Alias)
+		}
+		for _, k := range p.IngestKeys {
+			if k.Key == "" {
+				return fmt.Errorf("config: project %q has an empty ingest key", p.Alias)
+			}
+			if owner, dup := seenKey[k.Key]; dup {
+				return fmt.Errorf("config: an ingest key of project %q is already used by project %q; keys must be globally unique", p.Alias, owner)
+			}
+			seenKey[k.Key] = p.Alias
+		}
 		for _, o := range p.AllowedOrigins {
 			if o == "" {
 				return fmt.Errorf("config: project %q has an empty allowed_origin", p.Alias)
@@ -269,8 +336,10 @@ func (c *Config) validate() error {
 		}
 		// Validate merged retention for project
 		r := c.RetentionFor(p.Alias)
-		if r.Web.RawDays < 0 || r.Web.AggregateDays < 0 || r.Product.RawDays < 0 || r.Product.AggregateDays < 0 {
-			return fmt.Errorf("config: project %q has invalid merged retention (negative values): web=%+v product=%+v", p.Alias, r.Web, r.Product)
+		if r.Web.RawDays < 0 || r.Web.AggregateDays < 0 ||
+			r.Product.RawDays < 0 || r.Product.AggregateDays < 0 ||
+			r.App.RawDays < 0 || r.App.AggregateDays < 0 {
+			return fmt.Errorf("config: project %q has invalid merged retention (negative values): web=%+v product=%+v app=%+v", p.Alias, r.Web, r.Product, r.App)
 		}
 	}
 	return nil
@@ -304,5 +373,59 @@ func (c *Config) RetentionFor(project string) Retention {
 	}
 	apply(&r.Web, p.Retention.Web)
 	apply(&r.Product, p.Retention.Product)
+	apply(&r.App, p.Retention.App)
 	return r
+}
+
+// ProjectByKey resolves a project from an ingest key. Disabled keys never
+// resolve. This is the only auth outcome: the key resolves or it does not,
+// so there is no unknown-project oracle to keep indistinguishable.
+//
+// Every candidate is compared with no early return on match, so the loop's
+// timing does not vary with key content. Length differences do leak through
+// ConstantTimeCompare's zero return; that is unavoidable and harmless for
+// 128-bit random keys.
+func (c *Config) ProjectByKey(key string) (*Project, string, bool) {
+	if key == "" {
+		return nil, "", false
+	}
+	match := -1
+	kb := []byte(key)
+	for i := range c.keys {
+		if subtle.ConstantTimeCompare([]byte(c.keys[i].key), kb) == 1 {
+			match = i
+		}
+	}
+	if match < 0 {
+		return nil, "", false
+	}
+	return c.keys[match].project, c.keys[match].label, true
+}
+
+// MaxEventAge is derived from the app raw window rather than separately
+// configurable: the two must agree or a clamped timestamp could land in an
+// already-aggregated day.
+func (c *Config) MaxEventAge() time.Duration {
+	return time.Duration(c.Retention.App.RawDays) * 24 * time.Hour
+}
+
+// DisabledKeyProjects lists projects that can receive nothing because all
+// their keys are disabled. That is a legitimate retired state, so callers
+// warn rather than fail.
+func (c *Config) DisabledKeyProjects() []string {
+	var out []string
+	for i := range c.Projects {
+		p := &c.Projects[i]
+		active := false
+		for _, k := range p.IngestKeys {
+			if !k.Disabled {
+				active = true
+				break
+			}
+		}
+		if !active {
+			out = append(out, p.Alias)
+		}
+	}
+	return out
 }

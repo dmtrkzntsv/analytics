@@ -18,6 +18,7 @@ type fakeSink struct {
 	mu     sync.Mutex
 	hits   []store.WebHit
 	events []store.ProductEvent
+	views  []store.AppView
 	fail   int // fail this many calls before succeeding
 	calls  int
 }
@@ -39,6 +40,19 @@ func (f *fakeSink) WriteProductEvents(_ context.Context, e []store.ProductEvent)
 	defer f.mu.Unlock()
 	f.events = append(f.events, e...)
 	return nil
+}
+
+func (f *fakeSink) WriteAppViews(_ context.Context, v []store.AppView) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.views = append(f.views, v...)
+	return nil
+}
+
+func (f *fakeSink) viewCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.views)
 }
 
 func cfg(max int, interval time.Duration, cap int) config.BufferConfig {
@@ -197,4 +211,72 @@ func waitFor(t *testing.T, cond func() bool) {
 		time.Sleep(2 * time.Millisecond)
 	}
 	t.Fatal("condition not met within 2s")
+}
+
+func TestFlushesAppViewsBySize(t *testing.T) {
+	sink := &fakeSink{}
+	b := New(cfg(2, time.Hour, 100), sink, slog.Default())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { b.Run(ctx); close(done) }()
+
+	b.EnqueueAppView(store.AppView{ID: "1", Project: "p", Screen: "/a"})
+	b.EnqueueAppView(store.AppView{ID: "2", Project: "p", Screen: "/b"})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for sink.viewCount() < 2 && time.Now().Before(deadline) {
+		time.Sleep(2 * time.Millisecond)
+	}
+	if got := sink.viewCount(); got != 2 {
+		t.Errorf("app views written = %d, want 2", got)
+	}
+	cancel()
+	<-done
+}
+
+func TestShutdownDrainsAppViews(t *testing.T) {
+	sink := &fakeSink{}
+	b := New(cfg(1000, time.Hour, 100), sink, slog.Default())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { b.Run(ctx); close(done) }()
+
+	b.EnqueueAppView(store.AppView{ID: "1", Project: "p", Screen: "/a"})
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	<-done
+
+	if got := sink.viewCount(); got != 1 {
+		t.Errorf("app views written on shutdown = %d, want 1", got)
+	}
+}
+
+// The size trigger counts all three kinds together: a buffer holding one of
+// each must flush at FlushMaxEvents=3, not wait for three of any one kind.
+func TestFlushSizeCountsAllKinds(t *testing.T) {
+	sink := &fakeSink{}
+	b := New(cfg(3, time.Hour, 100), sink, slog.Default())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { b.Run(ctx); close(done) }()
+
+	b.EnqueueHit(store.WebHit{ID: "h", Project: "p"})
+	b.EnqueueEvent(store.ProductEvent{ID: "e", Project: "p", EventName: "n"})
+	b.EnqueueAppView(store.AppView{ID: "v", Project: "p", Screen: "/a"})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for sink.viewCount() < 1 && time.Now().Before(deadline) {
+		time.Sleep(2 * time.Millisecond)
+	}
+	sink.mu.Lock()
+	h, e, v := len(sink.hits), len(sink.events), len(sink.views)
+	sink.mu.Unlock()
+	if h != 1 || e != 1 || v != 1 {
+		t.Errorf("flushed hits=%d events=%d views=%d; want 1 1 1", h, e, v)
+	}
+	cancel()
+	<-done
 }

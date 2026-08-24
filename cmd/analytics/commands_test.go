@@ -13,7 +13,7 @@ import (
 func setEnv(t *testing.T, dbPath string) {
 	t.Helper()
 	projects := filepath.Join(t.TempDir(), "projects.json")
-	body := `[{"alias": "app", "name": "App", "allowed_origins": ["https://app.com"]}]`
+	body := `[{"alias": "app", "name": "App", "ingest_keys": [{"key": "ak_test", "label": "web"}], "allowed_origins": ["https://app.com"]}]`
 	if err := os.WriteFile(projects, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -92,5 +92,65 @@ func TestDashboardsRejectsMissingDatabase(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "DASHBOARDS_DB_PATH") {
 		t.Errorf("error = %q, want it to name the missing setting", out.String())
+	}
+}
+
+func TestKeygenPrintsUsableKeys(t *testing.T) {
+	var out bytes.Buffer
+	if code := run([]string{"keygen", "-n", "2"}, &out); code != 0 {
+		t.Fatalf("exit code = %d, want 0 (%s)", code, out.String())
+	}
+	s := out.String()
+	if !strings.Contains(s, "ak_") {
+		t.Errorf("output has no ak_ prefixed key:\n%s", s)
+	}
+	if !strings.Contains(s, "data-key") || !strings.Contains(s, "data-identity") {
+		t.Errorf("output should include a ready-to-paste snippet:\n%s", s)
+	}
+	if !strings.Contains(s, "ingest_keys") {
+		t.Errorf("output should include the projects.json fragment:\n%s", s)
+	}
+	if got := strings.Count(s, `"key":`); got != 2 {
+		t.Errorf("asked for 2 keys, got %d:\n%s", got, s)
+	}
+}
+
+func TestKeygenKeysAreUniqueAndWellFormed(t *testing.T) {
+	var out bytes.Buffer
+	if code := run([]string{"keygen", "-n", "8"}, &out); code != 0 {
+		t.Fatalf("exit code = %d", code)
+	}
+	seen := map[string]bool{}
+	for _, f := range strings.Fields(out.String()) {
+		f = strings.Trim(f, `",`)
+		if !strings.HasPrefix(f, "ak_") {
+			continue
+		}
+		if seen[f] {
+			t.Fatalf("duplicate key %q", f)
+		}
+		// 16 random bytes hex-encoded, plus the "ak_" prefix.
+		if len(f) != 3+32 {
+			t.Errorf("key %q has length %d, want %d", f, len(f), 3+32)
+		}
+		seen[f] = true
+	}
+	if len(seen) != 8 {
+		t.Errorf("got %d distinct keys, want 8", len(seen))
+	}
+}
+
+func TestKeygenRejectsBadCount(t *testing.T) {
+	var out bytes.Buffer
+	if code := run([]string{"keygen", "-n", "0"}, &out); code != 2 {
+		t.Errorf("exit code = %d, want 2", code)
+	}
+}
+
+func TestKeygenAppearsInUsage(t *testing.T) {
+	var out bytes.Buffer
+	run(nil, &out)
+	if !strings.Contains(out.String(), "keygen") {
+		t.Errorf("usage does not mention keygen: %s", out.String())
 	}
 }

@@ -10,7 +10,7 @@ import (
 
 // flatViewBaseColumns are the non-attribute columns of v_events_flat. Every
 // attribute column carries an attr_ prefix, so none can collide with these.
-var flatViewBaseColumns = []string{"id", "project", "event_name", "user_id", "ts"}
+var flatViewBaseColumns = []string{"id", "project", "event_name", "actor_id", "ts"}
 
 // KnownAttributeKeys returns every distinct attribute key present in the raw
 // product_events. attributes is NOT NULL DEFAULT '{}', so json_each is safe

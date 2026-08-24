@@ -20,7 +20,7 @@ import (
 func seedWebDay(t *testing.T, db *DB) {
 	t.Helper()
 	mk := func(id, vis, path, tsS, source, country, device, browser, osN, us, um, uc string) store.WebHit {
-		return store.WebHit{ID: id, Project: "app", TS: ts(tsS), VisitorHash: vis, Path: path,
+		return store.WebHit{ID: id, Project: "app", TS: ts(tsS), ActorID: vis, Path: path,
 			ReferrerSource: source, Country: country, Device: device, Browser: browser, OS: osN,
 			UTMSource: us, UTMMedium: um, UTMCampaign: uc}
 	}
@@ -110,8 +110,8 @@ func TestAggregateWebDayScopesToProjectAndDay(t *testing.T) {
 	ctx := context.Background()
 	seedWebDay(t, db)
 	other := []store.WebHit{
-		{ID: "x1", Project: "other", TS: ts("2026-08-10T10:00:00Z"), VisitorHash: "o1", Path: "/z"},
-		{ID: "x2", Project: "app", TS: ts("2026-08-11T10:00:00Z"), VisitorHash: "v9", Path: "/next-day"},
+		{ID: "x1", Project: "other", TS: ts("2026-08-10T10:00:00Z"), ActorID: "o1", Path: "/z"},
+		{ID: "x2", Project: "app", TS: ts("2026-08-11T10:00:00Z"), ActorID: "v9", Path: "/next-day"},
 	}
 	if err := db.WriteWebHits(ctx, other); err != nil {
 		t.Fatal(err)
@@ -131,7 +131,7 @@ func TestWebDaysBefore(t *testing.T) {
 	ctx := context.Background()
 	seedWebDay(t, db) // 2026-08-10
 	db.WriteWebHits(ctx, []store.WebHit{
-		{ID: "n1", Project: "app", TS: ts("2026-08-15T09:00:00Z"), VisitorHash: "v", Path: "/"},
+		{ID: "n1", Project: "app", TS: ts("2026-08-15T09:00:00Z"), ActorID: "v", Path: "/"},
 	})
 	days, err := db.WebDaysBefore(ctx, "app", day("2026-08-12"))
 	if err != nil {
