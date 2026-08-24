@@ -6,6 +6,7 @@ package jobs
 import (
 	"context"
 	"log/slog"
+	"sort"
 	"time"
 
 	"github.com/dmitry/analytics/internal/civil"
@@ -76,6 +77,38 @@ func (r *Runner) RunDailyPass(ctx context.Context) error {
 		// their raw rows are dropped without a product rollup.
 		ret := r.cfg.RetentionFor(id)
 
+		// Cohorts, actors and identity rollups read raw rows across all
+		// three classes and never delete them, so they run over every day
+		// still present -- not just the aged-out ones. Two reasons: a
+		// web-only project has no app_views to drive them from, and
+		// restricting them to aged-out days would leave the users, groups
+		// and retention pages a whole raw window stale. Every write is
+		// keyed and recomputed, so re-running a day is safe.
+		identityDays, err := r.allRawDays(ctx, id, today.AddDays(1))
+		if err != nil {
+			return err
+		}
+		// Retention is undefined for anonymous projects: actor_id rotates at
+		// midnight, so first_seen_day always equals the day itself and every
+		// cohort would hold nothing but offset 0.
+		identified := false
+		if p := r.cfg.Project(id); p != nil && p.Identity == config.IdentityIdentified {
+			identified = true
+		}
+		for _, day := range identityDays {
+			if identified {
+				if err := r.store.UpsertActors(ctx, id, day); err != nil {
+					r.logger.Error("upsert actors failed", "project", id, "day", day.String(), "error", err)
+				}
+				if err := r.store.AggregateRetentionDay(ctx, id, day); err != nil {
+					r.logger.Error("aggregate retention failed", "project", id, "day", day.String(), "error", err)
+				}
+			}
+			if err := r.store.AggregateIdentityDay(ctx, id, day); err != nil {
+				r.logger.Error("aggregate identity failed", "project", id, "day", day.String(), "error", err)
+			}
+		}
+
 		days, err := r.store.WebDaysBefore(ctx, id, today.AddDays(-ret.Web.RawDays))
 		if err != nil {
 			return err
@@ -97,9 +130,27 @@ func (r *Runner) RunDailyPass(ctx context.Context) error {
 			}
 		}
 
+		appDays, err := r.store.AppDaysBefore(ctx, id, today.AddDays(-ret.App.RawDays))
+		if err != nil {
+			return err
+		}
+		for _, day := range appDays {
+			if err := r.store.AggregateAppDay(ctx, id, day); err != nil {
+				r.logger.Error("aggregate app failed", "project", id, "day", day.String(), "error", err)
+			}
+		}
+
 		if err := r.store.PruneAggregates(ctx, id,
-			today.AddDays(-ret.Web.AggregateDays), today.AddDays(-ret.Product.AggregateDays)); err != nil {
+			today.AddDays(-ret.Web.AggregateDays),
+			today.AddDays(-ret.Product.AggregateDays),
+			today.AddDays(-ret.App.AggregateDays)); err != nil {
 			r.logger.Error("prune failed", "project", id, "error", err)
+		}
+		if err := r.store.PruneActors(ctx, id, today.AddDays(-ret.App.AggregateDays)); err != nil {
+			r.logger.Error("prune actors failed", "project", id, "error", err)
+		}
+		if err := r.store.PruneIdentities(ctx, id, today.AddDays(-ret.App.AggregateDays)); err != nil {
+			r.logger.Error("prune identities failed", "project", id, "error", err)
 		}
 	}
 
@@ -112,6 +163,32 @@ func (r *Runner) RunDailyPass(ctx context.Context) error {
 		r.logger.Error("incremental vacuum failed", "error", err)
 	}
 	return nil
+}
+
+// allRawDays merges the days present in all three raw tables, deduplicated
+// and sorted, so a project is covered whatever mix of surfaces it uses.
+func (r *Runner) allRawDays(ctx context.Context, project string, before civil.Date) ([]civil.Date, error) {
+	seen := map[string]bool{}
+	var out []civil.Date
+	for _, fn := range []func(context.Context, string, civil.Date) ([]civil.Date, error){
+		r.store.WebDaysBefore, r.store.ProductDaysBefore, r.store.AppDaysBefore,
+	} {
+		days, err := fn(ctx, project, before)
+		if err != nil {
+			return nil, err
+		}
+		for _, d := range days {
+			if !seen[d.String()] {
+				seen[d.String()] = true
+				out = append(out, d)
+			}
+		}
+	}
+	// Chronological order matters: AggregateRetentionDay reads first_seen_day
+	// from actors, so an earlier day must be recorded before a later one
+	// references it.
+	sort.Slice(out, func(i, j int) bool { return out[i].String() < out[j].String() })
+	return out, nil
 }
 
 // runScheduled fires whichever jobs are due at the current time. Split out

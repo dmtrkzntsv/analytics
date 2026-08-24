@@ -2,6 +2,10 @@
   {
     "alias": "myapp",
     "name": "My App",
+    "identity": "anonymous",
+    "ingest_keys": [
+      { "key": "REPLACE_ME_RUN_ANALYTICS_KEYGEN", "label": "web" }
+    ],
     "allowed_origins": ["https://myapp.com"]
   }
 ]

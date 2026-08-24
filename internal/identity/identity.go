@@ -100,3 +100,20 @@ func (s *Salter) rotateLocked(ctx context.Context) error {
 	s.salt, s.rotatedAt = salt, s.now()
 	return nil
 }
+
+// ActorHash salts a client-supplied identifier for anonymous mode.
+//
+// Unlike VisitorHash it takes a single identifier rather than IP plus
+// User-Agent. That matters: an app's install_id or a browser's stored
+// visitor id carries real entropy, so the result stays accurate per day
+// where an IP+UA hash collapses behind carrier NAT — every install of a
+// given app version sends an identical User-Agent. The salt still rotates
+// daily, so cross-day linking remains impossible either way.
+func ActorHash(salt, id, project string) string {
+	h := sha256.New()
+	for _, part := range []string{salt, id, project} {
+		h.Write([]byte(part))
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16]
+}

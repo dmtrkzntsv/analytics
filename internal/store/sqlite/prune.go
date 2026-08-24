@@ -18,11 +18,22 @@ var webAggTables = []string{
 
 var productAggTables = []string{"agg_product_daily", "agg_product_totals", "agg_product_attrs"}
 
+var appAggTables = []string{
+	"agg_app_daily", "agg_app_screens", "agg_app_versions",
+	"agg_app_os", "agg_app_devices", "agg_app_countries",
+}
+
+// agg_retention and agg_identity_daily are keyed by cohort_day and day
+// respectively rather than by a per-family retention class, so they follow
+// the app cutoff. agg_retention is pruned by PruneActors, which owns the
+// cohort/actor pair; agg_identity_daily is pruned by PruneIdentities.
+var identityAggTables = []string{"agg_identity_daily"}
+
 // PruneAggregates drops aggregate rows older than the per-family retention
-// cutoffs for one project. Web and product retention are configured
-// separately, hence the two cutoffs. All deletes share a transaction so
+// cutoffs for one project. Web, product and app retention are configured
+// separately, hence the three cutoffs. All deletes share a transaction so
 // retention is applied atomically across tables.
-func (d *DB) PruneAggregates(ctx context.Context, project string, webBefore, productBefore civil.Date) error {
+func (d *DB) PruneAggregates(ctx context.Context, project string, webBefore, productBefore, appBefore civil.Date) error {
 	return d.tx(ctx, func(tx *sql.Tx) error {
 		del := func(tables []string, before civil.Date) error {
 			for _, tbl := range tables {
@@ -37,7 +48,10 @@ func (d *DB) PruneAggregates(ctx context.Context, project string, webBefore, pro
 		if err := del(webAggTables, webBefore); err != nil {
 			return err
 		}
-		return del(productAggTables, productBefore)
+		if err := del(productAggTables, productBefore); err != nil {
+			return err
+		}
+		return del(appAggTables, appBefore)
 	})
 }
 

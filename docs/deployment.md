@@ -199,6 +199,7 @@ buffered in memory when the host died — bounded by `BUFFER_FLUSH_INTERVAL`.
 | Restart | `systemctl restart analytics` |
 | Upgrade | `curl -fsSL …/deploy/install.sh \| sudo bash -s -- --yes && sudo systemctl restart analytics` (or `make build && sudo ./deploy/install.sh --yes` from a checkout) |
 | Apply migrations only | `sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics migrate'` |
+| Generate an ingest key | `analytics keygen -n 1` |
 | Database size | `du -h /var/lib/analytics/analytics.db` |
 | Replication status | `journalctl -u litestream --since -1h` |
 
@@ -208,3 +209,66 @@ downtime across those times does not skip a day.
 
 File logging (`log.file`) is optional and off by default; if enabled, install
 `deploy/logrotate/analytics` into `/etc/logrotate.d/`.
+
+---
+
+## 8. Upgrading to app analytics
+
+This release adds app ingestion and changes the ingest surface. Six things
+break, and two of them require a coordinated deploy — read this before
+upgrading a running install.
+
+### Breaking changes
+
+1. **`ingest_keys` is required.** The service refuses to start until every
+   project in `projects.json` has at least one. This is deliberate: the
+   gentler alternative — key optional, warn when absent — leaves a silently
+   unauthenticated project, which is the exact condition the change exists to
+   remove.
+2. **Every embedded snippet must be rewritten.** `data-key` and
+   `data-identity` replace `data-project`. Old snippets receive `401`.
+3. **`/api/hit` and `/api/event` are removed**, not deprecated. Everything
+   goes to `POST /api/events`.
+4. **An unknown project returns `401`**, not `204`.
+5. **`identity: "anonymous"` (the new default) salts the site-supplied web
+   `user_id`.** A site calling `analytics.identify("u_123")` previously wrote
+   `u_123` straight into the database as a persistent cross-day identifier
+   governed by nothing. Under the new default it is salted and rotated, so
+   **cross-day web funnels and any query joining product events across days
+   stop working** until that project sets `identity: "identified"`. This is a
+   behaviour change on data you may already be collecting, not a config
+   rename.
+6. Migrations 003 and 004 rename `web_hits.visitor_hash` to `actor_id` and
+   `product_events.user_id` to `actor_id`. Any custom SQL you have written
+   against those columns needs updating. The rename is deliberate: in
+   identified mode a column named `…_hash` would hold plaintext identifiers.
+
+### Order of operations
+
+Steps 2 and 3 are the coordinated pair. Between them, old snippets get `401`,
+so schedule them together — ideally within the same maintenance window.
+
+```bash
+# 1. Generate a key per client and add them to projects.json.
+analytics keygen -n 2
+sudo -e /etc/analytics/projects.json
+
+# 2. Deploy the new binary. Migrations 003/004 run on boot.
+curl -fsSL https://…/deploy/install.sh | sudo bash -s -- --yes
+sudo systemctl restart analytics
+
+# 3. Update every site snippet, then deploy the sites.
+#    <script defer src="https://…/js/script.js"
+#            data-key="ak_…" data-identity="anonymous"></script>
+
+# 4. Confirm traffic is arriving under each key label.
+journalctl -u analytics -f | grep 'ingest summary'
+```
+
+Step 4 is also how you retire a key later: watch its label fall to zero, then
+set `"disabled": true`.
+
+### Rolling back
+
+Migrations are forward-only. Restore from a litestream replica if you need to
+go back — see §6.

@@ -42,7 +42,7 @@ func testConfig(t *testing.T, addr, dbPath string) *config.Config {
 		"BUFFER_FLUSH_MAX_EVENTS": "2",
 		"BUFFER_FLUSH_INTERVAL":   "50ms",
 		"BUFFER_CAPACITY":         "100",
-	}, `[{"alias": "app", "name": "App", "allowed_origins": ["https://app.com"]}]`)
+	}, `[{"alias": "app", "name": "App", "ingest_keys": [{"key": "ak_test", "label": "web"}], "allowed_origins": ["https://app.com"]}]`)
 }
 
 func waitHealthy(t *testing.T, base string) {
@@ -89,17 +89,26 @@ func TestServeEndToEnd(t *testing.T) {
 		resp.Body.Close()
 		return resp
 	}
-	if r := post("/api/hit", "https://app.com",
-		`{"project":"app","url":"https://app.com/pricing","referrer":""}`); r.StatusCode != 202 {
-		t.Fatalf("hit: %d", r.StatusCode)
+	// One envelope covering all three destinations.
+	if r := post("/api/events", "https://app.com",
+		`{"key":"ak_test","attributes":{"$platform":"ios","$app_version":"1.0"},
+		  "events":[
+		    {"name":"$pageview","attributes":{"$url":"https://app.com/pricing"}},
+		    {"name":"$screen_view","attributes":{"$screen":"/settings"}},
+		    {"name":"signup","attributes":{"plan":"pro"}}]}`); r.StatusCode != 202 {
+		t.Fatalf("events: %d", r.StatusCode)
 	}
-	if r := post("/api/event", "",
-		`{"project":"app","name":"signup","user_id":"u1","attributes":{"plan":"pro"}}`); r.StatusCode != 202 {
-		t.Fatalf("event: %d", r.StatusCode)
+	if r := post("/api/events", "",
+		`{"key":"ak_test","events":[{"name":"signup","attributes":{"plan":"pro"}}]}`); r.StatusCode != 202 {
+		t.Fatalf("keyed event without Origin: %d", r.StatusCode)
 	}
-	if r := post("/api/hit", "https://evil.com",
-		`{"project":"app","url":"https://app.com/"}`); r.StatusCode != 403 {
+	if r := post("/api/events", "https://evil.com",
+		`{"key":"ak_test","events":[{"name":"x"}]}`); r.StatusCode != 403 {
 		t.Fatalf("evil origin: %d", r.StatusCode)
+	}
+	if r := post("/api/events", "",
+		`{"key":"nope","events":[{"name":"x"}]}`); r.StatusCode != 401 {
+		t.Fatalf("bad key: %d", r.StatusCode)
 	}
 
 	// The tracking snippet must be served by the same process.
@@ -161,7 +170,7 @@ func TestServeRestartsOnExistingDatabase(t *testing.T) {
 		go func() { done <- Serve(ctx, testConfig(t, addr, dbPath), slog.Default()) }()
 		base := "http://" + addr
 		waitHealthy(t, base)
-		req, err := http.NewRequest("POST", base+"/api/hit", strings.NewReader(body))
+		req, err := http.NewRequest("POST", base+"/api/events", strings.NewReader(body))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -185,8 +194,8 @@ func TestServeRestartsOnExistingDatabase(t *testing.T) {
 			t.Fatal("serve did not shut down")
 		}
 	}
-	run(`{"project":"app","url":"https://app.com/one"}`)
-	run(`{"project":"app","url":"https://app.com/two"}`)
+	run(`{"key":"ak_test","events":[{"name":"$pageview","attributes":{"$url":"https://app.com/one"}}]}`)
+	run(`{"key":"ak_test","events":[{"name":"$pageview","attributes":{"$url":"https://app.com/two"}}]}`)
 
 	st, err := store.Open("sqlite://" + dbPath)
 	if err != nil {
@@ -273,8 +282,8 @@ func TestServeNeverPersistsIPOrUserAgent(t *testing.T) {
 	base := "http://" + addr
 	waitHealthy(t, base)
 
-	req, err := http.NewRequest("POST", base+"/api/hit",
-		strings.NewReader(`{"project":"app","url":"https://app.com/pricing"}`))
+	req, err := http.NewRequest("POST", base+"/api/events",
+		strings.NewReader(`{"key":"ak_test","events":[{"name":"$pageview","attributes":{"$url":"https://app.com/pricing"}}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}

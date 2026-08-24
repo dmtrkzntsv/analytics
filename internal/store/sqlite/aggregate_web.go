@@ -12,22 +12,22 @@ import (
 // a per-visitor run of hits with gaps <= 30 min (spec §9).
 const sessionsCTE = `
 WITH hits AS (
-  SELECT visitor_hash, CAST(strftime('%s', ts) AS INTEGER) AS t
+  SELECT actor_id, CAST(strftime('%s', ts) AS INTEGER) AS t
   FROM web_hits WHERE project = :p AND ts >= :from AND ts < :to
 ),
 marked AS (
-  SELECT visitor_hash, t,
+  SELECT actor_id, t,
          CASE WHEN LAG(t) OVER w IS NULL OR t - LAG(t) OVER w > 1800 THEN 1 ELSE 0 END AS new_session
-  FROM hits WINDOW w AS (PARTITION BY visitor_hash ORDER BY t)
+  FROM hits WINDOW w AS (PARTITION BY actor_id ORDER BY t)
 ),
 numbered AS (
-  SELECT visitor_hash, t,
-         SUM(new_session) OVER (PARTITION BY visitor_hash ORDER BY t) AS session_no
+  SELECT actor_id, t,
+         SUM(new_session) OVER (PARTITION BY actor_id ORDER BY t) AS session_no
   FROM marked
 ),
 sessions AS (
-  SELECT visitor_hash, session_no, COUNT(*) AS hit_count, MAX(t) - MIN(t) AS duration
-  FROM numbered GROUP BY visitor_hash, session_no
+  SELECT actor_id, session_no, COUNT(*) AS hit_count, MAX(t) - MIN(t) AS duration
+  FROM numbered GROUP BY actor_id, session_no
 )`
 
 func dayRange(day civil.Date) (string, string) {
@@ -82,7 +82,7 @@ func (d *DB) AggregateWebDay(ctx context.Context, project string, day civil.Date
 			INSERT OR REPLACE INTO agg_web_daily
 			  (project, day, visitors, pageviews, sessions, bounces, duration_sec)
 			SELECT :p, :day,
-			  (SELECT COUNT(DISTINCT visitor_hash) FROM hits),
+			  (SELECT COUNT(DISTINCT actor_id) FROM hits),
 			  (SELECT COUNT(*) FROM hits),
 			  COUNT(*),
 			  SUM(CASE WHEN hit_count = 1 THEN 1 ELSE 0 END),
@@ -103,7 +103,7 @@ func (d *DB) AggregateWebDay(ctx context.Context, project string, day civil.Date
 		}
 		for _, dm := range dims {
 			q := fmt.Sprintf(`INSERT OR REPLACE INTO %s (project, day, %s, visitors, pageviews)
-				SELECT :p, :day, %s, COUNT(DISTINCT visitor_hash), COUNT(*)
+				SELECT :p, :day, %s, COUNT(DISTINCT actor_id), COUNT(*)
 				FROM web_hits
 				WHERE project = :p AND ts >= :from AND ts < :to %s
 				GROUP BY %s`, dm.table, dm.cols, dm.group, dm.where, dm.group)

@@ -1,7 +1,7 @@
 # Analytics
 
 ```sql active_projects
-select alias, name
+select alias, name, identity
 from analytics.projects
 where archived_at is null and alias != ''
 order by name
@@ -18,7 +18,7 @@ order by name
 
 {#each active_projects as p}
 
-- [{p.name} — web](/web/{p.alias}) · [product](/product/{p.alias})
+- **{p.name}** ({p.identity}) — [web](/web/{p.alias}) · [app](/app/{p.alias}) · [product](/product/{p.alias}) · [users](/users/{p.alias}) · [groups](/groups/{p.alias}) · [retention](/retention/{p.alias})
 
 {/each}
 
@@ -28,7 +28,7 @@ order by name
 
 {#each archived_projects as p}
 
-- [{p.name} — web](/web/{p.alias}) · [product](/product/{p.alias})
+- **{p.name}** — [web](/web/{p.alias}) · [app](/app/{p.alias}) · [product](/product/{p.alias})
 
 {/each}
 

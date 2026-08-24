@@ -8,7 +8,9 @@ import (
 	"time"
 )
 
-const minimalProjects = `[{"alias": "app", "name": "App", "allowed_origins": ["https://app.com"]}]`
+const minimalProjects = `[{"alias": "app", "name": "App",
+	"ingest_keys": [{"key": "ak_test", "label": "web"}],
+	"allowed_origins": ["https://app.com"]}]`
 
 // load runs FromEnv against a var map, writing projects to a temp file and
 // pointing PROJECTS_FILE at it unless the map already sets one.
@@ -93,6 +95,7 @@ func TestEnvOverrides(t *testing.T) {
 func TestRetentionOverrideMerge(t *testing.T) {
 	c, err := load(t, map[string]string{"DATABASE_URL": "sqlite:///tmp/a.db"}, `[{
 	  "alias": "app", "name": "App", "allowed_origins": ["https://app.com"],
+	  "ingest_keys": [{"key": "ak_1", "label": "web"}],
 	  "retention": {"product": {"raw_days": 60}}
 	}]`)
 	if err != nil {
@@ -112,8 +115,10 @@ func TestRetentionOverrideMerge(t *testing.T) {
 
 func TestProductAggregationDefaults(t *testing.T) {
 	c, err := load(t, map[string]string{"DATABASE_URL": "sqlite:///tmp/a.db"}, `[
-	  {"alias": "a", "name": "A", "allowed_origins": ["https://a.com"]},
+	  {"alias": "a", "name": "A", "allowed_origins": ["https://a.com"],
+	   "ingest_keys": [{"key": "ak_a", "label": "web"}]},
 	  {"alias": "b", "name": "B", "allowed_origins": ["https://b.com"],
+	   "ingest_keys": [{"key": "ak_b", "label": "web"}],
 	   "product_aggregation": {"enabled": true, "attributes": {"subscribed": ["plan"]}}}
 	]`)
 	if err != nil {
@@ -185,5 +190,149 @@ func TestLoadFromProcessEnv(t *testing.T) {
 	}
 	if c.Log.Level != "warn" || len(c.Projects) != 1 {
 		t.Errorf("Load() = %+v", c)
+	}
+}
+
+// --- ingest keys, identity mode, app retention (app analytics spec §4/§5/§9) ---
+
+func loadProjects(t *testing.T, projects string) (*Config, error) {
+	t.Helper()
+	return load(t, map[string]string{"DATABASE_URL": "sqlite:///tmp/a.db"}, projects)
+}
+
+func mustLoadProjects(t *testing.T, projects string) *Config {
+	t.Helper()
+	c, err := loadProjects(t, projects)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	return c
+}
+
+func TestParseProjectsIngestKeys(t *testing.T) {
+	ps, err := ParseProjects(strings.NewReader(`[
+	  {"alias":"a","name":"A","identity":"identified",
+	   "ingest_keys":[{"key":"ak_1","label":"web"},{"key":"ak_2","label":"ios","disabled":true}]}
+	]`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(ps) != 1 || len(ps[0].IngestKeys) != 2 {
+		t.Fatalf("got %+v", ps)
+	}
+	if ps[0].Identity != "identified" {
+		t.Errorf("identity = %q", ps[0].Identity)
+	}
+	if !ps[0].IngestKeys[1].Disabled {
+		t.Error("second key should be disabled")
+	}
+}
+
+func TestIdentityDefaultsToAnonymous(t *testing.T) {
+	c := mustLoadProjects(t, `[{"alias":"a","name":"A","ingest_keys":[{"key":"ak_1","label":"w"}]}]`)
+	if got := c.Project("a").Identity; got != IdentityAnonymous {
+		t.Errorf("identity = %q, want anonymous", got)
+	}
+}
+
+func TestRejectsUnknownIdentity(t *testing.T) {
+	if _, err := loadProjects(t, `[{"alias":"a","name":"A","identity":"pseudonymous",
+	  "ingest_keys":[{"key":"ak_1","label":"w"}]}]`); err == nil {
+		t.Fatal("want error for unknown identity mode")
+	}
+}
+
+func TestRejectsProjectWithoutKeys(t *testing.T) {
+	if _, err := loadProjects(t, `[{"alias":"a","name":"A"}]`); err == nil {
+		t.Fatal("want error when ingest_keys is missing")
+	}
+}
+
+func TestRejectsEmptyIngestKey(t *testing.T) {
+	if _, err := loadProjects(t, `[{"alias":"a","name":"A","ingest_keys":[{"key":"","label":"w"}]}]`); err == nil {
+		t.Fatal("want error for empty ingest key")
+	}
+}
+
+func TestRejectsDuplicateKeyAcrossProjects(t *testing.T) {
+	if _, err := loadProjects(t, `[
+	  {"alias":"a","name":"A","ingest_keys":[{"key":"dup","label":"w"}]},
+	  {"alias":"b","name":"B","ingest_keys":[{"key":"dup","label":"w"}]}]`); err == nil {
+		t.Fatal("want error for duplicate key across projects")
+	}
+}
+
+func TestProjectByKey(t *testing.T) {
+	c := mustLoadProjects(t, `[
+	  {"alias":"a","name":"A","ingest_keys":[{"key":"ak_1","label":"web"},{"key":"ak_off","label":"old","disabled":true}]},
+	  {"alias":"b","name":"B","ingest_keys":[{"key":"ak_2","label":"ios"}]}]`)
+
+	p, label, ok := c.ProjectByKey("ak_1")
+	if !ok || p.Alias != "a" || label != "web" {
+		t.Fatalf("ak_1 -> %v %q %v", p, label, ok)
+	}
+	if p, _, ok := c.ProjectByKey("ak_2"); !ok || p.Alias != "b" {
+		t.Errorf("ak_2 -> %v %v", p, ok)
+	}
+	if _, _, ok := c.ProjectByKey("ak_off"); ok {
+		t.Error("disabled key must not resolve")
+	}
+	if _, _, ok := c.ProjectByKey("nope"); ok {
+		t.Error("unknown key must not resolve")
+	}
+	if _, _, ok := c.ProjectByKey(""); ok {
+		t.Error("empty key must not resolve")
+	}
+}
+
+func TestDisabledKeyProjects(t *testing.T) {
+	c := mustLoadProjects(t, `[
+	  {"alias":"a","name":"A","ingest_keys":[{"key":"ak_1","label":"w","disabled":true}]},
+	  {"alias":"b","name":"B","ingest_keys":[{"key":"ak_2","label":"w"}]}]`)
+	got := c.DisabledKeyProjects()
+	if len(got) != 1 || got[0] != "a" {
+		t.Fatalf("DisabledKeyProjects() = %v, want [a]", got)
+	}
+}
+
+func TestAppRetentionDefaultsAndMaxEventAge(t *testing.T) {
+	c := mustLoadProjects(t, `[{"alias":"a","name":"A","ingest_keys":[{"key":"k","label":"w"}]}]`)
+	if c.Retention.App.RawDays != 30 || c.Retention.App.AggregateDays != 365 {
+		t.Fatalf("app retention = %+v", c.Retention.App)
+	}
+	if want := 30 * 24 * time.Hour; c.MaxEventAge() != want {
+		t.Errorf("MaxEventAge() = %v, want %v", c.MaxEventAge(), want)
+	}
+}
+
+func TestAppRetentionFromEnv(t *testing.T) {
+	c, err := load(t, map[string]string{
+		"DATABASE_URL":                 "sqlite:///tmp/a.db",
+		"RETENTION_APP_RAW_DAYS":       "14",
+		"RETENTION_APP_AGGREGATE_DAYS": "90",
+	}, minimalProjects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Retention.App.RawDays != 14 || c.Retention.App.AggregateDays != 90 {
+		t.Errorf("app retention = %+v", c.Retention.App)
+	}
+}
+
+func TestRetentionForAppOverride(t *testing.T) {
+	c := mustLoadProjects(t, `[{"alias":"a","name":"A",
+	  "ingest_keys":[{"key":"k","label":"w"}],
+	  "retention":{"app":{"raw_days":14}}}]`)
+	r := c.RetentionFor("a")
+	if r.App.RawDays != 14 || r.App.AggregateDays != 365 {
+		t.Fatalf("merged app retention = %+v", r.App)
+	}
+}
+
+func TestRejectsNegativeAppRetention(t *testing.T) {
+	if _, err := loadProjects(t, `[{"alias":"a","name":"A",
+	  "ingest_keys":[{"key":"k","label":"w"}],
+	  "retention":{"app":{"raw_days":-1}}}]`); err == nil {
+		t.Fatal("want error for negative app retention")
 	}
 }

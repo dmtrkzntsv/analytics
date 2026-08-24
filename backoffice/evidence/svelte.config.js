@@ -63,7 +63,19 @@ function prerenderEntries() {
 		console.warn(`svelte.config.js: could not read project aliases (${err.message})`);
 	}
 	if (aliases.length === 0) aliases = [PLACEHOLDER];
-	return ['*', ...aliases.flatMap((a) => [`/web/${a}`, `/product/${a}`])];
+	// Every templated route needs at least one entry, or the build fails with
+	// "marked as prerenderable, but were not prerendered".
+	return [
+		'*',
+		...aliases.flatMap((a) => [
+			`/web/${a}`,
+			`/product/${a}`,
+			`/app/${a}`,
+			`/users/${a}`,
+			`/groups/${a}`,
+			`/retention/${a}`
+		])
+	];
 }
 
 export default {

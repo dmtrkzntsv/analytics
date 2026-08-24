@@ -20,6 +20,7 @@ import (
 )
 
 const jobsProjects = `[{"alias": "app", "name": "App", "allowed_origins": ["https://a.com"],
+	"ingest_keys": [{"key": "ak_app", "label": "web"}],
   "product_aggregation": {"enabled": true, "attributes": {"*": ["plan"]}, "top_n": 50}}]`
 
 // jobsVars pins the retention windows the assertions below rely on.
@@ -91,7 +92,7 @@ func TestRunDailyPassAggregatesOldDays(t *testing.T) {
 	ctx := context.Background()
 	// Old day (beyond the 7-day raw window relative to fake now 2026-08-22).
 	if err := st.WriteWebHits(ctx, []store.WebHit{
-		{ID: "1", Project: "app", TS: mustTime("2026-08-10T10:00:00Z"), VisitorHash: "v", Path: "/"}}); err != nil {
+		{ID: "1", Project: "app", TS: mustTime("2026-08-10T10:00:00Z"), ActorID: "v", Path: "/"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.WriteProductEvents(ctx, []store.ProductEvent{
@@ -101,7 +102,7 @@ func TestRunDailyPassAggregatesOldDays(t *testing.T) {
 	}
 	// Recent day (inside the window) must survive as raw.
 	if err := st.WriteWebHits(ctx, []store.WebHit{
-		{ID: "3", Project: "app", TS: mustTime("2026-08-21T10:00:00Z"), VisitorHash: "v", Path: "/"}}); err != nil {
+		{ID: "3", Project: "app", TS: mustTime("2026-08-21T10:00:00Z"), ActorID: "v", Path: "/"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.RunDailyPass(ctx); err != nil {
@@ -176,7 +177,7 @@ func TestRunDailyPassCoversArchivedProjects(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := st.WriteWebHits(ctx, []store.WebHit{
-		{ID: "1", Project: "gone", TS: mustTime("2026-08-10T10:00:00Z"), VisitorHash: "v", Path: "/"}}); err != nil {
+		{ID: "1", Project: "gone", TS: mustTime("2026-08-10T10:00:00Z"), ActorID: "v", Path: "/"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.RunDailyPass(ctx); err != nil {
@@ -194,14 +195,16 @@ func TestRunDailyPassCoversArchivedProjects(t *testing.T) {
 // A per-project retention override must win over the global window.
 func TestRunDailyPassHonoursProjectRetention(t *testing.T) {
 	const projectsJSON = `[
-        {"alias": "app", "name": "App", "allowed_origins": ["https://a.com"]},
+        {"alias": "app", "name": "App", "allowed_origins": ["https://a.com"],
+         "ingest_keys": [{"key": "ak_app2", "label": "web"}]},
         {"alias": "keep", "name": "Keep", "allowed_origins": ["https://b.com"],
+         "ingest_keys": [{"key": "ak_keep", "label": "web"}],
          "retention": {"web": {"raw_days": 90}}}]`
 	st, _, r := setup(t, projectsJSON)
 	ctx := context.Background()
 	hits := []store.WebHit{
-		{ID: "1", Project: "app", TS: mustTime("2026-08-10T10:00:00Z"), VisitorHash: "v", Path: "/"},
-		{ID: "2", Project: "keep", TS: mustTime("2026-08-10T10:00:00Z"), VisitorHash: "v", Path: "/"},
+		{ID: "1", Project: "app", TS: mustTime("2026-08-10T10:00:00Z"), ActorID: "v", Path: "/"},
+		{ID: "2", Project: "keep", TS: mustTime("2026-08-10T10:00:00Z"), ActorID: "v", Path: "/"},
 	}
 	if err := st.WriteWebHits(ctx, hits); err != nil {
 		t.Fatal(err)
@@ -315,5 +318,220 @@ func TestRunBootCatchUpAndCancel(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Run did not return after cancel")
+	}
+}
+
+// --- app class, cohorts and identities ---
+
+const identifiedProjects = `[{"alias": "app", "name": "App", "identity": "identified",
+	"allowed_origins": ["https://a.com"],
+	"ingest_keys": [{"key": "ak_app", "label": "web"}]}]`
+
+const anonymousProjects = `[{"alias": "app", "name": "App", "identity": "anonymous",
+	"allowed_origins": ["https://a.com"],
+	"ingest_keys": [{"key": "ak_app", "label": "web"}]}]`
+
+// appVars uses a 7-day app raw window so the fixed 2026-08-10 fixture day is
+// already outside it relative to the fake now of 2026-08-22.
+var appVars = map[string]string{
+	"RETENTION_WEB_RAW_DAYS": "7", "RETENTION_WEB_AGGREGATE_DAYS": "365",
+	"RETENTION_PRODUCT_RAW_DAYS": "7", "RETENTION_PRODUCT_AGGREGATE_DAYS": "365",
+	"RETENTION_APP_RAW_DAYS": "7", "RETENTION_APP_AGGREGATE_DAYS": "365",
+}
+
+func setupApp(t *testing.T, projectsJSON string) (store.Store, *Runner, *sql.DB) {
+	t.Helper()
+	cfg := configtest.Load(t, appVars, projectsJSON)
+	st, path := openStoreAt(t)
+	now := func() time.Time { return time.Date(2026, 8, 22, 4, 0, 0, 0, time.UTC) }
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { raw.Close() })
+	return st, New(st, cfg, identity.NewSalter(st, now), slog.Default(), now), raw
+}
+
+func seedAppDay(t *testing.T, st store.Store, actors ...string) {
+	t.Helper()
+	var views []store.AppView
+	for i, a := range actors {
+		views = append(views, store.AppView{
+			ID: "v" + a + string(rune('a'+i)), Project: "app",
+			TS:         mustTime("2026-08-10T10:00:00Z"),
+			ReceivedAt: mustTime("2026-08-10T10:00:00Z"),
+			ActorID:    a, UserID: "u-" + a, GroupID: "org9",
+			Screen: "/home", Platform: "ios", AppVersion: "2.4.1",
+		})
+	}
+	if err := st.WriteAppViews(context.Background(), views); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func count(t *testing.T, db *sql.DB, query string) int {
+	t.Helper()
+	var n int
+	if err := db.QueryRow(query).Scan(&n); err != nil {
+		t.Fatalf("%s: %v", query, err)
+	}
+	return n
+}
+
+func TestRunDailyPassAggregatesAppDays(t *testing.T) {
+	st, r, db := setupApp(t, identifiedProjects)
+	ctx := context.Background()
+	seedAppDay(t, st, "a", "b")
+
+	if err := r.RunDailyPass(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if n := count(t, db, `SELECT COUNT(*) FROM agg_app_daily`); n != 1 {
+		t.Errorf("agg_app_daily rows = %d, want 1", n)
+	}
+	if n := count(t, db, `SELECT actives FROM agg_app_daily`); n != 2 {
+		t.Errorf("actives = %d, want 2", n)
+	}
+	if n := count(t, db, `SELECT COUNT(*) FROM app_views`); n != 0 {
+		t.Errorf("raw app_views left = %d, want 0", n)
+	}
+	if n := count(t, db, `SELECT COUNT(*) FROM actors`); n != 2 {
+		t.Errorf("actors = %d, want 2", n)
+	}
+	if n := count(t, db, `SELECT COUNT(*) FROM agg_retention WHERE day_offset=0`); n != 1 {
+		t.Errorf("cohort rows = %d, want 1", n)
+	}
+	if n := count(t, db, `SELECT COUNT(*) FROM agg_identity_daily WHERE kind='group'`); n != 1 {
+		t.Errorf("group aggregate rows = %d, want 1", n)
+	}
+	if n := count(t, db, `SELECT users FROM agg_identity_daily WHERE kind='group'`); n != 2 {
+		t.Errorf("users in group = %d, want 2", n)
+	}
+}
+
+func TestRunDailyPassSkipsCohortsForAnonymousProjects(t *testing.T) {
+	st, r, db := setupApp(t, anonymousProjects)
+	ctx := context.Background()
+	seedAppDay(t, st, "a")
+
+	if err := r.RunDailyPass(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if n := count(t, db, `SELECT COUNT(*) FROM actors`); n != 0 {
+		t.Errorf("actors = %d; retention is undefined under daily rotation", n)
+	}
+	if n := count(t, db, `SELECT COUNT(*) FROM agg_retention`); n != 0 {
+		t.Errorf("agg_retention rows = %d, want 0", n)
+	}
+	// Identity aggregates and app rollups still run: only cohorts are skipped.
+	if n := count(t, db, `SELECT COUNT(*) FROM agg_app_daily`); n != 1 {
+		t.Errorf("agg_app_daily rows = %d, want 1", n)
+	}
+	if n := count(t, db, `SELECT COUNT(*) FROM agg_identity_daily`); n == 0 {
+		t.Error("identity aggregates must still run for anonymous projects")
+	}
+}
+
+func TestRunDailyPassIsIdempotentAcrossAppSteps(t *testing.T) {
+	st, r, db := setupApp(t, identifiedProjects)
+	ctx := context.Background()
+	seedAppDay(t, st, "a", "b")
+
+	for i := 0; i < 2; i++ {
+		if err := r.RunDailyPass(ctx); err != nil {
+			t.Fatalf("pass %d: %v", i, err)
+		}
+	}
+	if n := count(t, db, `SELECT views FROM agg_app_daily`); n != 2 {
+		t.Errorf("views = %d after two passes, want 2", n)
+	}
+	if n := count(t, db, `SELECT COUNT(*) FROM agg_retention`); n != 1 {
+		t.Errorf("agg_retention rows = %d after two passes, want 1", n)
+	}
+}
+
+func TestRunDailyPassPrunesActorsAndIdentities(t *testing.T) {
+	st, r, db := setupApp(t, identifiedProjects)
+	ctx := context.Background()
+
+	if err := st.UpsertIdentities(ctx, []store.Identity{
+		{Project: "app", Kind: store.KindUser, ID: "old", Name: "Gone"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE identities SET last_seen_day='2020-01-01'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO actors VALUES ('app','stale','app','2020-01-01','2020-01-01')`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := r.RunDailyPass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, db, `SELECT COUNT(*) FROM actors`); n != 0 {
+		t.Errorf("stale actors left = %d, want 0", n)
+	}
+	if n := count(t, db, `SELECT COUNT(*) FROM identities`); n != 0 {
+		t.Errorf("stale identities left = %d, want 0", n)
+	}
+}
+
+// A web-only identified project must still get cohorts and identity rollups:
+// they used to be driven off app_views alone, which meant a project with no
+// app never got either.
+func TestRunDailyPassCoversWebOnlyProjectsForCohorts(t *testing.T) {
+	st, r, db := setupApp(t, identifiedProjects)
+	ctx := context.Background()
+	ts := mustTime("2026-08-10T10:00:00Z")
+
+	if err := st.WriteWebHits(ctx, []store.WebHit{
+		{ID: "w1", Project: "app", TS: ts, ReceivedAt: ts, ActorID: "a",
+			UserID: "u1", GroupID: "org9", Path: "/"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RunDailyPass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, db, `SELECT COUNT(*) FROM actors`); n != 1 {
+		t.Errorf("actors = %d for a web-only project, want 1", n)
+	}
+	if n := count(t, db, `SELECT COUNT(*) FROM agg_retention`); n != 1 {
+		t.Errorf("agg_retention rows = %d, want 1", n)
+	}
+	if n := count(t, db, `SELECT COUNT(*) FROM agg_identity_daily WHERE kind='user'`); n != 1 {
+		t.Errorf("user aggregate rows = %d, want 1", n)
+	}
+}
+
+// Cohorts must not lag the raw-retention window. They read raw rows without
+// deleting them, so they cover days still inside the window too — otherwise
+// the retention page would be a whole window stale.
+func TestRunDailyPassComputesCohortsForRecentDays(t *testing.T) {
+	st, r, db := setupApp(t, identifiedProjects)
+	ctx := context.Background()
+	// Two days before the fake now of 2026-08-22, well inside the 7-day
+	// app raw window used by appVars.
+	recent := mustTime("2026-08-20T10:00:00Z")
+
+	if err := st.WriteAppViews(ctx, []store.AppView{
+		{ID: "r1", Project: "app", TS: recent, ReceivedAt: recent, ActorID: "a",
+			UserID: "u1", Screen: "/home", Platform: "ios"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RunDailyPass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, db, `SELECT COUNT(*) FROM agg_retention WHERE cohort_day='2026-08-20'`); n != 1 {
+		t.Errorf("cohort rows for an in-window day = %d, want 1", n)
+	}
+	// The raw row itself must survive: it is inside the retention window.
+	if n := count(t, db, `SELECT COUNT(*) FROM app_views`); n != 1 {
+		t.Errorf("raw app_views = %d; an in-window day must not be aggregated away", n)
 	}
 }
