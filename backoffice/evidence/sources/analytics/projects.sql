@@ -1,1 +1,1 @@
-select alias, name, archived_at from projects
+select alias, name, identity, archived_at from projects
