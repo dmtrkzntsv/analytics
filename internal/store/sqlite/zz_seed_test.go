@@ -50,7 +50,7 @@ func TestSeedEvidenceFixture(t *testing.T) {
 			evs = append(evs, store.ProductEvent{
 				ID: fmt.Sprintf("e%d-%d", d, i), Project: "app",
 				EventName: []string{"signup", "subscribed"}[i%2],
-				ActorID:    fmt.Sprintf("u%d", i%3), TS: ts,
+				ActorID:   fmt.Sprintf("u%d", i%3), TS: ts,
 				Attributes: map[string]string{"plan": []string{"pro", "free"}[i%2]},
 			})
 		}
