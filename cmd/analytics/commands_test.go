@@ -13,7 +13,7 @@ import (
 func setEnv(t *testing.T, dbPath string) {
 	t.Helper()
 	projects := filepath.Join(t.TempDir(), "projects.json")
-	body := `[{"alias": "app", "name": "App", "allowed_origins": ["https://app.com"]}]`
+	body := `[{"alias": "app", "name": "App", "ingest_keys": [{"key": "ak_test", "label": "web"}], "allowed_origins": ["https://app.com"]}]`
 	if err := os.WriteFile(projects, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}

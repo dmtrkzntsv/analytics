@@ -44,14 +44,14 @@ func (d *DB) AggregateProductDay(ctx context.Context, project string, day civil.
 func (d *DB) rollupProduct(ctx context.Context, tx *sql.Tx, project string, day civil.Date, from, to string, agg store.ProductAggSettings) error {
 	if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO agg_product_daily
 		(project, day, event_name, count, unique_users)
-		SELECT project, ?, event_name, COUNT(*), COUNT(DISTINCT user_id)
+		SELECT project, ?, event_name, COUNT(*), COUNT(DISTINCT actor_id)
 		FROM product_events WHERE project=? AND ts>=? AND ts<?
 		GROUP BY event_name`, day.String(), project, from, to); err != nil {
 		return fmt.Errorf("agg_product_daily: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO agg_product_totals
 		(project, day, total_events, active_users)
-		SELECT project, ?, COUNT(*), COUNT(DISTINCT user_id)
+		SELECT project, ?, COUNT(*), COUNT(DISTINCT actor_id)
 		FROM product_events WHERE project=? AND ts>=? AND ts<?
 		GROUP BY project`, day.String(), project, from, to); err != nil {
 		return fmt.Errorf("agg_product_totals: %w", err)
@@ -103,7 +103,7 @@ func (d *DB) rollupAttr(ctx context.Context, tx *sql.Tx, project string, day civ
 	// Top-N values by count.
 	if _, err := tx.ExecContext(ctx, `
 		WITH counted AS (
-		  SELECT json_extract(attributes, :path) AS v, COUNT(*) AS c, COUNT(DISTINCT user_id) AS u
+		  SELECT json_extract(attributes, :path) AS v, COUNT(*) AS c, COUNT(DISTINCT actor_id) AS u
 		  FROM product_events
 		  WHERE project=:p AND ts>=:from AND ts<:to AND event_name=:event
 		    AND json_extract(attributes, :path) IS NOT NULL
@@ -128,7 +128,7 @@ func (d *DB) rollupAttr(ctx context.Context, tx *sql.Tx, project string, day civ
 		keep AS (SELECT v FROM ranked WHERE rn <= :n)
 		INSERT OR REPLACE INTO agg_product_attrs
 		  (project, day, event_name, attr_key, attr_value, count, unique_users)
-		SELECT :p, :day, :event, :key, '(other)', COUNT(*), COUNT(DISTINCT user_id)
+		SELECT :p, :day, :event, :key, '(other)', COUNT(*), COUNT(DISTINCT actor_id)
 		FROM product_events
 		WHERE project=:p AND ts>=:from AND ts<:to AND event_name=:event
 		  AND json_extract(attributes, :path) IS NOT NULL

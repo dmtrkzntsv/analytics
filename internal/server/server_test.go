@@ -41,7 +41,7 @@ const chromeUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (
 func testServer(t *testing.T) (*fakeQueue, http.Handler) {
 	t.Helper()
 	cfg := configtest.Load(t, nil,
-		`[{"alias": "app", "name": "App", "allowed_origins": ["https://app.com"]}]`)
+		`[{"alias": "app", "name": "App", "ingest_keys": [{"key": "ak_test", "label": "web"}], "allowed_origins": ["https://app.com"]}]`)
 	g, _ := geo.New("cloudflare://", t.TempDir(), slog.Default())
 	q := &fakeQueue{}
 	return q, New(cfg, q, g, fixedSalt{}, slog.Default())

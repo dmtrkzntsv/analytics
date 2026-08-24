@@ -98,7 +98,9 @@ func (r *Runner) RunDailyPass(ctx context.Context) error {
 		}
 
 		if err := r.store.PruneAggregates(ctx, id,
-			today.AddDays(-ret.Web.AggregateDays), today.AddDays(-ret.Product.AggregateDays)); err != nil {
+			today.AddDays(-ret.Web.AggregateDays),
+			today.AddDays(-ret.Product.AggregateDays),
+			today.AddDays(-ret.App.AggregateDays)); err != nil {
 			r.logger.Error("prune failed", "project", id, "error", err)
 		}
 	}

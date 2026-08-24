@@ -42,7 +42,7 @@ func testConfig(t *testing.T, addr, dbPath string) *config.Config {
 		"BUFFER_FLUSH_MAX_EVENTS": "2",
 		"BUFFER_FLUSH_INTERVAL":   "50ms",
 		"BUFFER_CAPACITY":         "100",
-	}, `[{"alias": "app", "name": "App", "allowed_origins": ["https://app.com"]}]`)
+	}, `[{"alias": "app", "name": "App", "ingest_keys": [{"key": "ak_test", "label": "web"}], "allowed_origins": ["https://app.com"]}]`)
 }
 
 func waitHealthy(t *testing.T, base string) {

@@ -25,7 +25,7 @@ func TestPruneAggregates(t *testing.T) {
 	// Different project must be untouched.
 	exec(`INSERT INTO agg_web_daily VALUES ('other','2025-01-01',9,9,9,0,0)`)
 
-	if err := db.PruneAggregates(ctx, "app", day("2026-01-01"), day("2026-01-01")); err != nil {
+	if err := db.PruneAggregates(ctx, "app", day("2026-01-01"), day("2026-01-01"), day("2026-01-01")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -62,7 +62,7 @@ func TestPruneAggregatesIndependentCutoffs(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Prune web through 2026-06-01 but keep product back to 2026-01-01.
-	if err := db.PruneAggregates(ctx, "app", day("2026-06-01"), day("2026-01-01")); err != nil {
+	if err := db.PruneAggregates(ctx, "app", day("2026-06-01"), day("2026-01-01"), day("2026-01-01")); err != nil {
 		t.Fatal(err)
 	}
 	var web, product int
@@ -91,7 +91,14 @@ func TestPruneAggregatesCoversAllAggTables(t *testing.T) {
 	}
 	defer rows.Close()
 	pruned := map[string]bool{}
-	for _, tbl := range append(append([]string{}, webAggTables...), productAggTables...) {
+	all := append([]string{}, webAggTables...)
+	all = append(all, productAggTables...)
+	all = append(all, appAggTables...)
+	all = append(all, identityAggTables...)
+	// agg_retention is pruned by PruneActors alongside the actors rows it
+	// derives from, not by PruneAggregates.
+	all = append(all, "agg_retention")
+	for _, tbl := range all {
 		pruned[tbl] = true
 	}
 	for rows.Next() {

@@ -20,7 +20,7 @@ func (d *DB) WriteWebHits(ctx context.Context, hits []store.WebHit) error {
 	}
 	return d.tx(ctx, func(tx *sql.Tx) error {
 		stmt, err := tx.PrepareContext(ctx, `INSERT INTO web_hits
-			(id, project, ts, visitor_hash, path, referrer_source,
+			(id, project, ts, actor_id, path, referrer_source,
 			 utm_source, utm_medium, utm_campaign, country, device, browser, os)
 			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 		if err != nil {
@@ -44,7 +44,7 @@ func (d *DB) WriteProductEvents(ctx context.Context, evs []store.ProductEvent) e
 	}
 	return d.tx(ctx, func(tx *sql.Tx) error {
 		stmt, err := tx.PrepareContext(ctx, `INSERT INTO product_events
-			(id, project, event_name, user_id, ts, attributes) VALUES (?,?,?,?,?,?)`)
+			(id, project, event_name, actor_id, ts, attributes) VALUES (?,?,?,?,?,?)`)
 		if err != nil {
 			return err
 		}

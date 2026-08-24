@@ -75,7 +75,7 @@ func TestDaysBeforeRejectsCorruptTimestamp(t *testing.T) {
 	// Must sort before the cutoff so the WHERE clause admits it, yet be an
 	// impossible calendar date so civil.Parse rejects it.
 	if _, err := db.db.Exec(
-		`INSERT INTO web_hits (id, project, ts, visitor_hash, path) VALUES ('x','app','2026-02-30T00:00:00Z','v','/')`,
+		`INSERT INTO web_hits (id, project, ts, actor_id, path) VALUES ('x','app','2026-02-30T00:00:00Z','v','/')`,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,9 @@ func TestOperationsOnClosedDB(t *testing.T) {
 	}
 
 	for name, op := range map[string]func() error{
-		"PruneAggregates":   func() error { return db.PruneAggregates(ctx, "app", day("2026-01-01"), day("2026-01-01")) },
+		"PruneAggregates": func() error {
+			return db.PruneAggregates(ctx, "app", day("2026-01-01"), day("2026-01-01"), day("2026-01-01"))
+		},
 		"IncrementalVacuum": func() error { return db.IncrementalVacuum(ctx) },
 		"AggregateWebDay":   func() error { return db.AggregateWebDay(ctx, "app", day("2026-01-01")) },
 		"Migrate":           func() error { return db.Migrate(ctx) },
@@ -202,7 +204,7 @@ func TestPruneAggregatesReportsFailingTable(t *testing.T) {
 	if _, err := db.db.ExecContext(ctx, `DROP TABLE agg_product_attrs`); err != nil {
 		t.Fatal(err)
 	}
-	err := db.PruneAggregates(ctx, "app", day("2026-01-01"), day("2026-01-01"))
+	err := db.PruneAggregates(ctx, "app", day("2026-01-01"), day("2026-01-01"), day("2026-01-01"))
 	if err == nil {
 		t.Fatal("want error when a target table is missing, got nil")
 	}
@@ -258,7 +260,7 @@ func TestPruneAggregatesReportsFailingWebTable(t *testing.T) {
 	if _, err := db.db.ExecContext(ctx, `DROP TABLE agg_web_utm`); err != nil {
 		t.Fatal(err)
 	}
-	err := db.PruneAggregates(ctx, "app", day("2026-01-01"), day("2026-01-01"))
+	err := db.PruneAggregates(ctx, "app", day("2026-01-01"), day("2026-01-01"), day("2026-01-01"))
 	if err == nil || !strings.Contains(err.Error(), "agg_web_utm") {
 		t.Errorf("error %v does not name the failing web table", err)
 	}

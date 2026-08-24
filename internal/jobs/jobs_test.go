@@ -20,6 +20,7 @@ import (
 )
 
 const jobsProjects = `[{"alias": "app", "name": "App", "allowed_origins": ["https://a.com"],
+	"ingest_keys": [{"key": "ak_app", "label": "web"}],
   "product_aggregation": {"enabled": true, "attributes": {"*": ["plan"]}, "top_n": 50}}]`
 
 // jobsVars pins the retention windows the assertions below rely on.
@@ -194,8 +195,10 @@ func TestRunDailyPassCoversArchivedProjects(t *testing.T) {
 // A per-project retention override must win over the global window.
 func TestRunDailyPassHonoursProjectRetention(t *testing.T) {
 	const projectsJSON = `[
-        {"alias": "app", "name": "App", "allowed_origins": ["https://a.com"]},
+        {"alias": "app", "name": "App", "allowed_origins": ["https://a.com"],
+         "ingest_keys": [{"key": "ak_app2", "label": "web"}]},
         {"alias": "keep", "name": "Keep", "allowed_origins": ["https://b.com"],
+         "ingest_keys": [{"key": "ak_keep", "label": "web"}],
          "retention": {"web": {"raw_days": 90}}}]`
 	st, _, r := setup(t, projectsJSON)
 	ctx := context.Background()

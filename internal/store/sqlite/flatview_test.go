@@ -63,7 +63,7 @@ func TestRebuildFlatView(t *testing.T) {
 	}
 	var id, project, event, user, tsCol, plan string
 	if err := db.db.QueryRow(
-		`SELECT id, project, event_name, user_id, ts, attr_plan FROM v_events_flat WHERE id='1'`).
+		`SELECT id, project, event_name, actor_id, ts, attr_plan FROM v_events_flat WHERE id='1'`).
 		Scan(&id, &project, &event, &user, &tsCol, &plan); err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestRebuildFlatViewDeterministicOrder(t *testing.T) {
 			t.Fatalf("column order not deterministic: %v vs %v", first, second)
 		}
 	}
-	want := []string{"id", "project", "event_name", "user_id", "ts", "attr_alpha", "attr_mu", "attr_zeta"}
+	want := []string{"id", "project", "event_name", "actor_id", "ts", "attr_alpha", "attr_mu", "attr_zeta"}
 	for i := range want {
 		if first[i] != want[i] {
 			t.Fatalf("columns = %v, want %v", first, want)
