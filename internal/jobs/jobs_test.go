@@ -320,3 +320,162 @@ func TestRunBootCatchUpAndCancel(t *testing.T) {
 		t.Fatal("Run did not return after cancel")
 	}
 }
+
+// --- app class, cohorts and identities ---
+
+const identifiedProjects = `[{"alias": "app", "name": "App", "identity": "identified",
+	"allowed_origins": ["https://a.com"],
+	"ingest_keys": [{"key": "ak_app", "label": "web"}]}]`
+
+const anonymousProjects = `[{"alias": "app", "name": "App", "identity": "anonymous",
+	"allowed_origins": ["https://a.com"],
+	"ingest_keys": [{"key": "ak_app", "label": "web"}]}]`
+
+// appVars uses a 7-day app raw window so the fixed 2026-08-10 fixture day is
+// already outside it relative to the fake now of 2026-08-22.
+var appVars = map[string]string{
+	"RETENTION_WEB_RAW_DAYS": "7", "RETENTION_WEB_AGGREGATE_DAYS": "365",
+	"RETENTION_PRODUCT_RAW_DAYS": "7", "RETENTION_PRODUCT_AGGREGATE_DAYS": "365",
+	"RETENTION_APP_RAW_DAYS": "7", "RETENTION_APP_AGGREGATE_DAYS": "365",
+}
+
+func setupApp(t *testing.T, projectsJSON string) (store.Store, *Runner, *sql.DB) {
+	t.Helper()
+	cfg := configtest.Load(t, appVars, projectsJSON)
+	st, path := openStoreAt(t)
+	now := func() time.Time { return time.Date(2026, 8, 22, 4, 0, 0, 0, time.UTC) }
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { raw.Close() })
+	return st, New(st, cfg, identity.NewSalter(st, now), slog.Default(), now), raw
+}
+
+func seedAppDay(t *testing.T, st store.Store, actors ...string) {
+	t.Helper()
+	var views []store.AppView
+	for i, a := range actors {
+		views = append(views, store.AppView{
+			ID: "v" + a + string(rune('a'+i)), Project: "app",
+			TS:         mustTime("2026-08-10T10:00:00Z"),
+			ReceivedAt: mustTime("2026-08-10T10:00:00Z"),
+			ActorID:    a, UserID: "u-" + a, GroupID: "org9",
+			Screen: "/home", Platform: "ios", AppVersion: "2.4.1",
+		})
+	}
+	if err := st.WriteAppViews(context.Background(), views); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func count(t *testing.T, db *sql.DB, query string) int {
+	t.Helper()
+	var n int
+	if err := db.QueryRow(query).Scan(&n); err != nil {
+		t.Fatalf("%s: %v", query, err)
+	}
+	return n
+}
+
+func TestRunDailyPassAggregatesAppDays(t *testing.T) {
+	st, r, db := setupApp(t, identifiedProjects)
+	ctx := context.Background()
+	seedAppDay(t, st, "a", "b")
+
+	if err := r.RunDailyPass(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if n := count(t, db, `SELECT COUNT(*) FROM agg_app_daily`); n != 1 {
+		t.Errorf("agg_app_daily rows = %d, want 1", n)
+	}
+	if n := count(t, db, `SELECT actives FROM agg_app_daily`); n != 2 {
+		t.Errorf("actives = %d, want 2", n)
+	}
+	if n := count(t, db, `SELECT COUNT(*) FROM app_views`); n != 0 {
+		t.Errorf("raw app_views left = %d, want 0", n)
+	}
+	if n := count(t, db, `SELECT COUNT(*) FROM actors`); n != 2 {
+		t.Errorf("actors = %d, want 2", n)
+	}
+	if n := count(t, db, `SELECT COUNT(*) FROM agg_retention WHERE day_offset=0`); n != 1 {
+		t.Errorf("cohort rows = %d, want 1", n)
+	}
+	if n := count(t, db, `SELECT COUNT(*) FROM agg_identity_daily WHERE kind='group'`); n != 1 {
+		t.Errorf("group aggregate rows = %d, want 1", n)
+	}
+	if n := count(t, db, `SELECT users FROM agg_identity_daily WHERE kind='group'`); n != 2 {
+		t.Errorf("users in group = %d, want 2", n)
+	}
+}
+
+func TestRunDailyPassSkipsCohortsForAnonymousProjects(t *testing.T) {
+	st, r, db := setupApp(t, anonymousProjects)
+	ctx := context.Background()
+	seedAppDay(t, st, "a")
+
+	if err := r.RunDailyPass(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if n := count(t, db, `SELECT COUNT(*) FROM actors`); n != 0 {
+		t.Errorf("actors = %d; retention is undefined under daily rotation", n)
+	}
+	if n := count(t, db, `SELECT COUNT(*) FROM agg_retention`); n != 0 {
+		t.Errorf("agg_retention rows = %d, want 0", n)
+	}
+	// Identity aggregates and app rollups still run: only cohorts are skipped.
+	if n := count(t, db, `SELECT COUNT(*) FROM agg_app_daily`); n != 1 {
+		t.Errorf("agg_app_daily rows = %d, want 1", n)
+	}
+	if n := count(t, db, `SELECT COUNT(*) FROM agg_identity_daily`); n == 0 {
+		t.Error("identity aggregates must still run for anonymous projects")
+	}
+}
+
+func TestRunDailyPassIsIdempotentAcrossAppSteps(t *testing.T) {
+	st, r, db := setupApp(t, identifiedProjects)
+	ctx := context.Background()
+	seedAppDay(t, st, "a", "b")
+
+	for i := 0; i < 2; i++ {
+		if err := r.RunDailyPass(ctx); err != nil {
+			t.Fatalf("pass %d: %v", i, err)
+		}
+	}
+	if n := count(t, db, `SELECT views FROM agg_app_daily`); n != 2 {
+		t.Errorf("views = %d after two passes, want 2", n)
+	}
+	if n := count(t, db, `SELECT COUNT(*) FROM agg_retention`); n != 1 {
+		t.Errorf("agg_retention rows = %d after two passes, want 1", n)
+	}
+}
+
+func TestRunDailyPassPrunesActorsAndIdentities(t *testing.T) {
+	st, r, db := setupApp(t, identifiedProjects)
+	ctx := context.Background()
+
+	if err := st.UpsertIdentities(ctx, []store.Identity{
+		{Project: "app", Kind: store.KindUser, ID: "old", Name: "Gone"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE identities SET last_seen_day='2020-01-01'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO actors VALUES ('app','stale','app','2020-01-01','2020-01-01')`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := r.RunDailyPass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, db, `SELECT COUNT(*) FROM actors`); n != 0 {
+		t.Errorf("stale actors left = %d, want 0", n)
+	}
+	if n := count(t, db, `SELECT COUNT(*) FROM identities`); n != 0 {
+		t.Errorf("stale identities left = %d, want 0", n)
+	}
+}

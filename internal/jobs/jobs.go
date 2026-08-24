@@ -97,11 +97,49 @@ func (r *Runner) RunDailyPass(ctx context.Context) error {
 			}
 		}
 
+		appDays, err := r.store.AppDaysBefore(ctx, id, today.AddDays(-ret.App.RawDays))
+		if err != nil {
+			return err
+		}
+		// Cohorts need actors recorded before the day's raw rows are
+		// deleted, and are undefined for anonymous projects: actor_id
+		// rotates at midnight there, so every cohort would hold nothing but
+		// offset 0.
+		identified := false
+		if p := r.cfg.Project(id); p != nil && p.Identity == config.IdentityIdentified {
+			identified = true
+		}
+		for _, day := range appDays {
+			// Order is load-bearing: actors, retention and identity
+			// aggregates all read the raw rows that AggregateAppDay deletes,
+			// so app aggregation runs last.
+			if identified {
+				if err := r.store.UpsertActors(ctx, id, day); err != nil {
+					r.logger.Error("upsert actors failed", "project", id, "day", day.String(), "error", err)
+				}
+				if err := r.store.AggregateRetentionDay(ctx, id, day); err != nil {
+					r.logger.Error("aggregate retention failed", "project", id, "day", day.String(), "error", err)
+				}
+			}
+			if err := r.store.AggregateIdentityDay(ctx, id, day); err != nil {
+				r.logger.Error("aggregate identity failed", "project", id, "day", day.String(), "error", err)
+			}
+			if err := r.store.AggregateAppDay(ctx, id, day); err != nil {
+				r.logger.Error("aggregate app failed", "project", id, "day", day.String(), "error", err)
+			}
+		}
+
 		if err := r.store.PruneAggregates(ctx, id,
 			today.AddDays(-ret.Web.AggregateDays),
 			today.AddDays(-ret.Product.AggregateDays),
 			today.AddDays(-ret.App.AggregateDays)); err != nil {
 			r.logger.Error("prune failed", "project", id, "error", err)
+		}
+		if err := r.store.PruneActors(ctx, id, today.AddDays(-ret.App.AggregateDays)); err != nil {
+			r.logger.Error("prune actors failed", "project", id, "error", err)
+		}
+		if err := r.store.PruneIdentities(ctx, id, today.AddDays(-ret.App.AggregateDays)); err != nil {
+			r.logger.Error("prune identities failed", "project", id, "error", err)
 		}
 	}
 
