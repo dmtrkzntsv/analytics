@@ -186,3 +186,34 @@ func TestSalterPropagatesStoreErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestActorHashIsStableAndSalted(t *testing.T) {
+	a := ActorHash("salt1", "install-1", "proj")
+	b := ActorHash("salt1", "install-1", "proj")
+	c := ActorHash("salt2", "install-1", "proj")
+	d := ActorHash("salt1", "install-2", "proj")
+	e := ActorHash("salt1", "install-1", "other")
+
+	if a != b {
+		t.Error("same inputs must hash the same")
+	}
+	if a == c {
+		t.Error("rotating the salt must change the hash")
+	}
+	if a == d {
+		t.Error("different installs must not collide")
+	}
+	if a == e {
+		t.Error("the same install in two projects must not collide")
+	}
+	if len(a) != 16 {
+		t.Errorf("hash length = %d, want 16", len(a))
+	}
+}
+
+// The separator write means "ab"+"c" cannot collide with "a"+"bc".
+func TestActorHashSeparatesFields(t *testing.T) {
+	if ActorHash("sa", "lt", "p") == ActorHash("s", "alt", "p") {
+		t.Error("field boundaries must be unambiguous")
+	}
+}
