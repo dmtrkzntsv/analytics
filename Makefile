@@ -2,7 +2,7 @@ BIN := analytics
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test check vet build-all dist docker run smoke test-install dashboards clean
+.PHONY: build test check vet build-all dist docker run smoke test-install dashboards seed-demo clean
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o $(BIN) ./cmd/analytics
@@ -56,12 +56,34 @@ PROJECTS_FILE=local/projects.json
 endef
 export LOCAL_ENV
 
+# Several projects so the dashboards show a realistic project list; each alias
+# has a matching traffic profile in scripts/seed-demo.py.
 define LOCAL_PROJECTS
 [
   {
     "alias": "dev",
     "name": "Local Dev",
     "allowed_origins": ["http://localhost:8080", "http://localhost:5173", "http://localhost:3000"]
+  },
+  {
+    "alias": "marketing",
+    "name": "Marketing Site",
+    "allowed_origins": ["http://localhost:8080", "https://example.com"]
+  },
+  {
+    "alias": "docs",
+    "name": "Docs Portal",
+    "allowed_origins": ["http://localhost:8080", "https://docs.example.com"]
+  },
+  {
+    "alias": "app",
+    "name": "SaaS App",
+    "allowed_origins": ["http://localhost:8080", "https://app.example.com"]
+  },
+  {
+    "alias": "legacy",
+    "name": "Legacy Blog",
+    "allowed_origins": ["http://localhost:8080"]
   }
 ]
 endef
@@ -87,6 +109,13 @@ smoke: build
 
 test-install: build
 	./scripts/test-install.sh
+
+# Fills local/analytics.db with 180 days of believable traffic so the dashboards
+# have something to plot, one profile per project in local/projects.json. Needs
+# the server to have started once so those projects are registered. Re-running
+# replaces the seeded rows rather than stacking another copy on top.
+seed-demo: local/.env local/projects.json
+	python3 scripts/seed-demo.py local/analytics.db
 
 dashboards:
 	cd backoffice/evidence && npm install \
