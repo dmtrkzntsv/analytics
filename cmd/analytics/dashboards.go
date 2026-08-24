@@ -11,20 +11,20 @@ import (
 
 	"github.com/dmitry/analytics/internal/app"
 	"github.com/dmitry/analytics/internal/config"
-	"github.com/dmitry/analytics/internal/synccmd"
+	"github.com/dmitry/analytics/internal/dashboards"
 )
 
 func init() {
-	commands["sync"] = cmdSync
+	commands["dashboards"] = cmdDashboards
 }
 
-func cmdSync(args []string, stdout io.Writer) int {
-	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
+func cmdDashboards(args []string, stdout io.Writer) int {
+	fs := flag.NewFlagSet("dashboards", flag.ContinueOnError)
 	fs.SetOutput(stdout)
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	cfg, err := config.Load()
+	cfg, err := config.LoadDashboards()
 	if err != nil {
 		fmt.Fprintln(stdout, err)
 		return 1
@@ -32,8 +32,8 @@ func cmdSync(args []string, stdout io.Writer) int {
 	logger := app.NewLogger(cfg.Log)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := synccmd.Run(ctx, cfg.Sync, cfg.Database, logger); err != nil {
-		logger.Error("sync failed", "error", err)
+	if err := dashboards.Run(ctx, cfg.Dashboards, logger); err != nil {
+		logger.Error("dashboards failed", "error", err)
 		return 1
 	}
 	return 0

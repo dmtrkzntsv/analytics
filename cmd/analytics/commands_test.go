@@ -81,6 +81,20 @@ func TestMigrateRejectsBadDSN(t *testing.T) {
 	}
 }
 
+// dashboards renders whatever database it is pointed at; unlike serve and
+// migrate it must start without a project list.
+func TestDashboardsRejectsMissingDatabase(t *testing.T) {
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("DASHBOARDS_DB_PATH", "")
+	var out bytes.Buffer
+	if code := run([]string{"dashboards"}, &out); code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(out.String(), "DASHBOARDS_DB_PATH") {
+		t.Errorf("error = %q, want it to name the missing setting", out.String())
+	}
+}
+
 func TestKeygenPrintsUsableKeys(t *testing.T) {
 	var out bytes.Buffer
 	if code := run([]string{"keygen", "-n", "2"}, &out); code != 0 {

@@ -1,0 +1,40 @@
+# The whole application on one machine: ingestion and dashboards.
+#
+# No credentials, no object storage — backup is opt-in and separate:
+#   docker compose -f docker-compose.yml -f docker-compose.litestream.yml up -d
+#
+# Put a `projects.json` next to this file (copy projects.example.json from the
+# repository) and, if you want to override any defaults, a `.env`.
+services:
+  analytics:
+    image: ghcr.io/dmtrkzntsv/analytics:${ANALYTICS_VERSION:-latest}
+    restart: unless-stopped
+    ports:
+      - "8080:8080"          # put Caddy/nginx/Cloudflare in front for TLS
+    volumes:
+      - ./projects.json:/etc/analytics/projects.json:ro
+      - data:/var/lib/analytics
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - GOMEMLIMIT=128MiB
+
+  dashboards:
+    image: ghcr.io/dmtrkzntsv/analytics-evidence:${ANALYTICS_VERSION:-latest}
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    # Read-write on purpose: a SQLite reader in WAL mode needs to write the
+    # -shm file, so a :ro mount can fail to open a live database. The process
+    # only ever reads, and it renders a private snapshot rather than this file.
+    volumes:
+      - data:/var/lib/analytics
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - DASHBOARDS_DB_PATH=/var/lib/analytics/analytics.db
+
+volumes:
+  data:

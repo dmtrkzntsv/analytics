@@ -1,4 +1,4 @@
-# {$page.url.searchParams.get('path')}
+# {browser ? $page.url.searchParams.get('path') : null}
 
 [← back to {params.project}](/web/{params.project})
 
@@ -14,13 +14,20 @@
   The path comes from the query string, and Evidence interpolates ${...} into
   the SQL text verbatim -- an unescaped value can close the string literal and
   rewrite the predicate. Doubling single quotes keeps it a literal.
+
+  Every read is guarded by `browser`. SvelteKit refuses to expose
+  url.searchParams while prerendering, since a prerendered URL has no query,
+  and touching it there fails `evidence build` with a 500 on this route --
+  which `evidence dev` never shows, because dev does not prerender. The
+  prerendered file is a shell; Evidence resolves these queries in the browser
+  via DuckDB, so the real path arrives with the first client render.
 -->
 
 ```sql page_daily
 select day, visitors, pageviews
 from analytics.v_web_pages
 where project = '${params.project}'
-  and path = '${($page.url.searchParams.get('path') ?? '').replaceAll("'", "''")}'
+  and path = '${browser ? ($page.url.searchParams.get('path') ?? '').replaceAll("'", "''") : ''}'
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')
 order by day
@@ -31,7 +38,7 @@ select sum(visitors) as visitors, sum(pageviews) as pageviews,
        case when sum(visitors) > 0 then sum(pageviews) * 1.0 / sum(visitors) else 0 end as views_per_visitor
 from analytics.v_web_pages
 where project = '${params.project}'
-  and path = '${($page.url.searchParams.get('path') ?? '').replaceAll("'", "''")}'
+  and path = '${browser ? ($page.url.searchParams.get('path') ?? '').replaceAll("'", "''") : ''}'
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')
 ```

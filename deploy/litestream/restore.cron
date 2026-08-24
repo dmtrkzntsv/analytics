@@ -1,0 +1,5 @@
+# Refresh the local replica every five minutes. Install with:
+#   sudo cp restore.cron /etc/cron.d/analytics-restore
+# Adjust the paths and the user, and keep the trailing newline: cron ignores
+# a last line without one.
+*/5 * * * * analytics SOURCE_DB=/var/lib/analytics/analytics.db REPLICA_PATH=/var/lib/analytics/replica.db /usr/local/bin/restore.sh >> /var/log/analytics-restore.log 2>&1

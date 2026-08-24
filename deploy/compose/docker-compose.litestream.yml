@@ -1,0 +1,15 @@
+# Opt-in continuous backup for the single-server topology, as an overlay:
+#   docker compose -f docker-compose.yml -f docker-compose.litestream.yml up -d
+#
+# Needs a `.env` with LITESTREAM_ACCESS_KEY_ID, LITESTREAM_SECRET_ACCESS_KEY,
+# R2_BUCKET and R2_ENDPOINT, and a copy of deploy/litestream/litestream.yml
+# next to this file. The application never talks to object storage itself.
+services:
+  litestream:
+    image: litestream/litestream:0.3.13
+    restart: unless-stopped
+    command: ["replicate", "-config", "/etc/litestream.yml"]
+    volumes:
+      - ./litestream.yml:/etc/litestream.yml:ro
+      - data:/var/lib/analytics
+    env_file: .env

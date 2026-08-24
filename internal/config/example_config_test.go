@@ -32,7 +32,7 @@ func TestExamplesLoad(t *testing.T) {
 	if err := sc.Err(); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"DATABASE_URL", "LISTEN_ADDR", "BUFFER_FLUSH_INTERVAL", "SYNC_INTERVAL"} {
+	for _, key := range []string{"DATABASE_URL", "LISTEN_ADDR", "BUFFER_FLUSH_INTERVAL", "DASHBOARDS_INTERVAL"} {
 		if _, ok := vars[key]; !ok {
 			t.Fatalf("example env must document %s", key)
 		}
@@ -44,8 +44,8 @@ func TestExamplesLoad(t *testing.T) {
 	if len(cfg.Projects) != 1 || cfg.Projects[0].Alias != "myapp" {
 		t.Errorf("projects = %+v", cfg.Projects)
 	}
-	if cfg.Sync.Interval.Minutes() != 5 {
-		t.Errorf("sync interval = %v", cfg.Sync.Interval)
+	if cfg.Dashboards.Interval.Minutes() != 15 {
+		t.Errorf("dashboards interval = %v", cfg.Dashboards.Interval)
 	}
 	if cfg.Retention.Product.RawDays != 30 || cfg.Retention.Web.RawDays != 7 {
 		t.Errorf("retention = %+v", cfg.Retention)

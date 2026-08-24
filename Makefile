@@ -2,7 +2,7 @@ BIN := analytics
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test check vet build-all dist docker run smoke test-install dashboards seed-demo clean
+.PHONY: build test check vet build-all dist docker run smoke test-install test-compose dashboards seed-demo clean
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o $(BIN) ./cmd/analytics
@@ -41,7 +41,8 @@ dist: build-all
 	cd dist && sha256sum $(BIN)-linux-*.tar.gz > SHA256SUMS
 
 docker:
-	docker build -t analytics:$(VERSION) .
+	docker build --target runtime -t analytics:$(VERSION) .
+	docker build --target evidence -t analytics-evidence:$(VERSION) .
 
 # ---- local development / testing ----
 
@@ -122,6 +123,12 @@ smoke: build
 test-install: build
 	./scripts/test-install.sh
 
+# Builds both images and runs the single-server compose stack end to end.
+# Slow — a first Evidence build takes about a minute — so it is not part of
+# `make check`.
+test-compose:
+	./scripts/test-compose.sh
+
 # Fills local/analytics.db with 180 days of believable traffic so the dashboards
 # have something to plot, one profile per project in local/projects.json. Needs
 # the server to have started once so those projects are registered. Re-running
@@ -135,9 +142,9 @@ seed-demo: local/.env local/projects.json build
 	@echo "trigger the boot catch-up so the retention page has data."
 
 dashboards:
-	cd backoffice/evidence && npm install \
-		&& EVIDENCE_SOURCE__analytics__filename=../../../../local/analytics.db npm run sources \
-		&& EVIDENCE_SOURCE__analytics__filename=../../../../local/analytics.db npm run dev
+	cd evidence && npm install \
+		&& EVIDENCE_SOURCE__analytics__filename=../../../local/analytics.db npm run sources \
+		&& EVIDENCE_SOURCE__analytics__filename=../../../local/analytics.db npm run dev
 
 clean:
 	rm -rf $(BIN) dist local coverage.out

@@ -3,4 +3,9 @@ dist/
 coverage.out
 *.db
 docs/
-backoffice/evidence/node_modules
+local/
+evidence/node_modules
+evidence/.evidence
+evidence/build
+evidence/site.a
+evidence/site.b
