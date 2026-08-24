@@ -2,7 +2,7 @@ BIN := analytics
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test check vet build-all dist docker run smoke test-install dashboards clean
+.PHONY: build test check vet build-all dist docker run smoke test-install test-compose dashboards clean
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o $(BIN) ./cmd/analytics
@@ -88,6 +88,12 @@ smoke: build
 
 test-install: build
 	./scripts/test-install.sh
+
+# Builds both images and runs the single-server compose stack end to end.
+# Slow — a first Evidence build takes about a minute — so it is not part of
+# `make check`.
+test-compose:
+	./scripts/test-compose.sh
 
 dashboards:
 	cd evidence && npm install \
