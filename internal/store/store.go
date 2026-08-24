@@ -86,6 +86,8 @@ type Store interface {
 	UpsertActors(ctx context.Context, project string, day civil.Date) error
 	AggregateRetentionDay(ctx context.Context, project string, day civil.Date) error
 	PruneActors(ctx context.Context, project string, before civil.Date) error
+	AggregateIdentityDay(ctx context.Context, project string, day civil.Date) error
+	PruneIdentities(ctx context.Context, project string, before civil.Date) error
 	PruneAggregates(ctx context.Context, project string, webBefore, productBefore, appBefore civil.Date) error
 	IncrementalVacuum(ctx context.Context) error
 	ProjectAliases(ctx context.Context) ([]string, error) // all rows incl. archived
