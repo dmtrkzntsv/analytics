@@ -4,6 +4,7 @@ on:
     tags: ['v*']
 permissions:
   contents: write
+  packages: write
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -16,3 +17,49 @@ jobs:
       - run: gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/SHA256SUMS --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
+
+  # Published separately from the tarballs: the ingestion image is a static Go
+  # binary on alpine, while the Evidence image carries a Node toolchain and
+  # compiles sqlite3 from source. A slow or broken dashboards build must not
+  # hold up the release of either the binaries or the collector image.
+  images:
+    runs-on: ubuntu-latest
+    needs: release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: analytics
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          push: true
+          build-args: VERSION=${{ github.ref_name }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/analytics:${{ github.ref_name }}
+            ghcr.io/${{ github.repository_owner }}/analytics:latest
+          cache-from: type=gha,scope=analytics
+          cache-to: type=gha,mode=max,scope=analytics
+      # No linux/arm/v7: sqlite3 publishes no prebuilds for it, and building
+      # it from source under QEMU is not worth the release time. A 32-bit
+      # host runs the tarball, or renders dashboards elsewhere.
+      - name: analytics-evidence
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: evidence
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: VERSION=${{ github.ref_name }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/analytics-evidence:${{ github.ref_name }}
+            ghcr.io/${{ github.repository_owner }}/analytics-evidence:latest
+          cache-from: type=gha,scope=evidence
+          cache-to: type=gha,mode=max,scope=evidence
