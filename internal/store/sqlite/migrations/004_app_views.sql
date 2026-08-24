@@ -174,9 +174,38 @@ UNION ALL
 SELECT project, substr(ts,1,10), country, COUNT(DISTINCT actor_id), COUNT(*)
 FROM app_views GROUP BY project, substr(ts,1,10), country;
 
+-- Like the other stitch views, this needs a live half: the daily pass only
+-- rolls up days that have aged out of the raw window, so without one the
+-- users and groups pages would be blank for the whole retention window.
 CREATE VIEW v_identity_daily AS
 SELECT project, day, kind, id, actors, users, hits, views, events
-FROM agg_identity_daily;
+FROM agg_identity_daily
+UNION ALL
+SELECT project, day, kind, id,
+       COUNT(DISTINCT actor_id),
+       CASE WHEN kind = 'user' THEN 1 ELSE COUNT(DISTINCT NULLIF(user_id, '')) END,
+       SUM(is_hit), SUM(is_view), SUM(is_event)
+FROM (
+  SELECT project, substr(ts,1,10) AS day, 'user' AS kind, user_id AS id,
+         actor_id, user_id, 1 AS is_hit, 0 AS is_view, 0 AS is_event
+  FROM web_hits WHERE user_id <> ''
+  UNION ALL
+  SELECT project, substr(ts,1,10), 'user', user_id, actor_id, user_id, 0, 1, 0
+  FROM app_views WHERE user_id <> ''
+  UNION ALL
+  SELECT project, substr(ts,1,10), 'user', user_id, actor_id, user_id, 0, 0, 1
+  FROM product_events WHERE user_id <> ''
+  UNION ALL
+  SELECT project, substr(ts,1,10), 'group', group_id, actor_id, user_id, 1, 0, 0
+  FROM web_hits WHERE group_id <> ''
+  UNION ALL
+  SELECT project, substr(ts,1,10), 'group', group_id, actor_id, user_id, 0, 1, 0
+  FROM app_views WHERE group_id <> ''
+  UNION ALL
+  SELECT project, substr(ts,1,10), 'group', group_id, actor_id, user_id, 0, 0, 1
+  FROM product_events WHERE group_id <> ''
+)
+GROUP BY project, day, kind, id;
 
 -- Retention is defined only over aggregated days, so there is no live half.
 -- cohort_size is the offset-0 row, exposed so rates compute in one query.

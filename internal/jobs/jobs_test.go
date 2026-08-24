@@ -479,3 +479,59 @@ func TestRunDailyPassPrunesActorsAndIdentities(t *testing.T) {
 		t.Errorf("stale identities left = %d, want 0", n)
 	}
 }
+
+// A web-only identified project must still get cohorts and identity rollups:
+// they used to be driven off app_views alone, which meant a project with no
+// app never got either.
+func TestRunDailyPassCoversWebOnlyProjectsForCohorts(t *testing.T) {
+	st, r, db := setupApp(t, identifiedProjects)
+	ctx := context.Background()
+	ts := mustTime("2026-08-10T10:00:00Z")
+
+	if err := st.WriteWebHits(ctx, []store.WebHit{
+		{ID: "w1", Project: "app", TS: ts, ReceivedAt: ts, ActorID: "a",
+			UserID: "u1", GroupID: "org9", Path: "/"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RunDailyPass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, db, `SELECT COUNT(*) FROM actors`); n != 1 {
+		t.Errorf("actors = %d for a web-only project, want 1", n)
+	}
+	if n := count(t, db, `SELECT COUNT(*) FROM agg_retention`); n != 1 {
+		t.Errorf("agg_retention rows = %d, want 1", n)
+	}
+	if n := count(t, db, `SELECT COUNT(*) FROM agg_identity_daily WHERE kind='user'`); n != 1 {
+		t.Errorf("user aggregate rows = %d, want 1", n)
+	}
+}
+
+// Cohorts must not lag the raw-retention window. They read raw rows without
+// deleting them, so they cover days still inside the window too — otherwise
+// the retention page would be a whole window stale.
+func TestRunDailyPassComputesCohortsForRecentDays(t *testing.T) {
+	st, r, db := setupApp(t, identifiedProjects)
+	ctx := context.Background()
+	// Two days before the fake now of 2026-08-22, well inside the 7-day
+	// app raw window used by appVars.
+	recent := mustTime("2026-08-20T10:00:00Z")
+
+	if err := st.WriteAppViews(ctx, []store.AppView{
+		{ID: "r1", Project: "app", TS: recent, ReceivedAt: recent, ActorID: "a",
+			UserID: "u1", Screen: "/home", Platform: "ios"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RunDailyPass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, db, `SELECT COUNT(*) FROM agg_retention WHERE cohort_day='2026-08-20'`); n != 1 {
+		t.Errorf("cohort rows for an in-window day = %d, want 1", n)
+	}
+	// The raw row itself must survive: it is inside the retention window.
+	if n := count(t, db, `SELECT COUNT(*) FROM app_views`); n != 1 {
+		t.Errorf("raw app_views = %d; an in-window day must not be aggregated away", n)
+	}
+}

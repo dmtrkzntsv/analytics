@@ -2,7 +2,7 @@ BIN := analytics
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test check vet build-all dist docker run smoke test-install dashboards clean
+.PHONY: build test check vet build-all dist docker run smoke test-install dashboards seed-demo clean
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o $(BIN) ./cmd/analytics
@@ -56,12 +56,46 @@ PROJECTS_FILE=local/projects.json
 endef
 export LOCAL_ENV
 
+# Several projects so the dashboards show a realistic project list; each alias
+# has a matching traffic profile in scripts/seed-demo.py. Every project needs
+# an ingest key or the service refuses to start; `dev` and `app` run in
+# identified mode so the users, groups and retention pages have data.
 define LOCAL_PROJECTS
 [
   {
     "alias": "dev",
     "name": "Local Dev",
+    "identity": "identified",
+    "ingest_keys": [{ "key": "ak_dev00000000000000000000000000", "label": "local" }],
     "allowed_origins": ["http://localhost:8080", "http://localhost:5173", "http://localhost:3000"]
+  },
+  {
+    "alias": "marketing",
+    "name": "Marketing Site",
+    "ingest_keys": [{ "key": "ak_marketing000000000000000000", "label": "web" }],
+    "allowed_origins": ["http://localhost:8080", "https://example.com"]
+  },
+  {
+    "alias": "docs",
+    "name": "Docs Portal",
+    "ingest_keys": [{ "key": "ak_docs0000000000000000000000", "label": "web" }],
+    "allowed_origins": ["http://localhost:8080", "https://docs.example.com"]
+  },
+  {
+    "alias": "app",
+    "name": "SaaS App",
+    "identity": "identified",
+    "ingest_keys": [
+      { "key": "ak_app00000000000000000000000", "label": "web" },
+      { "key": "ak_appios00000000000000000000", "label": "ios" }
+    ],
+    "allowed_origins": ["http://localhost:8080", "https://app.example.com"]
+  },
+  {
+    "alias": "legacy",
+    "name": "Legacy Blog",
+    "ingest_keys": [{ "key": "ak_legacy00000000000000000000", "label": "web" }],
+    "allowed_origins": ["http://localhost:8080"]
   }
 ]
 endef
@@ -87,6 +121,18 @@ smoke: build
 
 test-install: build
 	./scripts/test-install.sh
+
+# Fills local/analytics.db with 180 days of believable traffic so the dashboards
+# have something to plot, one profile per project in local/projects.json. Needs
+# the server to have started once so those projects are registered. Re-running
+# replaces the seeded rows rather than stacking another copy on top.
+seed-demo: local/.env local/projects.json build
+	@DATABASE_URL="sqlite://$(PWD)/local/analytics.db" \
+	 PROJECTS_FILE="$(PWD)/local/projects.json" ./$(BIN) migrate
+	python3 scripts/seed-demo.py local/analytics.db local/projects.json
+	@echo
+	@echo "Cohorts are computed by the daily pass; run 'make run' once to"
+	@echo "trigger the boot catch-up so the retention page has data."
 
 dashboards:
 	cd backoffice/evidence && npm install \

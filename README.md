@@ -338,6 +338,7 @@ green.
 make run          # build and serve on 127.0.0.1:8080 with local/.env + local/projects.json
 make smoke        # boot the real binary, POST a batch, verify rows land
 make test-install # run deploy/install.sh in a Debian container, assert artifacts
+make seed-demo    # fill local/analytics.db with 180 days of demo traffic
 make dashboards   # Evidence dev server against local/analytics.db (port 3000)
 make clean        # remove binary, dist/, local/ state
 ```
@@ -355,6 +356,25 @@ curl -X POST localhost:8080/api/events -A 'Mozilla/5.0' \
   -d '{"events":[{"name":"$pageview",
                   "attributes":{"$url":"http://localhost/some-page"}}]}'
 ```
+
+`make dashboards` builds its parquet extracts from whatever is in the database
+at that moment, so run `make seed-demo` (or send some hits) first -- otherwise
+the charts have nothing to plot. `seed-demo` covers every project in
+`local/projects.json` (each gets its own traffic profile) over 180 days, and
+needs the server to have started once so the projects are registered.
+
+Both dashboards share one date-range selector -- 1, 7, 30, 90 or 180 days,
+defaulting to 7 -- that drives every widget on the page. The windows are
+anchored to UTC, matching how hits are stored; DuckDB's `current_date` resolves
+in the viewer's local timezone, which west of UTC would silently drop the
+current day.
+
+Paths in "Top pages" link through to a per-page breakdown. Note that Evidence
+interpolates `${...}` into the SQL text verbatim, so any value taken from the
+URL has to be escaped before it reaches a query -- see the comment in
+`pages/web/[project]/page.md`. Charts cannot be drilled into: the ECharts click
+event is not forwarded to a component a markdown page can reach, so drill-downs
+have to start from a table.
 
 `make smoke` is the end-to-end check: scratch database, real HTTP ingestion
 covering all three event kinds plus bad-key, bad-Origin and replay-dedupe

@@ -132,7 +132,13 @@ func TestIdentityDailyViewReadsAggregates(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// The view unions the aggregate table with a live computation over raw
+	// rows, so the raw day must be consumed before counting or the same day
+	// legitimately appears twice. AggregateAppDay is what deletes it.
 	if err := db.AggregateIdentityDay(ctx, "p", appDay()); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AggregateAppDay(ctx, "p", appDay()); err != nil {
 		t.Fatal(err)
 	}
 	var n int

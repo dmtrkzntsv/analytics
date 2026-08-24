@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/dmitry/analytics/internal/store"
 )
@@ -240,5 +241,61 @@ func TestStitchViewsMixedAggregatedAndRawDays(t *testing.T) {
 	}
 	if len(got) != 2 || got["2026-08-10"] != 4 || got["2026-08-11"] != 1 {
 		t.Fatalf("v_web_daily = %v, want {2026-08-10:4 2026-08-11:1}", got)
+	}
+}
+
+// The daily pass only rolls up days that have aged out of the raw window, so
+// the identity stitch view must serve recent days from raw or the users and
+// groups pages would be blank for the whole window.
+func TestStitchViewIdentityDailyCoversRawDays(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	ts := time.Date(2026, 8, 23, 10, 0, 0, 0, time.UTC)
+
+	if err := db.WriteAppViews(ctx, []store.AppView{
+		{ID: "1", Project: "p", TS: ts, ReceivedAt: ts, ActorID: "a",
+			UserID: "u1", GroupID: "org9", Screen: "/x"},
+		{ID: "2", Project: "p", TS: ts, ReceivedAt: ts, ActorID: "b",
+			UserID: "u2", GroupID: "org9", Screen: "/x"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var actors, users, views int
+	if err := db.db.QueryRowContext(ctx,
+		`SELECT actors, users, views FROM v_identity_daily
+		 WHERE project='p' AND kind='group' AND id='org9'`).
+		Scan(&actors, &users, &views); err != nil {
+		t.Fatalf("group row before aggregation: %v", err)
+	}
+	if actors != 2 || users != 2 || views != 2 {
+		t.Errorf("live group row = actors %d users %d views %d; want 2 2 2", actors, users, views)
+	}
+
+	// After aggregation the same figures must come from the aggregate half,
+	// with no double counting from the raw rows the pass deletes.
+	if err := db.AggregateIdentityDay(ctx, "p", appDay()); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AggregateAppDay(ctx, "p", appDay()); err != nil {
+		t.Fatal(err)
+	}
+	var rows int
+	if err := db.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM v_identity_daily WHERE project='p' AND kind='group' AND id='org9'`).
+		Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 1 {
+		t.Errorf("group rows after aggregation = %d, want exactly 1 (no double count)", rows)
+	}
+	if err := db.db.QueryRowContext(ctx,
+		`SELECT actors, users, views FROM v_identity_daily
+		 WHERE project='p' AND kind='group' AND id='org9'`).
+		Scan(&actors, &users, &views); err != nil {
+		t.Fatal(err)
+	}
+	if actors != 2 || users != 2 || views != 2 {
+		t.Errorf("aggregated group row = actors %d users %d views %d; want 2 2 2", actors, users, views)
 	}
 }
