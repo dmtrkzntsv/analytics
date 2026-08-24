@@ -23,18 +23,18 @@ func TestScriptServed(t *testing.T) {
 	body := w.Body.String()
 	// Behavioural markers the snippet must contain.
 	for _, marker := range []string{
-		"analytics_ignore",  // opt-out
-		"data-key",          // credential wiring
-		"data-identity",     // identity mode, mirroring projects.json
-		"data-user",         // server-rendered identity
-		"data-group",        // server-rendered group
-		"sendBeacon",        // transport
-		"pushState",         // SPA tracking
-		"popstate",          // SPA tracking
-		"webdriver",         // automation filter
-		"/api/events",       // the only endpoint
-		"$pageview",         // reserved name
-		"$user_id",          // reserved keys
+		"analytics_ignore", // opt-out
+		"data-key",         // credential wiring
+		"data-identity",    // identity mode, mirroring projects.json
+		"data-user",        // server-rendered identity
+		"data-group",       // server-rendered group
+		"sendBeacon",       // transport
+		"pushState",        // SPA tracking
+		"popstate",         // SPA tracking
+		"webdriver",        // automation filter
+		"/api/events",      // the only endpoint
+		"$pageview",        // reserved name
+		"$user_id",         // reserved keys
 		"$group_id",
 		"analytics_visitor", // stored visitor id
 		"identify:",         // identity API
