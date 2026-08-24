@@ -273,6 +273,13 @@ anchored to UTC, matching how hits are stored; DuckDB's `current_date` resolves
 in the viewer's local timezone, which west of UTC would silently drop the
 current day.
 
+Paths in "Top pages" link through to a per-page breakdown. Note that Evidence
+interpolates `${...}` into the SQL text verbatim, so any value taken from the
+URL has to be escaped before it reaches a query -- see the comment in
+`pages/web/[project]/page.md`. Charts cannot be drilled into: the ECharts click
+event is not forwarded to a component a markdown page can reach, so drill-downs
+have to start from a table.
+
 `make smoke` is the end-to-end check: scratch database, real HTTP ingestion
 including an Origin-rejection case, then row counts straight from SQLite.
 `make test-install` runs the installer in a throwaway container with

@@ -44,7 +44,8 @@ where project = '${params.project}'
 </Grid>
 
 ```sql pages
-select path, sum(visitors) as visitors, sum(pageviews) as pageviews
+select path, sum(visitors) as visitors, sum(pageviews) as pageviews,
+       '/web/${params.project}/page?path=' || path as detail_url
 from analytics.v_web_pages
 where project = '${params.project}'
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
@@ -66,7 +67,7 @@ group by source order by visitors desc limit 20
 
 <Grid cols=2>
     <DataTable data={pages} rows=10 title="Top pages">
-        <Column id=path title="Path" />
+        <Column id=detail_url title="Path" contentType=link linkLabel=path />
         <Column id=visitors title="Visitors" fmt=num0 contentType=colorscale />
         <Column id=pageviews title="Views" fmt=num0 />
     </DataTable>
