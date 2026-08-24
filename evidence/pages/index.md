@@ -3,14 +3,14 @@
 ```sql active_projects
 select alias, name
 from analytics.projects
-where archived_at is null
+where archived_at is null and alias != ''
 order by name
 ```
 
 ```sql archived_projects
 select alias, name
 from analytics.projects
-where archived_at is not null
+where archived_at is not null and alias != ''
 order by name
 ```
 
