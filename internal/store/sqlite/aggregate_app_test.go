@@ -10,7 +10,7 @@ import (
 	"github.com/dmitry/analytics/internal/store"
 )
 
-func appDay() civil.Date { return civil.Date{Year: 2026, Month: 8, Day: 23} }
+func appDay() civil.Date { return civil.Date{Year: 2026, Month: time.August, Day: 23} }
 
 func at(h, m int) time.Time {
 	return time.Date(2026, 8, 23, h, m, 0, 0, time.UTC)
