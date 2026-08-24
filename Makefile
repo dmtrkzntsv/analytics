@@ -41,7 +41,8 @@ dist: build-all
 	cd dist && sha256sum $(BIN)-linux-*.tar.gz > SHA256SUMS
 
 docker:
-	docker build -t analytics:$(VERSION) .
+	docker build --target runtime -t analytics:$(VERSION) .
+	docker build --target evidence -t analytics-evidence:$(VERSION) .
 
 # ---- local development / testing ----
 
@@ -89,9 +90,9 @@ test-install: build
 	./scripts/test-install.sh
 
 dashboards:
-	cd backoffice/evidence && npm install \
-		&& EVIDENCE_SOURCE__analytics__filename=../../../../local/analytics.db npm run sources \
-		&& EVIDENCE_SOURCE__analytics__filename=../../../../local/analytics.db npm run dev
+	cd evidence && npm install \
+		&& EVIDENCE_SOURCE__analytics__filename=../../../local/analytics.db npm run sources \
+		&& EVIDENCE_SOURCE__analytics__filename=../../../local/analytics.db npm run dev
 
 clean:
 	rm -rf $(BIN) dist local coverage.out
