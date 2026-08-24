@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -59,21 +60,25 @@ type Project struct {
 	ProductAggregation *ProductAggregation `json:"product_aggregation"`
 }
 
-type SyncConfig struct {
-	Interval         time.Duration
-	LitestreamConfig string
-	ReplicaPath      string
+// DashboardsConfig configures `analytics dashboards`: which database to
+// render, where the Evidence project lives, and how often to rebuild it.
+type DashboardsConfig struct {
+	DBPath     string
+	Addr       string
+	Interval   time.Duration
+	ProjectDir string
+	WorkDir    string
 }
 
 type Config struct {
-	Listen    string
-	Database  string
-	Geo       string
-	Log       LogConfig
-	Buffer    BufferConfig
-	Retention Retention
-	Sync      SyncConfig
-	Projects  []Project
+	Listen     string
+	Database   string
+	Geo        string
+	Log        LogConfig
+	Buffer     BufferConfig
+	Retention  Retention
+	Dashboards DashboardsConfig
+	Projects   []Project
 }
 
 // DefaultProjectsFile is where the installer puts projects.json; override
@@ -81,9 +86,15 @@ type Config struct {
 const DefaultProjectsFile = "/etc/analytics/projects.json"
 
 // Load builds the configuration from the process environment and the
-// projects file. This is the only entry point the commands use.
+// projects file, for the commands that need the project list.
 func Load() (*Config, error) {
 	return FromEnv(os.LookupEnv)
+}
+
+// LoadDashboards builds the configuration for `analytics dashboards`, which
+// renders whatever database it is pointed at and never reads the project list.
+func LoadDashboards() (*Config, error) {
+	return FromEnvDashboards(os.LookupEnv)
 }
 
 // env reads typed values from a lookup function, remembering the first error.
@@ -132,6 +143,16 @@ func (e *env) dur(key string, def time.Duration) time.Duration {
 // FromEnv parses the environment via lookup (os.LookupEnv in production,
 // a map lookup in tests) and loads the projects file it names.
 func FromEnv(lookup func(string) (string, bool)) (*Config, error) {
+	return parse(lookup, true)
+}
+
+// FromEnvDashboards is FromEnv without the projects file: a machine that only
+// reads a replica has no project list to give.
+func FromEnvDashboards(lookup func(string) (string, bool)) (*Config, error) {
+	return parse(lookup, false)
+}
+
+func parse(lookup func(string) (string, bool), withProjects bool) (*Config, error) {
 	e := &env{lookup: lookup}
 	c := &Config{
 		Listen:   e.str("LISTEN_ADDR", "127.0.0.1:8080"),
@@ -157,14 +178,25 @@ func FromEnv(lookup func(string) (string, bool)) (*Config, error) {
 				AggregateDays: e.num("RETENTION_PRODUCT_AGGREGATE_DAYS", 365),
 			},
 		},
-		Sync: SyncConfig{
-			Interval:         e.dur("SYNC_INTERVAL", 5*time.Minute),
-			LitestreamConfig: e.str("SYNC_LITESTREAM_CONFIG", "/etc/litestream.yml"),
-			ReplicaPath:      e.str("SYNC_REPLICA_PATH", ""),
+		Dashboards: DashboardsConfig{
+			DBPath:     e.str("DASHBOARDS_DB_PATH", ""),
+			Addr:       e.str("DASHBOARDS_ADDR", "0.0.0.0:3000"),
+			Interval:   e.dur("DASHBOARDS_INTERVAL", 15*time.Minute),
+			ProjectDir: e.str("DASHBOARDS_PROJECT_DIR", "/opt/evidence"),
+			WorkDir:    e.str("DASHBOARDS_WORK_DIR", "/var/lib/dashboards"),
 		},
 	}
 	if e.err != nil {
 		return nil, e.err
+	}
+	if !withProjects {
+		if c.Dashboards.DBPath == "" {
+			if c.Database == "" {
+				return nil, fmt.Errorf("config: DASHBOARDS_DB_PATH or DATABASE_URL is required")
+			}
+			c.Dashboards.DBPath = strings.TrimPrefix(c.Database, "sqlite://")
+		}
+		return c, nil
 	}
 	path := e.str("PROJECTS_FILE", DefaultProjectsFile)
 	f, err := os.Open(path)

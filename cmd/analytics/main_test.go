@@ -32,4 +32,9 @@ func TestNoSubcommandPrintsUsage(t *testing.T) {
 	if !strings.Contains(out.String(), "usage") {
 		t.Fatalf("output %q must contain usage", out.String())
 	}
+	// The mode list is the CLI's contract; `sync` was removed with the
+	// application's replication support.
+	if got := out.String(); !strings.Contains(got, "dashboards") || strings.Contains(got, "sync") {
+		t.Fatalf("usage = %q, want dashboards listed and sync gone", got)
+	}
 }

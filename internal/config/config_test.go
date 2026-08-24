@@ -45,8 +45,11 @@ func TestDefaultsApplied(t *testing.T) {
 		c.Retention.Web.AggregateDays != 365 || c.Retention.Product.AggregateDays != 365 {
 		t.Errorf("Retention = %+v", c.Retention)
 	}
-	if c.Sync.Interval != 5*time.Minute || c.Sync.LitestreamConfig != "/etc/litestream.yml" {
-		t.Errorf("Sync = %+v", c.Sync)
+	if c.Dashboards.Addr != "0.0.0.0:3000" || c.Dashboards.Interval != 15*time.Minute {
+		t.Errorf("Dashboards = %+v", c.Dashboards)
+	}
+	if c.Dashboards.ProjectDir != "/opt/evidence" || c.Dashboards.WorkDir != "/var/lib/dashboards" {
+		t.Errorf("Dashboards dirs = %+v", c.Dashboards)
 	}
 }
 
@@ -65,9 +68,10 @@ func TestEnvOverrides(t *testing.T) {
 		"RETENTION_WEB_AGGREGATE_DAYS":     "30",
 		"RETENTION_PRODUCT_RAW_DAYS":       "10",
 		"RETENTION_PRODUCT_AGGREGATE_DAYS": "60",
-		"SYNC_INTERVAL":                    "1m",
-		"SYNC_LITESTREAM_CONFIG":           "/tmp/ls.yml",
-		"SYNC_REPLICA_PATH":                "/tmp/replica.db",
+		"DASHBOARDS_ADDR":                  "127.0.0.1:4000",
+		"DASHBOARDS_INTERVAL":              "1m",
+		"DASHBOARDS_PROJECT_DIR":           "/tmp/evidence",
+		"DASHBOARDS_WORK_DIR":              "/tmp/work",
 	}, minimalProjects)
 	if err != nil {
 		t.Fatal(err)
@@ -85,8 +89,9 @@ func TestEnvOverrides(t *testing.T) {
 		c.Retention.Product.RawDays != 10 || c.Retention.Product.AggregateDays != 60 {
 		t.Errorf("Retention = %+v", c.Retention)
 	}
-	if c.Sync.Interval != time.Minute || c.Sync.LitestreamConfig != "/tmp/ls.yml" || c.Sync.ReplicaPath != "/tmp/replica.db" {
-		t.Errorf("Sync = %+v", c.Sync)
+	if c.Dashboards.Addr != "127.0.0.1:4000" || c.Dashboards.Interval != time.Minute ||
+		c.Dashboards.ProjectDir != "/tmp/evidence" || c.Dashboards.WorkDir != "/tmp/work" {
+		t.Errorf("Dashboards = %+v", c.Dashboards)
 	}
 }
 
@@ -185,5 +190,70 @@ func TestLoadFromProcessEnv(t *testing.T) {
 	}
 	if c.Log.Level != "warn" || len(c.Projects) != 1 {
 		t.Errorf("Load() = %+v", c)
+	}
+}
+
+// mapLookup is the FromEnv* seam: a lookup backed by a plain map.
+func mapLookup(vars map[string]string) func(string) (string, bool) {
+	return func(k string) (string, bool) { v, ok := vars[k]; return v, ok }
+}
+
+func TestDashboardsDefaults(t *testing.T) {
+	c, err := FromEnvDashboards(mapLookup(map[string]string{
+		"DATABASE_URL": "sqlite:///var/lib/analytics/analytics.db",
+	}))
+	if err != nil {
+		t.Fatalf("FromEnvDashboards: %v", err)
+	}
+	if c.Dashboards.DBPath != "/var/lib/analytics/analytics.db" {
+		t.Errorf("DBPath = %q, want the DATABASE_URL path", c.Dashboards.DBPath)
+	}
+	if c.Dashboards.Addr != "0.0.0.0:3000" || c.Dashboards.Interval != 15*time.Minute {
+		t.Errorf("defaults = %+v", c.Dashboards)
+	}
+	if c.Dashboards.ProjectDir != "/opt/evidence" || c.Dashboards.WorkDir != "/var/lib/dashboards" {
+		t.Errorf("dir defaults = %+v", c.Dashboards)
+	}
+}
+
+func TestDashboardsDBPathWins(t *testing.T) {
+	c, err := FromEnvDashboards(mapLookup(map[string]string{
+		"DATABASE_URL":       "sqlite:///var/lib/analytics/analytics.db",
+		"DASHBOARDS_DB_PATH": "/data/replica.db",
+	}))
+	if err != nil {
+		t.Fatalf("FromEnvDashboards: %v", err)
+	}
+	if c.Dashboards.DBPath != "/data/replica.db" {
+		t.Errorf("DBPath = %q, want the explicit override", c.Dashboards.DBPath)
+	}
+}
+
+func TestDashboardsNeedsADatabase(t *testing.T) {
+	if _, err := FromEnvDashboards(mapLookup(map[string]string{})); err == nil {
+		t.Fatal("want an error with neither DASHBOARDS_DB_PATH nor DATABASE_URL")
+	}
+}
+
+func TestDashboardsIgnoresProjectsFile(t *testing.T) {
+	// A replica-only host has no project list; dashboards must not demand one.
+	c, err := FromEnvDashboards(mapLookup(map[string]string{
+		"DASHBOARDS_DB_PATH": "/data/replica.db",
+		"PROJECTS_FILE":      "/nonexistent/projects.json",
+	}))
+	if err != nil {
+		t.Fatalf("FromEnvDashboards: %v", err)
+	}
+	if len(c.Projects) != 0 {
+		t.Errorf("Projects = %v, want none", c.Projects)
+	}
+}
+
+func TestDashboardsReportsBadDurations(t *testing.T) {
+	if _, err := FromEnvDashboards(mapLookup(map[string]string{
+		"DASHBOARDS_DB_PATH":  "/data/replica.db",
+		"DASHBOARDS_INTERVAL": "soon",
+	})); err == nil {
+		t.Fatal("want an error for an unparseable DASHBOARDS_INTERVAL")
 	}
 }
