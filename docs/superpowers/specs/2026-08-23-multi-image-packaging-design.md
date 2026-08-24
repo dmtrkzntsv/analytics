@@ -64,9 +64,12 @@ One `Dockerfile`, four stages, two published targets.
 | stage | base | purpose |
 |---|---|---|
 | `go-build` | `golang:1.25-alpine` | static `analytics` binary (unchanged) |
-| `evidence-build` | `node:20-alpine` + `build-base python3` | `COPY evidence/package*.json` → `npm ci` → `COPY evidence/` |
+| `evidence-build` | `node:22-alpine` + `build-base python3` | `COPY evidence/package*.json` → `npm ci` → `COPY evidence/` |
 | `runtime` *(target)* | `alpine:3.20` | + `analytics` |
-| `evidence` *(target)* | `node:20-alpine` | + `analytics`, + `/opt/evidence` from `evidence-build` |
+| `evidence` *(target)* | `node:22-alpine` | + `analytics`, + `/opt/evidence` from `evidence-build` |
+
+Node 22 rather than 20: the Evidence build imports the `node:sqlite` builtin,
+which 20 does not have, and fails with `ERR_UNKNOWN_BUILTIN_MODULE`.
 
 `npm ci` sits behind a lockfile-keyed layer, so editing a dashboard page does
 not reinstall dependencies. `@evidence-dev/sqlite` depends on `sqlite3`, which
@@ -270,7 +273,7 @@ which.
 | Risk | Mitigation |
 |---|---|
 | `npm ci` compiling `sqlite3` for arm64 under QEMU may take 15–30 min per release | Validate early in the plan. Fallback: publish `analytics-evidence` for amd64 only at first; the reader host is usually the beefier machine. |
-| Evidence image is ~500–700 MB against ~40 MB today | Only the reader pulls it, once per release, and it replaces a `node:20-alpine` pull plus a runtime `npm ci` that were already happening. |
+| Evidence image is ~1.0 GB against ~35 MB for the collector (measured; `node_modules` alone is 650 MB, of which `@duckdb` is 138 MB) | Only the reader pulls it, once per release, and it replaces a `node:20-alpine` pull plus a runtime `npm ci` that were already happening. |
 | `VACUUM INTO` doubles database size transiently | Acceptable at the design point (a few hundred MB); documented in `docs/deployment.md` alongside the existing "database size" guidance. |
 | Deleting `sync` removes verified restore for existing users | `restore.sh` reproduces it exactly — temp file, `PRAGMA quick_check`, atomic rename, `flock` against overlapping cron runs. |
 | GHCR packages private by default | Section 10; decide and document before the first tag. |
