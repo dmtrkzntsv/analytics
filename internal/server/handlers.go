@@ -84,7 +84,7 @@ func (s *server) handleHit(w http.ResponseWriter, r *http.Request) {
 		ID:             newID(),
 		Project:        p.Project,
 		TS:             time.Now().UTC(),
-		VisitorHash:    identity.VisitorHash(salt, clientIP(r), ua, p.Project),
+		ActorID:    identity.VisitorHash(salt, clientIP(r), ua, p.Project),
 		Path:           page.Path,
 		ReferrerSource: source,
 		UTMSource:      page.UTMSource,

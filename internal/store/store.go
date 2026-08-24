@@ -9,21 +9,52 @@ import (
 	"github.com/dmitry/analytics/internal/civil"
 )
 
-// WebHit represents a single web analytics event.
+// WebHit represents a single web pageview ($pageview).
 type WebHit struct {
 	ID, Project                       string
-	TS                                time.Time
-	VisitorHash, Path, ReferrerSource string
+	TS, ReceivedAt                    time.Time
+	ActorID, UserID, GroupID          string
+	Path, ReferrerSource              string
 	UTMSource, UTMMedium, UTMCampaign string
 	Country, Device, Browser, OS      string
 }
 
-// ProductEvent represents a product analytics event.
+// ProductEvent represents a custom event from any surface.
 type ProductEvent struct {
-	ID, Project, EventName, UserID string
-	TS                             time.Time
-	Attributes                     map[string]string
+	ID, Project, EventName   string
+	TS, ReceivedAt           time.Time
+	ActorID, UserID, GroupID string
+	Platform, AppVersion     string
+	Attributes               map[string]string
 }
+
+// AppView represents a single app screen view ($screen_view). Note what is
+// absent: no browser, no device class, no referrer, no utm — and no
+// User-Agent parsing anywhere. Apps declare their context, which is why the
+// Electron-reports-as-Chrome and OkHttp-reports-as-desktop problems do not
+// arise here rather than being patched around.
+type AppView struct {
+	ID, Project                         string
+	TS, ReceivedAt                      time.Time
+	ActorID, UserID, GroupID, SessionID string
+	Screen                              string
+	Platform, AppVersion                string
+	OSVersion, DeviceModel, Locale      string
+	Country                             string
+}
+
+// Identity is a display name for a user or group. Names live in their own
+// table rather than on event rows: a name repeated on every row could never
+// be updated, and names change.
+type Identity struct {
+	Project, Kind, ID, Name string
+}
+
+// Identity kinds.
+const (
+	KindUser  = "user"
+	KindGroup = "group"
+)
 
 // ProjectInfo represents basic information about a project.
 type ProjectInfo struct {
@@ -44,6 +75,8 @@ type Store interface {
 	SyncProjects(ctx context.Context, ps []ProjectInfo) error
 	WriteWebHits(ctx context.Context, hits []WebHit) error
 	WriteProductEvents(ctx context.Context, evs []ProductEvent) error
+	WriteAppViews(ctx context.Context, views []AppView) error
+	UpsertIdentities(ctx context.Context, ids []Identity) error
 	WebDaysBefore(ctx context.Context, project string, before civil.Date) ([]civil.Date, error)
 	ProductDaysBefore(ctx context.Context, project string, before civil.Date) ([]civil.Date, error)
 	AggregateWebDay(ctx context.Context, project string, day civil.Date) error

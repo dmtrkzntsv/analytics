@@ -40,7 +40,7 @@ func TestSeedEvidenceFixture(t *testing.T) {
 			ts := day.Add(time.Duration(i) * time.Hour)
 			hits = append(hits, store.WebHit{
 				ID: fmt.Sprintf("h%d-%d", d, i), Project: "app", TS: ts,
-				VisitorHash: fmt.Sprintf("v%d", i%3), Path: []string{"/", "/pricing", "/docs"}[i%3],
+				ActorID: fmt.Sprintf("v%d", i%3), Path: []string{"/", "/pricing", "/docs"}[i%3],
 				ReferrerSource: []string{"google", "", "hn"}[i%3],
 				Country:        []string{"US", "DE", "FR"}[i%3], Device: []string{"desktop", "mobile"}[i%2],
 				Browser: "Chrome", OS: "Linux",
@@ -50,7 +50,7 @@ func TestSeedEvidenceFixture(t *testing.T) {
 			evs = append(evs, store.ProductEvent{
 				ID: fmt.Sprintf("e%d-%d", d, i), Project: "app",
 				EventName: []string{"signup", "subscribed"}[i%2],
-				UserID:    fmt.Sprintf("u%d", i%3), TS: ts,
+				ActorID:    fmt.Sprintf("u%d", i%3), TS: ts,
 				Attributes: map[string]string{"plan": []string{"pro", "free"}[i%2]},
 			})
 		}

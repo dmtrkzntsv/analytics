@@ -12,12 +12,12 @@ func TestKnownAttributeKeys(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
 	evs := []store.ProductEvent{
-		{ID: "1", Project: "app", EventName: "e", UserID: "u", TS: ts("2026-08-10T10:00:00Z"),
+		{ID: "1", Project: "app", EventName: "e", ActorID: "u", TS: ts("2026-08-10T10:00:00Z"),
 			Attributes: map[string]string{"plan": "pro", "weird key!": "x"}},
-		{ID: "2", Project: "app", EventName: "e", UserID: "u", TS: ts("2026-08-10T11:00:00Z"),
+		{ID: "2", Project: "app", EventName: "e", ActorID: "u", TS: ts("2026-08-10T11:00:00Z"),
 			Attributes: map[string]string{"plan": "free", "source": "ads"}},
 		// No attributes at all: must not break json_each or add keys.
-		{ID: "3", Project: "app", EventName: "e", UserID: "u", TS: ts("2026-08-10T12:00:00Z")},
+		{ID: "3", Project: "app", EventName: "e", ActorID: "u", TS: ts("2026-08-10T12:00:00Z")},
 	}
 	if err := db.WriteProductEvents(ctx, evs); err != nil {
 		t.Fatal(err)
@@ -52,7 +52,7 @@ func TestRebuildFlatView(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
 	evs := []store.ProductEvent{
-		{ID: "1", Project: "app", EventName: "e", UserID: "u1", TS: ts("2026-08-10T10:00:00Z"),
+		{ID: "1", Project: "app", EventName: "e", ActorID: "u1", TS: ts("2026-08-10T10:00:00Z"),
 			Attributes: map[string]string{"plan": "pro"}},
 	}
 	if err := db.WriteProductEvents(ctx, evs); err != nil {
@@ -135,7 +135,7 @@ func TestRebuildFlatViewQuotedKeys(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
 	if err := db.WriteProductEvents(ctx, []store.ProductEvent{
-		{ID: "1", Project: "app", EventName: "e", UserID: "u", TS: ts("2026-08-10T10:00:00Z"),
+		{ID: "1", Project: "app", EventName: "e", ActorID: "u", TS: ts("2026-08-10T10:00:00Z"),
 			Attributes: map[string]string{"it's": "apostrophe", `say"hi`: "doublequote"}},
 	}); err != nil {
 		t.Fatal(err)

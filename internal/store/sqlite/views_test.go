@@ -210,7 +210,7 @@ func TestStitchViewsMixedAggregatedAndRawDays(t *testing.T) {
 	ctx := context.Background()
 	seedWebDay(t, db) // 2026-08-10
 	if err := db.WriteWebHits(ctx, []store.WebHit{
-		{ID: "9", Project: "app", TS: ts("2026-08-11T10:00:00Z"), VisitorHash: "v9", Path: "/a"},
+		{ID: "9", Project: "app", TS: ts("2026-08-11T10:00:00Z"), ActorID: "v9", Path: "/a"},
 	}); err != nil {
 		t.Fatal(err)
 	}

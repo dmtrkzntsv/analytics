@@ -15,13 +15,13 @@ import (
 func seedProductDay(t *testing.T, db *DB) {
 	t.Helper()
 	evs := []store.ProductEvent{
-		{ID: "p1", Project: "app", EventName: "subscribed", UserID: "u1", TS: ts("2026-08-10T10:00:00Z"),
+		{ID: "p1", Project: "app", EventName: "subscribed", ActorID: "u1", TS: ts("2026-08-10T10:00:00Z"),
 			Attributes: map[string]string{"plan": "pro", "source": "ads"}},
-		{ID: "p2", Project: "app", EventName: "subscribed", UserID: "u2", TS: ts("2026-08-10T11:00:00Z"),
+		{ID: "p2", Project: "app", EventName: "subscribed", ActorID: "u2", TS: ts("2026-08-10T11:00:00Z"),
 			Attributes: map[string]string{"plan": "free", "source": "ads"}},
-		{ID: "p3", Project: "app", EventName: "subscribed", UserID: "u2", TS: ts("2026-08-10T12:00:00Z"),
+		{ID: "p3", Project: "app", EventName: "subscribed", ActorID: "u2", TS: ts("2026-08-10T12:00:00Z"),
 			Attributes: map[string]string{"plan": "free"}},
-		{ID: "p4", Project: "app", EventName: "ping", UserID: "u1", TS: ts("2026-08-10T13:00:00Z")},
+		{ID: "p4", Project: "app", EventName: "ping", ActorID: "u1", TS: ts("2026-08-10T13:00:00Z")},
 	}
 	if err := db.WriteProductEvents(context.Background(), evs); err != nil {
 		t.Fatal(err)
@@ -108,7 +108,7 @@ func TestAggregateProductTopNCollapsesTail(t *testing.T) {
 	add := func(user, val string) {
 		id++
 		evs = append(evs, store.ProductEvent{ID: fmt.Sprintf("e%d", id), Project: "app",
-			EventName: "clicked", UserID: user, TS: ts("2026-08-10T10:00:00Z"),
+			EventName: "clicked", ActorID: user, TS: ts("2026-08-10T10:00:00Z"),
 			Attributes: map[string]string{"button": val}})
 	}
 	add("u1", "v0")

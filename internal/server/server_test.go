@@ -75,7 +75,7 @@ func TestHitHappyPath(t *testing.T) {
 		hit.Country != "DE" || hit.Device != "desktop" || hit.Browser != "Chrome" || hit.OS != "Windows" {
 		t.Errorf("hit = %+v", hit)
 	}
-	if hit.ID == "" || hit.VisitorHash == "" || len(hit.VisitorHash) != 16 {
+	if hit.ID == "" || hit.ActorID == "" || len(hit.ActorID) != 16 {
 		t.Errorf("id/hash: %+v", hit)
 	}
 	if w.Header().Get("Access-Control-Allow-Origin") != "https://app.com" {

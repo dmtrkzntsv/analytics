@@ -92,7 +92,7 @@ func TestRunDailyPassAggregatesOldDays(t *testing.T) {
 	ctx := context.Background()
 	// Old day (beyond the 7-day raw window relative to fake now 2026-08-22).
 	if err := st.WriteWebHits(ctx, []store.WebHit{
-		{ID: "1", Project: "app", TS: mustTime("2026-08-10T10:00:00Z"), VisitorHash: "v", Path: "/"}}); err != nil {
+		{ID: "1", Project: "app", TS: mustTime("2026-08-10T10:00:00Z"), ActorID: "v", Path: "/"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.WriteProductEvents(ctx, []store.ProductEvent{
@@ -102,7 +102,7 @@ func TestRunDailyPassAggregatesOldDays(t *testing.T) {
 	}
 	// Recent day (inside the window) must survive as raw.
 	if err := st.WriteWebHits(ctx, []store.WebHit{
-		{ID: "3", Project: "app", TS: mustTime("2026-08-21T10:00:00Z"), VisitorHash: "v", Path: "/"}}); err != nil {
+		{ID: "3", Project: "app", TS: mustTime("2026-08-21T10:00:00Z"), ActorID: "v", Path: "/"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.RunDailyPass(ctx); err != nil {
@@ -177,7 +177,7 @@ func TestRunDailyPassCoversArchivedProjects(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := st.WriteWebHits(ctx, []store.WebHit{
-		{ID: "1", Project: "gone", TS: mustTime("2026-08-10T10:00:00Z"), VisitorHash: "v", Path: "/"}}); err != nil {
+		{ID: "1", Project: "gone", TS: mustTime("2026-08-10T10:00:00Z"), ActorID: "v", Path: "/"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.RunDailyPass(ctx); err != nil {
@@ -203,8 +203,8 @@ func TestRunDailyPassHonoursProjectRetention(t *testing.T) {
 	st, _, r := setup(t, projectsJSON)
 	ctx := context.Background()
 	hits := []store.WebHit{
-		{ID: "1", Project: "app", TS: mustTime("2026-08-10T10:00:00Z"), VisitorHash: "v", Path: "/"},
-		{ID: "2", Project: "keep", TS: mustTime("2026-08-10T10:00:00Z"), VisitorHash: "v", Path: "/"},
+		{ID: "1", Project: "app", TS: mustTime("2026-08-10T10:00:00Z"), ActorID: "v", Path: "/"},
+		{ID: "2", Project: "keep", TS: mustTime("2026-08-10T10:00:00Z"), ActorID: "v", Path: "/"},
 	}
 	if err := st.WriteWebHits(ctx, hits); err != nil {
 		t.Fatal(err)
