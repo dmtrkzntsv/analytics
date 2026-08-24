@@ -13,23 +13,30 @@ IP address nor the full User-Agent is ever written to the database or the
 logs — they exist only long enough to compute the hash. Cross-day linking of a
 visitor is therefore not merely disallowed but impossible after rotation.
 
-## Quickstart — all-in-one
+## Quickstart — one server
 
-Ingestion, backup and dashboards on one machine (a Raspberry Pi is enough):
+Ingestion and dashboards on one machine (a Raspberry Pi is enough). No
+credentials, no object storage, no checkout:
 
 ```bash
-git clone <this repo> && cd analytics/backoffice
-cp ../projects.example.json projects.json   # edit: projects, allowed_origins
-cp ../.env.example .env                     # fill in the R2 credentials
-docker compose -f docker-compose.aio.yml up -d
+mkdir analytics && cd analytics
+base=https://raw.githubusercontent.com/dmtrkzntsv/analytics/main
+curl -fsSLO $base/deploy/compose/docker-compose.yml
+curl -fsSL $base/projects.example.json -o projects.json   # edit: projects, allowed_origins
+docker compose up -d
 open http://localhost:3000        # dashboards; ingestion is on :8080
 ```
 
 Put Caddy, nginx or a Cloudflare tunnel in front of `:8080` for TLS.
 
-## Quickstart — split (VPS + backoffice)
+Dashboards come up on `:3000` as `503` while Evidence runs its first build —
+about a minute — then serve the site. Backup is opt-in and separate: see
+[docs/litestream.md](docs/litestream.md).
 
-Ingestion on a public VPS, dashboards at home off a replica.
+## Quickstart — two servers
+
+Ingestion on a public VPS, dashboards at home off a replica. The bucket is
+the only channel between them; neither machine needs to reach the other.
 
 On the VPS — either straight from a GitHub release:
 
@@ -61,18 +68,35 @@ The remote form downloads the release tarball for the machine's architecture
 binary, config, systemd units and logrotate rules. Releases are published by
 CI whenever a `v*` tag is pushed.
 
-On the backoffice machine:
+On the machine that renders dashboards, install the restore script on cron
+and point the dashboards at what it produces:
 
 ```bash
-cd backoffice
-cp ../projects.example.json projects.json
-cp ../.env.example .env                     # fill in the R2 credentials
-docker compose up -d   # compose sets SYNC_REPLICA_PATH=/data/replica.db itself
+curl -fsSLO $base/deploy/compose/docker-compose.evidence.yml
+sudo install -m 0755 restore.sh /usr/local/bin/restore.sh   # from deploy/litestream/
+sudo cp restore.cron /etc/cron.d/analytics-restore
+docker compose -f docker-compose.evidence.yml up -d
 ```
 
-`analytics sync` restores the database from R2 into a temporary file, runs
-`PRAGMA quick_check` on it and only then swaps it into place, so a failed or
-corrupt restore leaves the previous replica serving.
+`restore.sh` restores from R2 into a temporary file, runs `PRAGMA quick_check`
+on it and only then renames it into place, so a failed or corrupt restore
+leaves the previous replica serving. The collector itself never talks to
+object storage — [docs/litestream.md](docs/litestream.md) covers the whole
+arrangement.
+
+## Images
+
+| Image | Contents | Modes |
+| --- | --- | --- |
+| `ghcr.io/dmtrkzntsv/analytics` | the binary on alpine, ~35 MB | `serve`, `migrate`, `version` |
+| `ghcr.io/dmtrkzntsv/analytics-evidence` | the binary, Node 22 and the Evidence project, ~1 GB | `dashboards` |
+
+They are separate because `serve` is the internet-facing process and has no
+business carrying a Node toolchain. Both are published for amd64 and arm64 on
+every `v*` tag; the collector is also published for 32-bit arm.
+
+Updating is `docker compose pull && docker compose up -d`. Never `down -v` —
+the database lives in the named volume.
 
 ## Embedding
 
@@ -135,13 +159,16 @@ the binary itself only reads the real environment. See
 | `RETENTION_WEB_AGGREGATE_DAYS` | Days aggregates are kept. Default 365. |
 | `RETENTION_PRODUCT_RAW_DAYS` | Days raw events are kept before rollup. Default 30. |
 | `RETENTION_PRODUCT_AGGREGATE_DAYS` | Days product aggregates are kept. Default 365. |
-| `SYNC_INTERVAL` | Replica refresh cadence for the `sync` command. Default `5m`. |
-| `SYNC_LITESTREAM_CONFIG` | Litestream config passed to `litestream restore`. Default `/etc/litestream.yml`. |
-| `SYNC_REPLICA_PATH` | Where the verified replica is swapped into place. |
+| `DASHBOARDS_DB_PATH` | Database `dashboards` renders. Defaults to the `DATABASE_URL` path. |
+| `DASHBOARDS_ADDR` | Address the dashboards bind. Default `0.0.0.0:3000`. |
+| `DASHBOARDS_INTERVAL` | Minimum spacing between Evidence rebuilds. Default `15m`. |
+| `DASHBOARDS_PROJECT_DIR` | Evidence project in the image. Default `/opt/evidence`. |
+| `DASHBOARDS_WORK_DIR` | Where the database snapshot is written. Default `/var/lib/dashboards`. |
 
-The litestream credentials (`LITESTREAM_ACCESS_KEY_ID`,
-`LITESTREAM_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_ENDPOINT`) live in the same
-`analytics.env`, so secrets never sit in a JSON file.
+If you replicate with litestream, its credentials
+(`LITESTREAM_ACCESS_KEY_ID`, `LITESTREAM_SECRET_ACCESS_KEY`, `R2_BUCKET`,
+`R2_ENDPOINT`) live in the same `analytics.env`, so secrets never sit in a
+JSON file. Nothing in the collector reads them.
 
 Projects live in `projects.json` — a JSON array (see
 `projects.example.json` at the repo root):
@@ -214,10 +241,16 @@ full `VACUUM`, which would rewrite the whole file.
 
 ## Dashboards
 
-Evidence serves a static site on `:3000`: an index of projects, and a web and
-product page for each. It reads the database directly (all-in-one) or the
-verified replica (split), and rebuilds when the replica changes, otherwise
-every few minutes.
+`analytics dashboards` serves a static Evidence site on `:3000`: an index of
+projects, and a web and product page for each.
+
+Evidence is a static site generator — it bakes query results in at build time
+— so serving dashboards is a build loop. Each cycle copies the database with
+`VACUUM INTO` and renders that snapshot, so the Node process never opens the
+file the collector is writing (or that a restore job is about to replace).
+It rebuilds when the database has changed and at most once per
+`DASHBOARDS_INTERVAL`, and a build that fails leaves the previous site
+serving.
 
 Dashboards never show a seam between raw and aggregated data. Every figure
 comes from a `v_*` stitch view that unions the aggregate tables with a live
@@ -232,7 +265,7 @@ make check       # vet + coverage gate: >=80% total, >=85% for core packages
 make build       # single binary
 make build-all   # linux amd64 / arm64 / arm
 make dist        # release tarballs (binary + deploy/) with SHA256SUMS
-make docker      # container image
+make docker      # both container images
 ```
 
 Tests are written first; every commit is expected to leave `make check`

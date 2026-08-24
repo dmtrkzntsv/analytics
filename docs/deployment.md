@@ -1,30 +1,29 @@
 # Deployment runbook
 
-Two topologies. **All-in-one** puts ingestion, backup and dashboards on one
-machine — simplest, and enough for a Pi at home behind a tunnel.
-**Split** runs ingestion on a public VPS and dashboards at home off a verified
-replica, so the dashboard machine never needs to be reachable from the
-internet.
+Two topologies. **One server** puts ingestion and dashboards on the same
+machine — simplest, and enough for a Pi at home behind a tunnel. **Two
+servers** runs ingestion on a public VPS and dashboards at home off a
+restored replica, so the dashboard machine never needs to be reachable from
+the internet.
 
-Both replicate SQLite to S3-compatible object storage (Cloudflare R2 below)
-with litestream.
+Replication is not part of the application: `serve` writes a SQLite file and
+`dashboards` reads one. The two-server topology needs something to move that
+file, and litestream is the supported answer —
+[docs/litestream.md](litestream.md) covers bucket setup, credentials, the
+writer, the reader and recovery. The one-server topology needs none of it.
 
 ---
 
 ## 1. Object storage (R2)
 
-1. Cloudflare dashboard → R2 → **Create bucket**, e.g. `analytics-backup`.
-   Pick a location near the VPS; no public access.
-2. R2 → **Manage API Tokens** → *Create API Token*, permission
-   **Object Read & Write**, scoped to that bucket. Copy the Access Key ID and
-   Secret Access Key — the secret is shown once.
-3. Note the S3 endpoint: `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`.
-
-Any S3-compatible store works; only `endpoint` and `bucket` change.
+Only if you want backup or a second machine. See
+[docs/litestream.md](litestream.md) §1 for the bucket, the read-write token
+for the writer and the read-only token for the reader. Any S3-compatible
+store works; only `endpoint` and `bucket` change.
 
 ---
 
-## 2. VPS install (both topologies)
+## 2. VPS install (two-server topology)
 
 ```bash
 # From a published release (no checkout needed):
@@ -85,42 +84,45 @@ curl -i -X POST http://localhost:8080/api/hit \
 
 ---
 
-## 3. Backoffice
+## 3. Dashboards
 
-### All-in-one
+### One server
 
-Ingestion, litestream and Evidence in one compose stack:
-
-```bash
-cd backoffice
-cp ../projects.example.json projects.json    # edit projects
-cp ../.env.example .env    # fill in the R2 credentials from step 1
-docker compose -f docker-compose.aio.yml up -d
-```
-
-Evidence reads the live database read-only; SQLite WAL allows this alongside
-the writer.
-
-### Split
-
-On the backoffice machine, only sync and Evidence run:
+Ingestion and dashboards in one compose stack, no credentials needed:
 
 ```bash
-cd backoffice
-cp ../projects.example.json projects.json
-cp ../.env.example .env    # fill in the R2 credentials from step 1
+mkdir analytics && cd analytics
+base=https://raw.githubusercontent.com/dmtrkzntsv/analytics/main
+curl -fsSLO $base/deploy/compose/docker-compose.yml
+curl -fsSL $base/projects.example.json -o projects.json
+docker compose up -d
 ```
 
-Then `docker compose up -d` (the default `docker-compose.yml`); the compose
-file itself sets `SYNC_REPLICA_PATH=/data/replica.db` and
-`SYNC_LITESTREAM_CONFIG=/etc/litestream.yml` to match its mounts. The `sync`
-service restores from R2 into `/data/replica.db.tmp`, verifies it with
-`PRAGMA quick_check`, swaps it into place and touches `/data/.last_sync`.
-Evidence watches that marker and rebuilds when it changes.
+`:3000` answers `503` until Evidence finishes its first build — roughly a
+minute — then serves the site. To add continuous backup, fetch
+`docker-compose.litestream.yml` and `litestream.yml`, put the R2 credentials
+in `.env`, and bring the stack up with both files:
 
-A failed or corrupt restore is not fatal: the temporary file is discarded and
-the previous replica keeps serving. Check progress with
-`docker compose logs -f sync`.
+```bash
+docker compose -f docker-compose.yml -f docker-compose.litestream.yml up -d
+```
+
+### Two servers
+
+The reader restores the database on cron and renders it. Install
+`deploy/litestream/restore.sh` and `restore.cron` on the host (see
+[docs/litestream.md](litestream.md) §4), then:
+
+```bash
+curl -fsSLO $base/deploy/compose/docker-compose.evidence.yml
+docker compose -f docker-compose.evidence.yml up -d
+```
+
+`dashboards` rebuilds within a minute of a successful restore: it compares
+the replica's size and modification time and does not need to be told.
+
+A failed or corrupt restore is not fatal — `restore.sh` verifies into a
+temporary file and only then renames, so the previous replica keeps serving.
 
 ---
 
@@ -139,28 +141,26 @@ sqlite3 /tmp/check.db "SELECT MAX(day) FROM v_web_daily;"
 rm /tmp/check.db
 ```
 
-Without `sqlite3` installed, `analytics sync` performs the same
-restore-and-verify against a scratch path — run it once with
-`SYNC_REPLICA_PATH=/tmp/check.db` (plus the usual env) and inspect the
-result.
+`deploy/litestream/restore.sh` performs the same restore-and-verify — point
+`REPLICA_PATH` at a scratch file to use it as the drill.
 
 Check the max day is recent. A restore that succeeds but is days stale means
 litestream is not replicating: inspect `journalctl -u litestream`.
 
 ---
 
-## 5. Migrating all-in-one → split
+## 5. Migrating one server → two
 
 1. Stand up the VPS per section 2, pointing litestream at the same bucket.
-2. On the backoffice machine, stop the `analytics` and `litestream` services
-   in the aio compose file (or switch to `docker-compose.yml`).
-3. Change Evidence's source to the replica:
-   `EVIDENCE_SOURCE__analytics__filename=../../../data/replica.db`.
-4. Bring up the `sync` service and confirm `/data/.last_sync` appears.
+2. On the machine that will render dashboards, stop the `analytics` service
+   (and the litestream overlay, if you were replicating from here).
+3. Install `restore.sh` on cron per [docs/litestream.md](litestream.md) §4,
+   with `SOURCE_DB` set to the database path **on the VPS** — it must match
+   `path:` in `litestream.yml`, not wherever the file lands locally.
+4. Switch to `docker-compose.evidence.yml`, which points
+   `DASHBOARDS_DB_PATH` at `/data/replica.db`, and confirm the first restore
+   lands before the next rebuild.
 5. Repoint the tracking snippet's `src` at the VPS hostname.
-
-The path is relative because the Evidence SQLite plugin resolves `filename`
-against the source directory, not the project root.
 
 ---
 
@@ -197,10 +197,12 @@ buffered in memory when the host died — bounded by `BUFFER_FLUSH_INTERVAL`.
 | --- | --- |
 | Logs | `journalctl -u analytics -f` |
 | Restart | `systemctl restart analytics` |
-| Upgrade | `curl -fsSL …/deploy/install.sh \| sudo bash -s -- --yes && sudo systemctl restart analytics` (or `make build && sudo ./deploy/install.sh --yes` from a checkout) |
+| Upgrade (systemd) | `curl -fsSL …/deploy/install.sh \| sudo bash -s -- --yes && sudo systemctl restart analytics` (or `make build && sudo ./deploy/install.sh --yes` from a checkout) |
+| Upgrade (compose) | `docker compose pull && docker compose up -d`. Never `down -v`: the database lives in the named volume. Pin a release with `ANALYTICS_VERSION=v0.3.0` in `.env`. |
 | Apply migrations only | `sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics migrate'` |
-| Database size | `du -h /var/lib/analytics/analytics.db` |
-| Replication status | `journalctl -u litestream --since -1h` |
+| Database size | `du -h /var/lib/analytics/analytics.db`. Dashboards need room for one more copy: each rebuild snapshots the database into `DASHBOARDS_WORK_DIR`. |
+| Replication status | `journalctl -u litestream --since -1h`, or `docker compose logs litestream` |
+| Dashboard rebuilds | `docker compose logs dashboards` — one `dashboards: rebuilt` line per successful build |
 
 Aggregation, pruning and incremental vacuum run daily at 03:00 UTC, and the
 visitor salt rotates at 00:00 UTC. A catch-up pass runs at startup, so
