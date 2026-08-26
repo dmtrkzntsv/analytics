@@ -1,20 +1,37 @@
 name: release
 on:
   push:
-    tags: ['v*']
+    branches: [main]
 permissions:
   contents: write
   packages: write
+# Serialize runs so two pushes can't compute the same tag.
+concurrency:
+  group: release
 jobs:
   release:
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+        with: { fetch-tags: true }
+      - id: tag
+        # vYY.M.D (UTC, no leading zeros); same-day repeats get .1, .2, ...
+        run: |
+          base="v$(date -u +%-y.%-m.%-d)"
+          tag="$base"
+          n=1
+          while git rev-parse -q --verify "refs/tags/$tag" >/dev/null; do
+            tag="$base.$n"
+            n=$((n + 1))
+          done
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@v5
         with: { go-version-file: go.mod }
       - run: make check
       - run: make dist
-      - run: gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/SHA256SUMS --generate-notes
+      - run: gh release create "${{ steps.tag.outputs.tag }}" dist/*.tar.gz dist/SHA256SUMS --target "$GITHUB_SHA" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -41,9 +58,9 @@ jobs:
           target: runtime
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: true
-          build-args: VERSION=${{ github.ref_name }}
+          build-args: VERSION=${{ needs.release.outputs.tag }}
           tags: |
-            ghcr.io/${{ github.repository_owner }}/analytics:${{ github.ref_name }}
+            ghcr.io/${{ github.repository_owner }}/analytics:${{ needs.release.outputs.tag }}
             ghcr.io/${{ github.repository_owner }}/analytics:latest
           cache-from: type=gha,scope=analytics
           cache-to: type=gha,mode=max,scope=analytics
@@ -57,9 +74,9 @@ jobs:
           target: evidence
           platforms: linux/amd64,linux/arm64
           push: true
-          build-args: VERSION=${{ github.ref_name }}
+          build-args: VERSION=${{ needs.release.outputs.tag }}
           tags: |
-            ghcr.io/${{ github.repository_owner }}/analytics-evidence:${{ github.ref_name }}
+            ghcr.io/${{ github.repository_owner }}/analytics-evidence:${{ needs.release.outputs.tag }}
             ghcr.io/${{ github.repository_owner }}/analytics-evidence:latest
           cache-from: type=gha,scope=evidence
           cache-to: type=gha,mode=max,scope=evidence
