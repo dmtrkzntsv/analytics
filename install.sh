@@ -6,7 +6,7 @@
 #
 # Straight from GitHub — downloads the latest release for this machine:
 #   curl -fsSL https://raw.githubusercontent.com/dmtrkzntsv/analytics/main/install.sh | sudo bash
-#   curl -fsSL ...install.sh | sudo bash -s -- --yes --version v26.8.25
+#   curl -fsSL ...install.sh | sudo bash -s -- --yes --version v26.825.1
 set -euo pipefail
 
 REPO="dmtrkzntsv/analytics"

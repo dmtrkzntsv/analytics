@@ -5,7 +5,7 @@ on:
 permissions:
   contents: write
   packages: write
-# Serialize runs so two pushes can't compute the same tag.
+# Serialize runs so releases are published in commit order.
 concurrency:
   group: release
 jobs:
@@ -15,18 +15,10 @@ jobs:
       tag: ${{ steps.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-tags: true }
       - id: tag
-        # vYY.M.D (UTC, no leading zeros); same-day repeats get .1, .2, ...
-        run: |
-          base="v$(date -u +%-y.%-m.%-d)"
-          tag="$base"
-          n=1
-          while git rev-parse -q --verify "refs/tags/$tag" >/dev/null; do
-            tag="$base.$n"
-            n=$((n + 1))
-          done
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+        # vYY.MMDD.{build}: UTC date with the month unpadded (v26.825.N,
+        # v26.105.N); the run number makes the tag unique by construction.
+        run: echo "tag=v$(date -u +%-y.%-m%d).${{ github.run_number }}" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@v5
         with: { go-version-file: go.mod }
       - run: make check

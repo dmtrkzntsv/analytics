@@ -36,7 +36,7 @@ sudo ./install.sh                 # --user NAME to skip the prompt, --yes for de
 ```
 
 The curl form detects the architecture, downloads the matching tarball from
-the latest GitHub release (`--version vYY.M.D` to pin) and verifies its
+the latest GitHub release (`--version vYY.MMDD.{build}` to pin) and verifies its
 SHA256 before installing. Releases are published by CI on every push to
 `main`.
 
@@ -196,7 +196,7 @@ buffered in memory when the host died — bounded by `BUFFER_FLUSH_INTERVAL`.
 | Logs | `journalctl -u analytics -f` |
 | Restart | `systemctl restart analytics` |
 | Upgrade (systemd) | `curl -fsSL …/install.sh \| sudo bash -s -- --yes && sudo systemctl restart analytics` (or `make build && sudo ./install.sh --yes` from a checkout) |
-| Upgrade (compose) | `docker compose pull && docker compose up -d`. Never `down -v`: the database lives in the named volume. Pin a release with `ANALYTICS_VERSION=v0.3.0` in `.env`. |
+| Upgrade (compose) | `docker compose pull && docker compose up -d`. Never `down -v`: the database lives in the named volume. Pin a release with `ANALYTICS_VERSION=v26.825.1` in `.env`. |
 | Apply migrations only | `sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics migrate'` |
 | Generate an ingest key | `analytics keygen -n 1` |
 | Database size | `du -h /var/lib/analytics/analytics.db`. Dashboards need room for one more copy: each rebuild snapshots the database into `DASHBOARDS_WORK_DIR`. |

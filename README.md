@@ -54,7 +54,7 @@ On the VPS — either straight from a GitHub release:
 curl -fsSL https://raw.githubusercontent.com/dmtrkzntsv/analytics/main/install.sh | sudo bash
 ```
 
-(add `-s -- --yes` for a non-interactive install, `-s -- --version v26.8.25`
+(add `-s -- --yes` for a non-interactive install, `-s -- --version v26.825.1`
 to pin)
 
 or from a checkout:
@@ -419,5 +419,6 @@ and that re-running preserves an edited config.
 ### Releasing
 
 Every push to `main` makes CI build the tarballs and publish the GitHub
-release that `curl … install.sh` consumes, tagged `vYY.M.D` (UTC, no leading
-zeros — e.g. `v26.8.25`; a second release the same day gets `v26.8.25.1`).
+release that `curl … install.sh` consumes, tagged `vYY.MMDD.{build}` — the
+UTC date with the month unpadded, then the workflow run number (e.g.
+`v26.825.1`, or `v26.105.2` for January 5th).
