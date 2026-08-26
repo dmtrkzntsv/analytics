@@ -11,9 +11,9 @@ mkdir -p /etc/logrotate.d
 # Copy out of the read-only mount, mimicking an unpacked checkout: the
 # installer resolves the examples and binary relative to its own directory.
 cp -r /src/deploy /tmp/deploy
-cp /src/analytics /src/.env.example /src/projects.example.json /tmp/
+cp /src/install.sh /src/analytics /src/.env.example /src/projects.example.json /tmp/
 
-/tmp/deploy/install.sh --yes
+/tmp/install.sh --yes
 
 echo "--- assertions"
 test -x /usr/local/bin/analytics       && echo "ok: binary installed"
@@ -42,7 +42,7 @@ test -f /etc/logrotate.d/analytics     && echo "ok: logrotate installed"
 # Re-running must not clobber edited config files.
 echo '[{"alias": "edited", "name": "E", "allowed_origins": ["https://e.com"]}]' > /etc/analytics/projects.json
 echo 'DATABASE_URL=sqlite:///edited.db' > /etc/analytics/analytics.env
-/tmp/deploy/install.sh --yes > /dev/null
+/tmp/install.sh --yes > /dev/null
 grep -q edited /etc/analytics/projects.json && grep -q edited /etc/analytics/analytics.env \
   && echo "ok: rerun preserves config"
 

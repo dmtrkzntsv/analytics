@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs deploy/install.sh inside a throwaway Debian container (with systemctl
+# Runs install.sh inside a throwaway Debian container (with systemctl
 # stubbed — no systemd in a container) and asserts every artifact lands where
 # the runbook says. Requires docker and a linux binary at the repo root.
 # The container-side assertions live in test-install-inner.sh.
