@@ -82,7 +82,7 @@ hosts):
 | `MCP_RESOURCE_URL` | Canonical public URI of this server, e.g. `https://analytics.example.com/mcp`. Required in `oauth` mode. |
 | `MCP_AUTH_ISSUER` | Authorization server issuer URL. Required in `oauth` mode; optional in `token` mode, where setting it enables the metadata document. |
 | `MCP_AUTH_AUDIENCE` | Expected `aud`. Defaults to `MCP_RESOURCE_URL`. |
-| `MCP_READ_TOKENS` | Comma-separated `label:token` pairs. Required in `token` mode. |
+| `MCP_READ_TOKENS` | Comma-separated `label:token` pairs. Required in `token` mode. See §4.1. |
 | `MCP_QUERY_TIMEOUT` | Per-query deadline. Default `10s`. |
 | `MCP_QUERY_MAX_ROWS` | Row cap for the `query` tool. Default `1000`. |
 
@@ -93,7 +93,40 @@ mode and no way to reach one by omission.
 
 `projects.json` is unchanged. Read tokens live in the environment, not the
 JSON file, for the same reason litestream credentials do: secrets should
-not sit in a file that is routinely edited and shared.
+not sit in a file that is routinely edited and shared. The split is a rule,
+not a convenience — `projects.json` holds only values that are public by
+design (`ingest_keys` ship in page source and app binaries;
+`allowed_origins` is public), and every actual secret lives in
+`analytics.env` beside the R2 credentials.
+
+### 4.1 Read token format and minting
+
+`MCP_READ_TOKENS` is a comma-separated list of `label:token` pairs. Each
+entry is split on its **first** `:` so a token may itself contain colons;
+an entry with an empty label or an empty token is a startup error naming
+the offending position. A token containing a comma cannot be expressed and
+is rejected at startup rather than silently truncated.
+
+The label is never compared and never logged as a credential — it is what
+appears as `TokenInfo.UserID`, so an operator can tell which token is in
+use from the logs without the token itself ever being written.
+
+`keygen` gains `-read` to mint them:
+
+    analytics keygen -read -n 2
+
+Unlike ingest keys, read tokens are true secrets: they grant read access to
+every project including identified-mode personal data. So they use 256 bits
+of entropy rather than 128, carry an `ar_` prefix to distinguish them from
+`ak_` ingest keys at a glance, and print an **env line for
+`analytics.env`** rather than a `projects.json` block:
+
+    Add to analytics.env:
+
+      MCP_READ_TOKENS=laptop:ar_…,ci:ar_…
+
+The two output shapes are the visible form of the rule above: `keygen`
+prints JSON for public identifiers and an env line for secrets.
 
 ## 5. Authentication and authorization
 
@@ -348,6 +381,11 @@ are not edited.
   unknown `kid`; `kid` rotation triggering a refetch.
 - **Verifier, `token`** — match, non-match, and that comparison does not
   short-circuit on a prefix.
+- **`MCP_READ_TOKENS` parsing** — multiple pairs; a token containing a
+  colon; empty label; empty token; a token containing a comma. The last
+  three are startup errors.
+- **`keygen -read`** — `ar_` prefix, 256 bits, prints an env line and no
+  `projects.json` block.
 - **Startup validation** — `-mcp` without `MCP_AUTH_MODE`, unknown mode,
   and each mode missing a required variable all exit non-zero.
 - **Flags** — bare `serve` exits non-zero with the usage message; each of
@@ -371,6 +409,7 @@ The 85% per-package coverage floor holds; `make check`, `make build-all`,
 ## 15. Package layout
 
     cmd/analytics/serve.go        -api / -mcp flags, usage error
+    cmd/analytics/keygen.go       -read: 256-bit ar_ tokens, env output
     internal/app/app.go           two listeners, existing shutdown order
     internal/config/config.go     MCP_* loading and fail-fast validation
     internal/mcpserver/
