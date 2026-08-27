@@ -136,6 +136,10 @@ use a shared browser inherits the previous user's identity. Events already
 sent stay unattributed: there is no retroactive stitching, so a pageview
 fired before `identify()` keeps no user id.
 
+Migrating a site off Plausible? The tagged-event classes on its CTAs need a
+shim, because this snippet has no class-based binding —
+[docs/plausible/](docs/plausible/) has one ready to paste.
+
 The snippet stays silent on localhost, `file://` URLs and automated browsers.
 To exclude yourself:
 
