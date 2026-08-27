@@ -2,6 +2,13 @@ name: release
 on:
   push:
     branches: [main]
+    # A prose-only commit ships no artifact, so it must not burn a version
+    # number, a release tag or a QEMU image build. A push that mixes docs
+    # with code does not match these patterns exhaustively and still
+    # releases, so nothing shippable can slip through unreleased.
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
 permissions:
   contents: write
   packages: write
