@@ -111,8 +111,16 @@ if [ -d /etc/logrotate.d ] && [ -f "$root/deploy/logrotate/analytics" ]; then
   install -m 0644 "$root/deploy/logrotate/analytics" /etc/logrotate.d/analytics
 fi
 
+# Litestream is not installed by us — it may live in /usr/local/bin (manual
+# tarball) or /usr/bin (package manager), so bake in wherever it actually is.
+# The fallback keeps the unit sensible when it is installed later by hand.
+litestream_bin="$(command -v litestream || true)"
+litestream_bin="${litestream_bin:-/usr/local/bin/litestream}"
+
 for unit in analytics litestream; do
-  sed "s/__USER__/$SERVICE_USER/g" "$root/deploy/systemd/$unit.service" \
+  sed -e "s/__USER__/$SERVICE_USER/g" \
+      -e "s|__LITESTREAM__|$litestream_bin|g" \
+      "$root/deploy/systemd/$unit.service" \
     > "/etc/systemd/system/$unit.service"
 done
 systemctl daemon-reload
@@ -120,7 +128,9 @@ systemctl enable analytics.service
 if command -v litestream >/dev/null 2>&1; then
   systemctl enable litestream.service
 else
-  echo "NOTE: litestream binary not found; install it (https://litestream.io/install/) then: systemctl enable --now litestream"
+  echo "NOTE: litestream binary not found; install it (https://litestream.io/install/)."
+  echo "  If it does not land at $litestream_bin, fix ExecStart= in"
+  echo "  /etc/systemd/system/litestream.service, then: systemctl enable --now litestream"
 fi
 
 cat <<EOF_DONE
