@@ -12,7 +12,7 @@ func TestListProjects(t *testing.T) {
 		t.Fatalf("error: %s", textOf(res))
 	}
 	out := textOf(res)
-	for _, want := range []string{"blog", "identified", "docs", "anonymous"} {
+	for _, want := range []string{"blog", "identified", "docs", "anonymous", "https://blog.example.com"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in %s", want, out)
 		}

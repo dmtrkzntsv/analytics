@@ -65,11 +65,12 @@ func (h *host) registerResources(s *mcp.Server) {
 	}, func(ctx context.Context, _ *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 		type pj struct {
 			Alias, Name, Identity string
-			Archived              bool `json:",omitempty"`
+			Archived              bool     `json:",omitempty"`
+			AllowedOrigins        []string `json:"allowed_origins"`
 		}
 		var out []pj
 		for _, p := range h.reg.Snapshot(ctx).Projects() {
-			out = append(out, pj{p.Alias, p.Name, p.Identity, p.Archived})
+			out = append(out, pj{p.Alias, p.Name, p.Identity, p.Archived, p.AllowedOrigins})
 		}
 		b, err := json.MarshalIndent(out, "", "  ")
 		if err != nil {

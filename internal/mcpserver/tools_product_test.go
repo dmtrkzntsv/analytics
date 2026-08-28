@@ -12,8 +12,12 @@ func TestProductEvents(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("error: %s", textOf(res))
 	}
-	if out := textOf(res); !strings.Contains(out, "signup") {
+	out := textOf(res)
+	if !strings.Contains(out, "signup") {
 		t.Errorf("missing event: %s", out)
+	}
+	if !strings.Contains(out, "total_events") {
+		t.Errorf("missing daily totals from v_product_totals: %s", out)
 	}
 }
 

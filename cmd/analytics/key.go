@@ -45,6 +45,10 @@ func cmdKey(args []string, stdout io.Writer) int {
 			return 1
 		}
 		p := ops.Reg.Snapshot(ctx).Project(*project)
+		if p == nil {
+			fmt.Fprintf(stdout, "issued %s (label %q) but project %q vanished before the snippet could be built; run `analytics key list` to confirm\n", key, *label, *project)
+			return 1
+		}
 		origin := ""
 		if len(p.AllowedOrigins) > 0 {
 			origin = p.AllowedOrigins[0]

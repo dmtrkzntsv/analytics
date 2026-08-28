@@ -207,7 +207,7 @@ func (h *host) registerManage(s *mcp.Server) {
 		Description: "Create a project and (by default) its first ingest key; returns a paste-ready embed snippet. Set skip_key to suppress the key."},
 		h.createProject)
 	mcp.AddTool(s, &mcp.Tool{Name: "update_project", Annotations: write,
-		Description: "Update a project's name, identity mode and/or allowed origins. Fields you omit are left unchanged (this is a merge, not a replace) — except allowed_origins, which if provided non-empty replaces the whole list; origins cannot be cleared to empty via this tool (use the CLI to clear origins). Switching to identity=identified starts storing user ids and names as given — privacy-significant, say so to the user before doing it."},
+		Description: "Update a project's name, identity mode and/or allowed origins. Fields you omit are left unchanged (this is a merge, not a replace) — except allowed_origins, which if provided non-empty replaces the whole list; origins cannot be cleared to empty via this tool (clear origins via `analytics config import`, an explicit empty allowed_origins list in the document). Switching to identity=identified starts storing user ids and names as given — privacy-significant, say so to the user before doing it."},
 		h.updateProject)
 	mcp.AddTool(s, &mcp.Tool{Name: "archive_project", Annotations: idem,
 		Description: "Archive a project: ingestion stops, data and dashboards keep working, fully reversible with restore_project. There is no delete over MCP — deletion requires the CLI."},

@@ -130,17 +130,38 @@ func (o *Ops) Import(ctx context.Context, actor string, r io.Reader) (ImportResu
 			}
 		}
 
-		existing := map[string]bool{}
+		existing := map[string]store.RegistryKey{}
 		_, ks, err := o.St.LoadRegistry(ctx)
 		if err != nil {
 			return res, err
 		}
 		for _, k := range ks {
-			existing[k.Key] = true
+			existing[k.Key] = k
 		}
 		for _, ek := range ep.IngestKeys {
-			if ek.Key == "" || existing[ek.Key] {
-				continue // present keys are left as they are; explicit only
+			if ek.Key == "" {
+				continue
+			}
+			if cur, ok := existing[ek.Key]; ok {
+				// A key listed in the document that already exists and
+				// belongs to this listed project has its disabled state
+				// reconciled to what the document says — explicit, so it
+				// is not covered by the "unlisted stays untouched" rule.
+				// Keys absent from the document, or present but under a
+				// different project, are left alone.
+				if cur.Project != ep.Alias || cur.Disabled == ek.Disabled {
+					continue
+				}
+				action := "key.enable"
+				if ek.Disabled {
+					action = "key.disable"
+				}
+				if err := o.St.SetIngestKeyDisabled(ctx, ep.Alias, ek.Label, ek.Disabled,
+					store.AuditEntry{Actor: actor, Action: action,
+						Subject: ep.Alias + "/" + ek.Label}); err != nil {
+					return res, fmt.Errorf("import key %q/%q: %w", ep.Alias, ek.Label, err)
+				}
+				continue
 			}
 			if err := o.St.InsertIngestKey(ctx, store.RegistryKey{
 				Key: ek.Key, Project: ep.Alias, Label: ek.Label},

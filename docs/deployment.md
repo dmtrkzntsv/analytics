@@ -245,6 +245,16 @@ e.g. `analytics-mcp.service`, change `ExecStart=` to `analytics serve -mcp`,
 and set `MCP_ADDR` in `analytics.env` if it should bind a different port
 than `LISTEN_ADDR`.
 
+A `serve -mcp`-only process still starts the store/jobs runner and so still
+runs the daily aggregation pass against `DATABASE_URL` — `-mcp` only makes
+the HTTP listener conditional, not the background jobs. Point a `-mcp`-only
+unit at a Litestream replica and it will write to that replica on every
+pass. Set `MCP_DB_PATH` (the path MCP reads for queries) and `DATABASE_URL`
+(the path the aggregation pass writes to) deliberately for your topology:
+either keep `DATABASE_URL` on a database this process is meant to own, or
+accept that a two-process topology (one `-api`, one `-mcp`, each with its
+own `DATABASE_URL`) runs the idempotent daily aggregation twice.
+
 In `cloudflare` mode, the Access application sits in front of the MCP
 hostname or path only — the ingestion path (`/api/events`) must stay outside
 it so devices can keep posting without an Access session. Scope the

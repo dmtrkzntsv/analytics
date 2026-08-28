@@ -5,6 +5,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/dmitry/analytics/internal/store"
 )
 
 func TestExportImportRoundTrip(t *testing.T) {
@@ -92,6 +94,85 @@ func TestImportLegacyProjectsJSON(t *testing.T) {
 	}
 	if _, _, ok := reg.Snapshot(ctx).ProjectByKey("ak_legacy1"); !ok {
 		t.Fatal("legacy key not imported")
+	}
+}
+
+// findKey looks up a RegistryKey by key value directly from the store,
+// bypassing the snapshot (which drops disabled keys — see the "list"
+// comment in cmd/analytics/key.go).
+func findKey(t *testing.T, st store.Store, ctx context.Context, key string) store.RegistryKey {
+	t.Helper()
+	_, ks, err := st.LoadRegistry(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range ks {
+		if k.Key == key {
+			return k
+		}
+	}
+	t.Fatalf("key %q not found", key)
+	return store.RegistryKey{}
+}
+
+func TestImportReEnablesADisabledKeyWhenTheDocumentSaysSo(t *testing.T) {
+	st := testStore(t)
+	reg := New(st, defaults, discard())
+	ctx := context.Background()
+	reg.Reload(ctx)
+	ops := NewOps(reg, st)
+	if _, err := ops.CreateProject(ctx, "cli", ProjectSpec{
+		Alias: "blog", Name: "My blog", Identity: "anonymous"}); err != nil {
+		t.Fatal(err)
+	}
+	key, err := ops.IssueIngestKey(ctx, "cli", "blog", "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ops.DisableIngestKey(ctx, "cli", "blog", "web"); err != nil {
+		t.Fatal(err)
+	}
+	if !findKey(t, st, ctx, key).Disabled {
+		t.Fatal("setup: key must be disabled before import")
+	}
+
+	// The document lists the same key with disabled:false — an explicit
+	// re-enable, not silence, so it must take effect.
+	doc := `{"version":1,"projects":[{"alias":"blog","name":"My blog","identity":"anonymous","allowed_origins":[],
+	  "ingest_keys":[{"key":"` + key + `","label":"web","disabled":false}]}]}`
+	if _, err := ops.Import(ctx, "cli", strings.NewReader(doc)); err != nil {
+		t.Fatal(err)
+	}
+	if findKey(t, st, ctx, key).Disabled {
+		t.Error("key still disabled after import listed it with disabled:false")
+	}
+}
+
+func TestImportDisablesAnEnabledKeyWhenTheDocumentSaysSo(t *testing.T) {
+	st := testStore(t)
+	reg := New(st, defaults, discard())
+	ctx := context.Background()
+	reg.Reload(ctx)
+	ops := NewOps(reg, st)
+	if _, err := ops.CreateProject(ctx, "cli", ProjectSpec{
+		Alias: "blog", Name: "My blog", Identity: "anonymous"}); err != nil {
+		t.Fatal(err)
+	}
+	key, err := ops.IssueIngestKey(ctx, "cli", "blog", "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findKey(t, st, ctx, key).Disabled {
+		t.Fatal("setup: key must start enabled")
+	}
+
+	doc := `{"version":1,"projects":[{"alias":"blog","name":"My blog","identity":"anonymous","allowed_origins":[],
+	  "ingest_keys":[{"key":"` + key + `","label":"web","disabled":true}]}]}`
+	if _, err := ops.Import(ctx, "cli", strings.NewReader(doc)); err != nil {
+		t.Fatal(err)
+	}
+	if !findKey(t, st, ctx, key).Disabled {
+		t.Error("key still enabled after import listed it with disabled:true")
 	}
 }
 

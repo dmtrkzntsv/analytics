@@ -84,7 +84,7 @@ func wrapAuth(ctx context.Context, m config.MCPConfig, next http.Handler) (http.
 	case "token":
 		opts := &auth.RequireBearerTokenOptions{AllowMissingExpiration: true}
 		if m.Issuer != "" {
-			opts.ResourceMetadataURL = m.ResourceURL + "/.well-known/oauth-protected-resource"
+			opts.ResourceMetadataURL = metadataURLFor(m.ResourceURL)
 		}
 		return auth.RequireBearerToken(StaticVerifier(m.Token), opts)(next), nil
 	case "oauth":

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dmitry/analytics/internal/config"
 	"github.com/dmitry/analytics/internal/manage"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -38,17 +39,25 @@ func (h *host) checkRange(ctx context.Context, in rangeIn) error {
 	if !dayRe.MatchString(in.From) || !dayRe.MatchString(in.To) {
 		return fmt.Errorf("from and to must be YYYY-MM-DD, got %q and %q", in.From, in.To)
 	}
-	s := h.reg.Snapshot(ctx)
-	if s.Project(in.Project) == nil {
-		var aliases []string
-		for _, p := range s.Projects() {
-			aliases = append(aliases, p.Alias)
-		}
-		sort.Strings(aliases)
-		return fmt.Errorf("unknown project %q; valid aliases: %s",
-			in.Project, strings.Join(aliases, ", "))
+	if h.reg.Snapshot(ctx).Project(in.Project) == nil {
+		return h.unknownProjectErr(ctx, in.Project)
 	}
 	return nil
+}
+
+// unknownProjectErr lists the valid aliases so a model can recover
+// (endpoint spec §10). Shared by checkRange and by tools that re-fetch
+// the project after checkRange has already validated it, in case the
+// registry reloaded in between (a nil project would otherwise panic on
+// field access).
+func (h *host) unknownProjectErr(ctx context.Context, alias string) error {
+	s := h.reg.Snapshot(ctx)
+	var aliases []string
+	for _, p := range s.Projects() {
+		aliases = append(aliases, p.Alias)
+	}
+	sort.Strings(aliases)
+	return fmt.Errorf("unknown project %q; valid aliases: %s", alias, strings.Join(aliases, ", "))
 }
 
 type tableOut struct {
@@ -76,14 +85,17 @@ func (h *host) table(ctx context.Context, q string, args ...any) (tableOut, erro
 // ---- list_projects ----
 
 type projectOut struct {
-	Alias       string `json:"alias"`
-	Name        string `json:"name"`
-	Identity    string `json:"identity"`
-	Archived    bool   `json:"archived,omitempty"`
-	FirstWebDay string `json:"first_web_day,omitempty"`
-	LastWebDay  string `json:"last_web_day,omitempty"`
-	FirstAppDay string `json:"first_app_day,omitempty"`
-	LastAppDay  string `json:"last_app_day,omitempty"`
+	Alias              string                     `json:"alias"`
+	Name               string                     `json:"name"`
+	Identity           string                     `json:"identity"`
+	Archived           bool                       `json:"archived,omitempty"`
+	FirstWebDay        string                     `json:"first_web_day,omitempty"`
+	LastWebDay         string                     `json:"last_web_day,omitempty"`
+	FirstAppDay        string                     `json:"first_app_day,omitempty"`
+	LastAppDay         string                     `json:"last_app_day,omitempty"`
+	AllowedOrigins     []string                   `json:"allowed_origins"`
+	Retention          *config.RetentionOverride  `json:"retention,omitempty"`
+	ProductAggregation *config.ProductAggregation `json:"product_aggregation,omitempty"`
 }
 
 type listProjectsOut struct {
@@ -93,7 +105,10 @@ type listProjectsOut struct {
 func (h *host) listProjects(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, listProjectsOut, error) {
 	var out listProjectsOut
 	for _, p := range h.reg.Snapshot(ctx).Projects() {
-		po := projectOut{Alias: p.Alias, Name: p.Name, Identity: p.Identity, Archived: p.Archived}
+		po := projectOut{
+			Alias: p.Alias, Name: p.Name, Identity: p.Identity, Archived: p.Archived,
+			AllowedOrigins: p.AllowedOrigins, Retention: p.Retention, ProductAggregation: p.Aggregation,
+		}
 		// coverage probe: cheap MIN/MAX over the stitch views
 		for _, probe := range []struct {
 			view  string

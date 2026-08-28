@@ -70,6 +70,13 @@ func TestMCPRequires401WithChallenge(t *testing.T) {
 	if !strings.Contains(www, "resource_metadata") {
 		t.Errorf("WWW-Authenticate = %q; must point at the metadata URL", www)
 	}
+	// The resource URL carries a /mcp path; the challenge must be the
+	// host-rooted well-known URL (RFC 9728), not ResourceURL+"/.well-known/..."
+	// which would 404 by appending onto the /mcp path segment.
+	const want = "https://analytics.example.com/.well-known/oauth-protected-resource"
+	if !strings.Contains(www, want) {
+		t.Errorf("WWW-Authenticate = %q; want resource_metadata=%q (host-rooted, no /mcp segment)", www, want)
+	}
 }
 
 func TestMCPTokenAuthPasses(t *testing.T) {

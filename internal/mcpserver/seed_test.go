@@ -88,6 +88,7 @@ func newTestHost(t *testing.T) (*host, *mcp.ClientSession) {
 	// depends on.
 	seed(`UPDATE projects SET product_aggregation =
 	      '{"enabled":true,"attributes":{"*":["plan"]},"top_n":50}' WHERE alias='blog'`)
+	seed(`UPDATE projects SET allowed_origins = '["https://blog.example.com"]' WHERE alias='blog'`)
 	seed(`INSERT INTO agg_product_attrs (project, day, event_name, attr_key, attr_value, count, unique_users)
 	      VALUES ('blog','2026-08-20','signup','plan','pro',3,3)`)
 
