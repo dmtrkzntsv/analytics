@@ -99,6 +99,20 @@ type DashboardsConfig struct {
 	WorkDir    string
 }
 
+type MCPConfig struct {
+	Addr         string        // MCP_ADDR, defaults to Listen
+	DBPath       string        // MCP_DB_PATH, defaults to DATABASE_URL path
+	AuthMode     string        // "oauth" | "cloudflare" | "token"; no default
+	ResourceURL  string        // MCP_RESOURCE_URL
+	Issuer       string        // MCP_AUTH_ISSUER
+	Audience     string        // MCP_AUTH_AUDIENCE, defaults to ResourceURL
+	CFTeamDomain string        // MCP_CF_TEAM_DOMAIN
+	CFAud        string        // MCP_CF_AUD
+	Token        string        // MCP_TOKEN
+	QueryTimeout time.Duration // MCP_QUERY_TIMEOUT, default 10s
+	QueryMaxRows int           // MCP_QUERY_MAX_ROWS, default 1000
+}
+
 type Config struct {
 	Listen     string
 	Database   string
@@ -107,6 +121,7 @@ type Config struct {
 	Buffer     BufferConfig
 	Retention  Retention
 	Dashboards DashboardsConfig
+	MCP        MCPConfig
 }
 
 // Load builds the configuration from the process environment.
@@ -213,6 +228,19 @@ func parse(lookup func(string) (string, bool), dashboards bool) (*Config, error)
 			WorkDir:    e.str("DASHBOARDS_WORK_DIR", "/var/lib/dashboards"),
 		},
 	}
+	c.MCP = MCPConfig{
+		Addr:         e.str("MCP_ADDR", c.Listen),
+		DBPath:       e.str("MCP_DB_PATH", strings.TrimPrefix(c.Database, "sqlite://")),
+		AuthMode:     e.str("MCP_AUTH_MODE", ""),
+		ResourceURL:  e.str("MCP_RESOURCE_URL", ""),
+		Issuer:       e.str("MCP_AUTH_ISSUER", ""),
+		CFTeamDomain: e.str("MCP_CF_TEAM_DOMAIN", ""),
+		CFAud:        e.str("MCP_CF_AUD", ""),
+		Token:        e.str("MCP_TOKEN", ""),
+		QueryTimeout: e.dur("MCP_QUERY_TIMEOUT", 10*time.Second),
+		QueryMaxRows: e.num("MCP_QUERY_MAX_ROWS", 1000),
+	}
+	c.MCP.Audience = e.str("MCP_AUTH_AUDIENCE", c.MCP.ResourceURL)
 	if e.err != nil {
 		return nil, e.err
 	}
@@ -268,4 +296,35 @@ func (c *Config) validate() error {
 // already-aggregated day.
 func (c *Config) MaxEventAge() time.Duration {
 	return time.Duration(c.Retention.App.RawDays) * 24 * time.Hour
+}
+
+// ValidateMCP fail-fasts the -mcp surface (endpoint spec §4): there is no
+// unauthenticated mode and no way to reach one by omission.
+func (c *Config) ValidateMCP() error {
+	m := c.MCP
+	switch m.AuthMode {
+	case "token":
+		if m.Token == "" {
+			return fmt.Errorf("config: MCP_AUTH_MODE=token requires MCP_TOKEN (mint with `analytics keygen -mcp`)")
+		}
+	case "oauth":
+		if m.Issuer == "" {
+			return fmt.Errorf("config: MCP_AUTH_MODE=oauth requires MCP_AUTH_ISSUER")
+		}
+		if m.ResourceURL == "" {
+			return fmt.Errorf("config: MCP_AUTH_MODE=oauth requires MCP_RESOURCE_URL")
+		}
+	case "cloudflare":
+		if m.CFTeamDomain == "" {
+			return fmt.Errorf("config: MCP_AUTH_MODE=cloudflare requires MCP_CF_TEAM_DOMAIN")
+		}
+		if m.CFAud == "" {
+			return fmt.Errorf("config: MCP_AUTH_MODE=cloudflare requires MCP_CF_AUD")
+		}
+	case "":
+		return fmt.Errorf("config: -mcp requires MCP_AUTH_MODE (oauth, cloudflare or token)")
+	default:
+		return fmt.Errorf("config: unknown MCP_AUTH_MODE %q (oauth, cloudflare or token)", m.AuthMode)
+	}
+	return nil
 }

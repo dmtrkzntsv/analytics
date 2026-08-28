@@ -253,3 +253,82 @@ func TestLoadDoesNotRequireProjectsFile(t *testing.T) {
 		t.Fatalf("cfg = %+v", cfg)
 	}
 }
+
+func mcpEnv(over map[string]string) func(string) (string, bool) {
+	base := map[string]string{
+		"DATABASE_URL":  "sqlite:///tmp/x.db",
+		"MCP_AUTH_MODE": "token", "MCP_TOKEN": "ar_x",
+	}
+	for k, v := range over {
+		if v == "" {
+			delete(base, k)
+		} else {
+			base[k] = v
+		}
+	}
+	return func(k string) (string, bool) { v, ok := base[k]; return v, ok }
+}
+
+func TestValidateMCP(t *testing.T) {
+	cases := []struct {
+		name string
+		over map[string]string
+		ok   bool
+	}{
+		{"token mode ok", nil, true},
+		{"no mode", map[string]string{"MCP_AUTH_MODE": ""}, false},
+		{"unknown mode", map[string]string{"MCP_AUTH_MODE": "basic"}, false},
+		{"token mode missing token", map[string]string{"MCP_TOKEN": ""}, false},
+		{"oauth ok", map[string]string{"MCP_AUTH_MODE": "oauth", "MCP_TOKEN": "",
+			"MCP_AUTH_ISSUER":  "https://idp.example.com",
+			"MCP_RESOURCE_URL": "https://analytics.example.com/mcp"}, true},
+		{"oauth missing issuer", map[string]string{"MCP_AUTH_MODE": "oauth", "MCP_TOKEN": "",
+			"MCP_RESOURCE_URL": "https://analytics.example.com/mcp"}, false},
+		{"oauth missing resource", map[string]string{"MCP_AUTH_MODE": "oauth", "MCP_TOKEN": "",
+			"MCP_AUTH_ISSUER": "https://idp.example.com"}, false},
+		{"cloudflare ok", map[string]string{"MCP_AUTH_MODE": "cloudflare", "MCP_TOKEN": "",
+			"MCP_CF_TEAM_DOMAIN": "team.cloudflareaccess.com", "MCP_CF_AUD": "aud123"}, true},
+		{"cloudflare missing aud", map[string]string{"MCP_AUTH_MODE": "cloudflare", "MCP_TOKEN": "",
+			"MCP_CF_TEAM_DOMAIN": "team.cloudflareaccess.com"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := FromEnv(mcpEnv(tc.over))
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = cfg.ValidateMCP()
+			if (err == nil) != tc.ok {
+				t.Fatalf("ValidateMCP = %v, want ok=%v", err, tc.ok)
+			}
+		})
+	}
+}
+
+func TestMCPDefaults(t *testing.T) {
+	cfg, err := FromEnv(mcpEnv(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MCP.Addr != cfg.Listen {
+		t.Errorf("Addr = %q, want Listen %q", cfg.MCP.Addr, cfg.Listen)
+	}
+	if cfg.MCP.DBPath != "/tmp/x.db" {
+		t.Errorf("DBPath = %q", cfg.MCP.DBPath)
+	}
+	if cfg.MCP.QueryTimeout != 10*time.Second || cfg.MCP.QueryMaxRows != 1000 {
+		t.Errorf("guards = %v %d", cfg.MCP.QueryTimeout, cfg.MCP.QueryMaxRows)
+	}
+}
+
+func TestMCPAudienceDefaultsToResource(t *testing.T) {
+	cfg, err := FromEnv(mcpEnv(map[string]string{"MCP_AUTH_MODE": "oauth", "MCP_TOKEN": "",
+		"MCP_AUTH_ISSUER":  "https://idp.example.com",
+		"MCP_RESOURCE_URL": "https://analytics.example.com/mcp"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MCP.Audience != "https://analytics.example.com/mcp" {
+		t.Errorf("Audience = %q", cfg.MCP.Audience)
+	}
+}
