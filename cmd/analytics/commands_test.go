@@ -37,13 +37,15 @@ func TestMigrateSubcommand(t *testing.T) {
 }
 
 // A missing or unusable configuration must fail loudly rather than starting
-// with defaults.
+// with defaults. serve needs a surface flag to get past the usage check and
+// reach config loading at all.
 func TestSubcommandsRejectBadConfig(t *testing.T) {
+	argsFor := map[string][]string{"serve": {"serve", "-api"}, "migrate": {"migrate"}}
 	for _, cmd := range []string{"serve", "migrate"} {
 		t.Run(cmd+" missing DATABASE_URL", func(t *testing.T) {
 			t.Setenv("DATABASE_URL", "")
 			var out bytes.Buffer
-			if code := run([]string{cmd}, &out); code != 1 {
+			if code := run(argsFor[cmd], &out); code != 1 {
 				t.Fatalf("exit code = %d, want 1", code)
 			}
 			if out.Len() == 0 {
@@ -56,6 +58,18 @@ func TestSubcommandsRejectBadConfig(t *testing.T) {
 				t.Fatalf("exit code = %d, want 2", code)
 			}
 		})
+	}
+}
+
+func TestBareServeIsUsageError(t *testing.T) {
+	var out bytes.Buffer
+	code := run([]string{"serve"}, &out)
+	if code == 0 {
+		t.Fatal("bare serve did not fail")
+	}
+	want := "specify at least one surface: -api (ingestion), -mcp (MCP endpoint)"
+	if !strings.Contains(out.String(), want) {
+		t.Errorf("output %q missing %q", out.String(), want)
 	}
 }
 

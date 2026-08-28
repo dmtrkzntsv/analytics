@@ -16,6 +16,7 @@ import (
 	"github.com/dmitry/analytics/internal/identity"
 	"github.com/dmitry/analytics/internal/jobs"
 	"github.com/dmitry/analytics/internal/manage"
+	"github.com/dmitry/analytics/internal/mcpserver"
 	"github.com/dmitry/analytics/internal/pipeline"
 	"github.com/dmitry/analytics/internal/server"
 	"github.com/dmitry/analytics/internal/store"
@@ -47,14 +48,30 @@ func NewLogger(cfg config.LogConfig) *slog.Logger {
 	return slog.New(slog.NewJSONHandler(out, opts))
 }
 
-// Serve runs the ingestion server until ctx is cancelled or the listener
-// fails.
+// httpSurface pairs a listen address with the handler serving it, so
+// Serve can start/shut down an arbitrary number of listeners (one for the
+// shared -api/-mcp case, up to two when the surfaces use different
+// addresses) with the same loop.
+type httpSurface struct {
+	addr    string
+	handler http.Handler
+}
+
+// Serve runs the requested surfaces (api: ingestion, mcpOn: the MCP
+// endpoint) until ctx is cancelled or a listener fails. At least one of
+// api/mcpOn must be true; the caller (cmd/analytics) enforces that as a
+// usage error before reaching here.
 //
-// Shutdown order matters: HTTP drains first so no new events arrive, then
-// the jobs runner stops, and only then is the pipeline cancelled — its
-// cancellation is what triggers the final flush, so it must come last or
-// buffered events would be lost.
-func Serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
+// Store/registry/geo/pipeline/jobs setup runs regardless of which surfaces
+// are requested: jobs and pipeline are harmless when only MCP runs, and
+// the MCP surface itself needs store+registry. Only the HTTP listeners and
+// the ingest-summary goroutine are conditional.
+//
+// Shutdown order matters: HTTP drains first so no new events/requests
+// arrive, then the ingest summary logger, then the jobs runner stops, and
+// only then is the pipeline cancelled — its cancellation is what triggers
+// the final flush, so it must come last or buffered events would be lost.
+func Serve(ctx context.Context, cfg *config.Config, logger *slog.Logger, api, mcpOn bool) error {
 	st, err := store.Open(cfg.Database)
 	if err != nil {
 		return err
@@ -106,35 +123,97 @@ func Serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	jobsDone := make(chan struct{})
 	go func() { runner.Run(jobsCtx); close(jobsDone) }()
 
-	handler := server.New(cfg, reg, buf, geoProvider, salter, st, logger)
-	sumCtx, stopSummary := context.WithCancel(context.Background())
-	summaryDone := make(chan struct{})
-	go func() { logIngestSummary(sumCtx, handler, logger); close(summaryDone) }()
-
-	srv := &http.Server{
-		Addr:              cfg.Listen,
-		Handler:           handler,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-	errCh := make(chan error, 1)
-	go func() { errCh <- srv.ListenAndServe() }()
-	logger.Info("serving", "addr", cfg.Listen, "projects", len(reg.Snapshot(ctx).Projects()))
-
-	select {
-	case <-ctx.Done():
-	case err := <-errCh:
-		stopSummary()
-		<-summaryDone
+	// stopBackground shuts down jobs then pipeline, in that order, for use
+	// on early-return error paths before the HTTP surfaces exist.
+	stopBackground := func() {
 		stopJobs()
 		<-jobsDone
 		stopPipe()
 		<-pipeDone
-		return err
 	}
+
+	var ingestHandler *server.Server
+	if api {
+		ingestHandler = server.New(cfg, reg, buf, geoProvider, salter, st, logger)
+	}
+
+	// Assemble the HTTP surface(s). When both -api and -mcp target the
+	// same address, they share one listener/mux (Build, not NewHandler,
+	// so the /mcp route mounts alongside the ingest routes without a
+	// double /healthz registration); otherwise the MCP endpoint gets its
+	// own standalone mux via NewHandler.
+	var surfaces []httpSurface
+	var mcpClose func() error
+	if mcpOn {
+		ops := manage.NewOps(reg, st)
+		if api && cfg.MCP.Addr == cfg.Listen {
+			protected, closeDB, err := mcpserver.Build(ctx, cfg, reg, ops, logger)
+			if err != nil {
+				stopBackground()
+				return err
+			}
+			mcpClose = closeDB
+			mux := http.NewServeMux()
+			mux.Handle("/", ingestHandler) // ingest keeps its own /healthz and /js/*
+			mcpserver.RegisterOn(mux, protected, cfg, false)
+			surfaces = append(surfaces, httpSurface{cfg.Listen, mux})
+		} else {
+			mcpHandler, closeDB, err := mcpserver.NewHandler(ctx, cfg, reg, ops, logger)
+			if err != nil {
+				stopBackground()
+				return err
+			}
+			mcpClose = closeDB
+			if api {
+				surfaces = append(surfaces, httpSurface{cfg.Listen, ingestHandler})
+			}
+			surfaces = append(surfaces, httpSurface{cfg.MCP.Addr, mcpHandler})
+		}
+	} else {
+		surfaces = append(surfaces, httpSurface{cfg.Listen, ingestHandler})
+	}
+	if mcpClose != nil {
+		defer mcpClose()
+	}
+
+	summaryDone := make(chan struct{})
+	stopSummary := func() {}
+	if api {
+		var sumCtx context.Context
+		sumCtx, stopSummary = context.WithCancel(context.Background())
+		go func() { logIngestSummary(sumCtx, ingestHandler, logger); close(summaryDone) }()
+	} else {
+		close(summaryDone)
+	}
+
+	srvs := make([]*http.Server, len(surfaces))
+	errCh := make(chan error, len(surfaces))
+	for i, s := range surfaces {
+		sv := &http.Server{
+			Addr:              s.addr,
+			Handler:           s.handler,
+			ReadHeaderTimeout: 5 * time.Second,
+		}
+		srvs[i] = sv
+		go func(sv *http.Server) { errCh <- sv.ListenAndServe() }(sv)
+		logger.Info("serving", "addr", s.addr, "projects", len(reg.Snapshot(ctx).Projects()))
+	}
+
+	remaining := len(srvs)
+	var listenErr error
+	select {
+	case <-ctx.Done():
+	case err := <-errCh:
+		listenErr = err
+		remaining--
+	}
+
 	shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(shutCtx); err != nil {
-		logger.Error("http shutdown", "error", err)
+	for _, sv := range srvs {
+		if err := sv.Shutdown(shutCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("http shutdown", "error", err, "addr", sv.Addr)
+		}
 	}
 	stopSummary()
 	<-summaryDone
@@ -142,10 +221,13 @@ func Serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	<-jobsDone
 	stopPipe() // triggers final flush
 	<-pipeDone
-	if err := <-errCh; err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return err
+
+	for i := 0; i < remaining; i++ {
+		if err := <-errCh; listenErr == nil && err != nil && !errors.Is(err, http.ErrServerClosed) {
+			listenErr = err
+		}
 	}
-	return nil
+	return listenErr
 }
 
 // databasePath extracts the filesystem path from a sqlite DSN for use as

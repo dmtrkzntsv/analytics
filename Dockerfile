@@ -48,7 +48,7 @@ USER analytics
 ENV LISTEN_ADDR=0.0.0.0:8080 \
     DATABASE_URL=sqlite:///var/lib/analytics/analytics.db
 ENTRYPOINT ["/usr/local/bin/analytics"]
-CMD ["serve"]
+CMD ["serve", "-api"]
 
 FROM node:22-alpine AS evidence
 RUN apk add --no-cache ca-certificates tzdata && adduser -D -H -u 10001 analytics

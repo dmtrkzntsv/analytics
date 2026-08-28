@@ -104,7 +104,7 @@ func TestServeEndToEnd(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- Serve(ctx, cfg, slog.Default()) }()
+	go func() { done <- Serve(ctx, cfg, slog.Default(), true, false) }()
 
 	base := "http://" + addr
 	waitHealthy(t, base)
@@ -205,7 +205,7 @@ func TestServeRestartsOnExistingDatabase(t *testing.T) {
 		addr := freePort(t)
 		ctx, cancel := context.WithCancel(bg)
 		done := make(chan error, 1)
-		go func() { done <- Serve(ctx, testConfig(t, addr, dbPath), slog.Default()) }()
+		go func() { done <- Serve(ctx, testConfig(t, addr, dbPath), slog.Default(), true, false) }()
 		base := "http://" + addr
 		waitHealthy(t, base)
 		req, err := http.NewRequest("POST", base+"/api/events", strings.NewReader(body))
@@ -249,6 +249,117 @@ func TestServeRestartsOnExistingDatabase(t *testing.T) {
 	}
 }
 
+// mcpTestConfig is testConfig plus the MCP surface's env: token auth mode
+// so a request with no bearer token is a deterministic 401, and (when
+// mcpAddr is non-empty) a second listener address for the split-listener
+// sub-run.
+func mcpTestConfig(t *testing.T, addr, dbPath, mcpAddr string) *config.Config {
+	t.Helper()
+	seedProject(t, dbPath,
+		manage.ProjectSpec{Alias: "app", Name: "App", AllowedOrigins: []string{"https://app.com"}},
+		"ak_test", "web")
+	vars := map[string]string{
+		"LISTEN_ADDR":             addr,
+		"DATABASE_URL":            "sqlite://" + dbPath,
+		"BUFFER_FLUSH_MAX_EVENTS": "2",
+		"BUFFER_FLUSH_INTERVAL":   "50ms",
+		"BUFFER_CAPACITY":         "100",
+		"MCP_AUTH_MODE":           "token",
+		"MCP_TOKEN":               "ar_apptest",
+	}
+	if mcpAddr != "" {
+		vars["MCP_ADDR"] = mcpAddr
+	}
+	return configtest.Load(t, vars)
+}
+
+// Spec §3.2/Task 21: -api and -mcp together share one listener when
+// MCP_ADDR equals LISTEN_ADDR, and use two listeners otherwise. Both
+// arrangements must serve both surfaces correctly and shut down cleanly.
+func TestServeSharedListenerServesBothSurfaces(t *testing.T) {
+	run := func(t *testing.T, cfg *config.Config) {
+		t.Helper()
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- Serve(ctx, cfg, slog.Default(), true, true) }()
+		waitHealthy(t, "http://"+cfg.Listen)
+
+		t.Cleanup(func() {
+			cancel()
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatalf("serve: %v", err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("serve did not shut down within 5s of ctx cancel")
+			}
+		})
+
+		if resp, err := http.Get("http://" + cfg.Listen + "/healthz"); err != nil {
+			t.Fatalf("healthz: %v", err)
+		} else {
+			resp.Body.Close()
+			if resp.StatusCode != 200 {
+				t.Errorf("healthz on %s = %d, want 200", cfg.Listen, resp.StatusCode)
+			}
+		}
+
+		if resp, err := http.Post("http://"+cfg.Listen+"/api/events", "application/json",
+			strings.NewReader(`{"key":"ak_test","events":[{"name":"x"}]}`)); err != nil {
+			t.Fatalf("events: %v", err)
+		} else {
+			resp.Body.Close()
+			if resp.StatusCode == 404 {
+				t.Errorf("events on %s = 404, want the ingest surface to answer", cfg.Listen)
+			}
+		}
+
+		postMCP := func(addr string) *http.Response {
+			t.Helper()
+			resp, err := http.Post("http://"+addr+"/mcp", "application/json", strings.NewReader(`{}`))
+			if err != nil {
+				t.Fatalf("mcp post to %s: %v", addr, err)
+			}
+			return resp
+		}
+
+		if cfg.MCP.Addr == cfg.Listen {
+			resp := postMCP(cfg.Listen)
+			resp.Body.Close()
+			if resp.StatusCode != 401 {
+				t.Errorf("POST /mcp (shared, no token) = %d, want 401", resp.StatusCode)
+			}
+		} else {
+			resp := postMCP(cfg.Listen)
+			resp.Body.Close()
+			if resp.StatusCode != 404 {
+				t.Errorf("POST /mcp on ingest port %s = %d, want 404", cfg.Listen, resp.StatusCode)
+			}
+			resp = postMCP(cfg.MCP.Addr)
+			resp.Body.Close()
+			if resp.StatusCode != 401 {
+				t.Errorf("POST /mcp on MCP port %s (no token) = %d, want 401", cfg.MCP.Addr, resp.StatusCode)
+			}
+		}
+	}
+
+	t.Run("shared listener", func(t *testing.T) {
+		dbPath := filepath.Join(t.TempDir(), "shared.db")
+		addr := freePort(t)
+		cfg := mcpTestConfig(t, addr, dbPath, "")
+		run(t, cfg)
+	})
+
+	t.Run("separate listeners", func(t *testing.T) {
+		dbPath := filepath.Join(t.TempDir(), "split.db")
+		addr := freePort(t)
+		mcpAddr := freePort(t)
+		cfg := mcpTestConfig(t, addr, dbPath, mcpAddr)
+		run(t, cfg)
+	})
+}
+
 // A listen address already in use must surface as an error, not a hang.
 func TestServeReportsListenFailure(t *testing.T) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -258,7 +369,7 @@ func TestServeReportsListenFailure(t *testing.T) {
 	defer l.Close()
 	cfg := testConfig(t, l.Addr().String(), filepath.Join(t.TempDir(), "busy.db"))
 	errCh := make(chan error, 1)
-	go func() { errCh <- Serve(context.Background(), cfg, slog.Default()) }()
+	go func() { errCh <- Serve(context.Background(), cfg, slog.Default(), true, false) }()
 	select {
 	case err := <-errCh:
 		if err == nil {
@@ -272,7 +383,7 @@ func TestServeReportsListenFailure(t *testing.T) {
 func TestServeRejectsBadDatabaseDSN(t *testing.T) {
 	cfg := testConfig(t, freePort(t), filepath.Join(t.TempDir(), "x.db"))
 	cfg.Database = "bogus://nope"
-	if err := Serve(context.Background(), cfg, slog.Default()); err == nil {
+	if err := Serve(context.Background(), cfg, slog.Default(), true, false); err == nil {
 		t.Fatal("want an error for an unknown DSN scheme")
 	}
 }
@@ -316,7 +427,7 @@ func TestServeNeverPersistsIPOrUserAgent(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- Serve(ctx, cfg, logger) }()
+	go func() { done <- Serve(ctx, cfg, logger, true, false) }()
 	base := "http://" + addr
 	waitHealthy(t, base)
 
@@ -383,7 +494,7 @@ func runServeAndCollectLogs(t *testing.T, cfg *config.Config) string {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- Serve(ctx, cfg, logger) }()
+	go func() { done <- Serve(ctx, cfg, logger, true, false) }()
 	waitHealthy(t, "http://"+cfg.Listen)
 	cancel()
 	select {
