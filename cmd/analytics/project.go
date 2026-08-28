@@ -116,8 +116,43 @@ func cmdProject(args []string, stdout io.Writer) int {
 		if err := sf.Parse(subArgs); err != nil {
 			return 2
 		}
-		spec := manage.ProjectSpec{Alias: *alias, Name: *name,
-			Identity: *identity, AllowedOrigins: origins}
+
+		spec := manage.ProjectSpec{Alias: *alias}
+
+		if sub == "create" {
+			// For create, use the provided flags or defaults
+			spec.Name = *name
+			spec.Identity = *identity
+			spec.AllowedOrigins = origins
+		} else {
+			// For update, start from current values and overlay only explicitly-set flags
+			snap := ops.Reg.Snapshot(ctx)
+			current := snap.Project(*alias)
+			if current == nil {
+				fmt.Fprintf(stdout, "project %q not found\n", *alias)
+				return 1
+			}
+			// Start from current values
+			spec.Name = current.Name
+			spec.Identity = current.Identity
+			spec.AllowedOrigins = current.AllowedOrigins
+			spec.Retention = current.Retention
+			spec.Aggregation = current.Aggregation
+
+			// Overlay explicitly-set flags using sf.Visit
+			sf.Visit(func(f *flag.Flag) {
+				switch f.Name {
+				case "name":
+					spec.Name = *name
+				case "identity":
+					spec.Identity = *identity
+				case "origin":
+					// If -origin was passed at all, replace the whole list
+					spec.AllowedOrigins = origins
+				}
+			})
+		}
+
 		var p *manage.Project
 		var err error
 		if sub == "create" {

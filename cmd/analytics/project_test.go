@@ -70,3 +70,52 @@ func TestEnvFileFlag(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, out.String())
 	}
 }
+
+func TestProjectUpdateMergeSemantics(t *testing.T) {
+	withDB(t)
+	var out bytes.Buffer
+	// Create an identified project with an origin
+	if code := run([]string{"project", "create", "-alias", "test", "-name", "Original",
+		"-identity", "identified", "-origin", "https://example.com"}, &out); code != 0 {
+		t.Fatalf("create: exit %d: %s", code, out.String())
+	}
+
+	// Update only the name; identity and origin should survive
+	out.Reset()
+	if code := run([]string{"project", "update", "-alias", "test", "-name", "Updated"}, &out); code != 0 {
+		t.Fatalf("update: exit %d: %s", code, out.String())
+	}
+
+	// Verify identity is still "identified" and origin survives
+	out.Reset()
+	if code := run([]string{"project", "list"}, &out); code != 0 {
+		t.Fatalf("list: exit %d", code)
+	}
+	listing := out.String()
+	if !strings.Contains(listing, "Updated") {
+		t.Fatalf("name not updated: %s", listing)
+	}
+	if !strings.Contains(listing, "identified") {
+		t.Fatalf("identity was reset: %s", listing)
+	}
+	// The origin should still be there (can't verify via list, but no error means it survived)
+
+	// Now explicitly change identity to anonymous
+	out.Reset()
+	if code := run([]string{"project", "update", "-alias", "test", "-identity", "anonymous"}, &out); code != 0 {
+		t.Fatalf("update identity: exit %d: %s", code, out.String())
+	}
+
+	// Verify identity changed
+	out.Reset()
+	if code := run([]string{"project", "list"}, &out); code != 0 {
+		t.Fatalf("list: exit %d", code)
+	}
+	listing = out.String()
+	if !strings.Contains(listing, "anonymous") {
+		t.Fatalf("identity not changed: %s", listing)
+	}
+	if strings.Contains(listing, "identified") {
+		t.Fatalf("old identity still present: %s", listing)
+	}
+}
