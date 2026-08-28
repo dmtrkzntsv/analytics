@@ -17,19 +17,21 @@ trap cleanup EXIT
 
 fail() { echo "SMOKE FAIL: $*" >&2; sed 's/^/  server: /' "$dir/log" >&2 || true; exit 1; }
 
-key="ak_smoke0000000000000000000000000"
-cat > "$dir/projects.json" <<EOF
-[{ "alias": "dev", "name": "Smoke", "identity": "anonymous",
-   "ingest_keys": [{ "key": "$key", "label": "smoke" }],
-   "allowed_origins": ["http://localhost"] }]
-EOF
+export DATABASE_URL="sqlite://$dir/smoke.db"
+
+# Project configuration is registry-first now: create the project and issue
+# an ingest key via the CLI (against the same DATABASE_URL) before the
+# server ever boots, instead of writing a local projects.json.
+./analytics project create -alias dev -name "Smoke" -identity anonymous \
+    -origin "http://localhost" \
+  || fail "project create failed"
+key=$(./analytics key issue -project dev -label smoke | grep -o 'ak_[0-9a-f]*' | head -1)
+[ -n "$key" ] || fail "key issue failed"
 
 env LISTEN_ADDR="127.0.0.1:$port" \
-    DATABASE_URL="sqlite://$dir/smoke.db" \
     GEO_URL="none://" \
     LOG_LEVEL=debug LOG_FORMAT=text \
     BUFFER_FLUSH_INTERVAL=200ms \
-    PROJECTS_FILE="$dir/projects.json" \
     ./analytics serve > "$dir/log" 2>&1 &
 pid=$!
 

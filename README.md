@@ -32,8 +32,9 @@ credentials, no object storage, no checkout:
 mkdir analytics && cd analytics
 base=https://raw.githubusercontent.com/dmtrkzntsv/analytics/main
 curl -fsSLO $base/deploy/compose/docker-compose.yml
-curl -fsSL $base/projects.example.json -o projects.json   # edit: projects, allowed_origins
 docker compose up -d
+docker compose exec analytics analytics project create -alias myapp
+docker compose exec analytics analytics key issue -project myapp -label web
 open http://localhost:3000        # dashboards; ingestion is on :8080
 ```
 
@@ -68,9 +69,10 @@ sudo ./deploy/install.sh              # prompts for a service account
 then in both cases:
 
 ```bash
-sudo vi /etc/analytics/projects.json  # projects, allowed_origins
 sudo vi /etc/analytics/analytics.env  # R2 credentials, geo
 sudo systemctl start analytics litestream
+sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics project create -alias myapp'
+sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics key issue -project myapp -label web'
 ```
 
 The remote form downloads the release tarball for the machine's architecture
@@ -116,8 +118,9 @@ the database lives in the named volume.
         data-identity="anonymous"></script>
 ```
 
-Run `analytics keygen` to generate the key and print this snippet ready to
-paste. `data-identity` mirrors the project's `identity` setting so a mismatch
+Run `analytics key issue -project <alias> -label <label>` to mint the key,
+register it against the project and print this snippet ready to paste.
+`data-identity` mirrors the project's `identity` setting so a mismatch
 is visible at a glance; the server enforces the real value regardless, so a
 wrong tag can waste a storage write but never leak a raw identifier.
 
@@ -187,7 +190,6 @@ the binary itself only reads the real environment. See
 | `LISTEN_ADDR` | Address to bind. Default `127.0.0.1:8080` (the docker image sets `0.0.0.0:8080`). |
 | `DATABASE_URL` | Store DSN. Only `sqlite://<path>` today. Required. |
 | `GEO_URL` | Country lookup: `cloudflare://` (header), `maxmind://<license-key>`, or `none://`. |
-| `PROJECTS_FILE` | Path of the projects file. Default `/etc/analytics/projects.json`. |
 | `LOG_LEVEL` | `debug`, `info`, `warn`, `error`. Default `info`. |
 | `LOG_FORMAT` | `json` or `text`. Default `json`. |
 | `LOG_FILE` | Log to this path instead of stdout. |
@@ -209,18 +211,38 @@ If you replicate with litestream, its credentials
 `R2_ENDPOINT`) live in the same `analytics.env`, so secrets never sit in a
 JSON file. Nothing in the collector reads them.
 
-Projects live in `projects.json` — a JSON array (see
-`projects.example.json` at the repo root):
+Projects live in the database — a registry table, not a file — and are
+managed entirely through the CLI (or an MCP management tool):
+
+```bash
+analytics project create -alias myapp -name "My App" -identity anonymous \
+  -origin https://myapp.com
+analytics project list
+analytics project update -alias myapp -origin https://myapp.com -origin https://www.myapp.com
+analytics project archive -alias myapp    # reversible: `project restore` undoes it
+analytics key issue -project myapp -label web
+analytics key list -project myapp
+analytics key disable -project myapp -label ios-2025
+```
+
+Each project record has these fields:
 
 | Key | Meaning |
 | --- | --- |
 | `alias` | Internal key: the `project` column on every stored row and the dashboard label. Never transmitted. |
 | `name` | Display name. |
 | `identity` | `anonymous` (default) or `identified`. See [Privacy and GDPR](#privacy-and-gdpr). |
-| `ingest_keys` | One or more `{key, label, disabled}` credentials. Required. |
+| `ingest_keys` | One or more `{key, label, disabled}` credentials. Required — `analytics key issue` mints and registers one in a single step. |
 | `allowed_origins` | Origins allowed to post for this project. Add `tauri://localhost` or `app://.` for Electron/Tauri. |
 | `retention` | Per-project override of any retention window. |
 | `product_aggregation` | Opt-in product rollup, see below. |
+
+`retention` and `product_aggregation` are not plain CLI flags — set them
+through `analytics config export` (dumps every project as JSON) and
+`analytics config import FILE` (upserts from that same JSON, or from a
+pre-upgrade `projects.json` — it detects the legacy bare-array format
+automatically). Import never archives or deletes anything absent from the
+file, so it is safe to import a partial edit.
 
 Product aggregation is off unless enabled. Attribute breakdowns are opt-in per
 key, `"*"` applies to every event, and only the top `top_n` values per
@@ -368,7 +390,7 @@ green.
 ### Testing the service locally
 
 ```bash
-make run          # build and serve on 127.0.0.1:8080 with local/.env + local/projects.json
+make run          # build, ensure a `dev` project exists, serve on 127.0.0.1:8080
 make smoke        # boot the real binary, POST a batch, verify rows land
 make test-install # run deploy/install.sh in a Debian container, assert artifacts
 make test-compose # build both images, run the compose stack, assert a rendered page
@@ -377,16 +399,18 @@ make dashboards   # Evidence dev server against local/analytics.db (port 3000)
 make clean        # remove binary, dist/, local/ state
 ```
 
-`make run` writes a dev config on first use (`local/.env` +
-`local/projects.json`: project `dev`, localhost origins, `GEO_URL=none://`,
-debug text logs, database at `local/analytics.db`) — edit both freely, they
-are never overwritten. Exercise it
-with a browser UA (curl's default is classified as a bot and dropped):
+`make run` writes a dev config on first use (`local/.env`: `GEO_URL=none://`,
+debug text logs, database at `local/analytics.db` — edit freely, it is never
+overwritten) and creates a `dev` project if one does not already exist. Issue
+it a key once, then exercise the endpoint with a browser UA (curl's default is
+classified as a bot and dropped):
 
 ```bash
+set -a; . local/.env; set +a
+./analytics key issue -project dev -label local
 curl -X POST localhost:8080/api/events -A 'Mozilla/5.0' \
   -H 'Origin: http://localhost:8080' -H 'Content-Type: application/json' \
-  -H 'X-Analytics-Key: <key from local/projects.json>' \
+  -H 'X-Analytics-Key: <key from `key issue` above>' \
   -d '{"events":[{"name":"$pageview",
                   "attributes":{"$url":"http://localhost/some-page"}}]}'
 ```
@@ -394,8 +418,10 @@ curl -X POST localhost:8080/api/events -A 'Mozilla/5.0' \
 `make dashboards` builds its parquet extracts from whatever is in the database
 at that moment, so run `make seed-demo` (or send some hits) first -- otherwise
 the charts have nothing to plot. `seed-demo` covers every project in
-`local/projects.json` (each gets its own traffic profile) over 180 days, and
-needs the server to have started once so the projects are registered.
+`local/projects.json` (each gets its own traffic profile) over 180 days; since
+the server no longer auto-registers projects from a file, each alias needs to
+already exist as a project (`set -a; . local/.env; set +a; ./analytics project
+create -alias <alias>`) before seeding it.
 
 Both dashboards share one date-range selector -- 1, 7, 30, 90 or 180 days,
 defaulting to 7 -- that drives every widget on the page. The windows are

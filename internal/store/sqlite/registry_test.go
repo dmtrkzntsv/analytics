@@ -69,6 +69,64 @@ func TestCreateProjectDuplicateAliasFails(t *testing.T) {
 	}
 }
 
+func TestUpdateProjectAppliesFieldsAndAudits(t *testing.T) {
+	d := openRegistryDB(t)
+	ctx := context.Background()
+	p := store.RegistryProject{Alias: "blog", Name: "My blog",
+		Identity: "anonymous", AllowedOrigins: `["https://blog.example.com"]`}
+	if err := d.CreateProject(ctx, p, store.AuditEntry{
+		Actor: "cli", Action: "project.create", Subject: "blog"}); err != nil {
+		t.Fatal(err)
+	}
+	v0, _ := d.ConfigVersion(ctx)
+
+	updated := store.RegistryProject{Alias: "blog", Name: "Renamed blog",
+		Identity: "identified", AllowedOrigins: `["https://blog.example.com","https://www.blog.example.com"]`,
+		Retention: `{"web":{"raw_days":90}}`, Aggregation: `{"enabled":true}`}
+	if err := d.UpdateProject(ctx, updated, store.AuditEntry{
+		Actor: "cli", Action: "project.update", Subject: "blog"}); err != nil {
+		t.Fatal(err)
+	}
+
+	ps, _, err := d.LoadRegistry(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ps) != 1 {
+		t.Fatalf("LoadRegistry = %+v", ps)
+	}
+	got := ps[0]
+	if got.Name != "Renamed blog" || got.Identity != "identified" ||
+		got.AllowedOrigins != updated.AllowedOrigins ||
+		got.Retention != updated.Retention || got.Aggregation != updated.Aggregation {
+		t.Fatalf("LoadRegistry after update = %+v", got)
+	}
+
+	v1, _ := d.ConfigVersion(ctx)
+	if v1 != v0+1 {
+		t.Errorf("config_version = %d, want %d", v1, v0+1)
+	}
+	var actor, action string
+	if err := d.db.QueryRow(
+		`SELECT actor, action FROM audit_log WHERE subject='blog' AND action='project.update'`).
+		Scan(&actor, &action); err != nil {
+		t.Fatal(err)
+	}
+	if actor != "cli" || action != "project.update" {
+		t.Errorf("audit = %s %s", actor, action)
+	}
+}
+
+func TestUpdateProjectUnknownAliasFails(t *testing.T) {
+	d := openRegistryDB(t)
+	ctx := context.Background()
+	p := store.RegistryProject{Alias: "ghost", Name: "n", Identity: "anonymous", AllowedOrigins: "[]"}
+	err := d.UpdateProject(ctx, p, store.AuditEntry{Actor: "cli", Action: "project.update", Subject: "ghost"})
+	if err == nil {
+		t.Fatal("update of an unknown alias did not fail")
+	}
+}
+
 func TestIngestKeyLifecycle(t *testing.T) {
 	d := openRegistryDB(t)
 	ctx := context.Background()

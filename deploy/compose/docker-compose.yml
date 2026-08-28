@@ -3,8 +3,11 @@
 # No credentials, no object storage — backup is opt-in and separate:
 #   docker compose -f docker-compose.yml -f docker-compose.litestream.yml up -d
 #
-# Put a `projects.json` next to this file (copy projects.example.json from the
-# repository) and, if you want to override any defaults, a `.env`.
+# If you want to override any defaults, put a `.env` next to this file.
+# Projects live in the database now: after `up -d`, create one with
+#   docker compose exec analytics analytics project create -alias myapp
+# then issue a key with
+#   docker compose exec analytics analytics key issue -project myapp -label web
 services:
   analytics:
     image: ghcr.io/dmtrkzntsv/analytics:${ANALYTICS_VERSION:-latest}
@@ -12,7 +15,6 @@ services:
     ports:
       - "8080:8080"          # put Caddy/nginx/Cloudflare in front for TLS
     volumes:
-      - ./projects.json:/etc/analytics/projects.json:ro
       - data:/var/lib/analytics
     env_file:
       - path: .env

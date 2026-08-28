@@ -31,10 +31,6 @@ sed -e 's|ghcr.io/dmtrkzntsv/analytics:${ANALYTICS_VERSION:-latest}|analytics:co
     -e 's|"8080:8080"|"18080:8080"|' \
     -e 's|"3000:3000"|"13000:3000"|' \
     deploy/compose/docker-compose.yml > "$dir/docker-compose.yml"
-cat > "$dir/projects.json" <<'JSON'
-[{"alias": "dev", "name": "Dev", "allowed_origins": ["http://localhost:18080"],
-  "ingest_keys": [{"key": "ak_composetest", "label": "web"}]}]
-JSON
 
 docker compose -p "$project" -f "$dir/docker-compose.yml" up -d > /dev/null
 
@@ -44,13 +40,23 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 
+# Projects live in the database now: seed one through the CLI inside the
+# running container instead of mounting a projects.json.
+echo "creating project via the CLI..."
+docker compose -p "$project" -f "$dir/docker-compose.yml" exec -T analytics \
+  /usr/local/bin/analytics project create -alias dev -name Dev -origin "http://localhost:18080" \
+  || fail "project create failed"
+key="$(docker compose -p "$project" -f "$dir/docker-compose.yml" exec -T analytics \
+  /usr/local/bin/analytics key issue -project dev -label web | grep -o 'ak_[0-9a-f]*' | head -1)"
+[ -n "$key" ] || fail "key issue failed"
+
 # curl's default User-Agent is classified as a bot and the pageview would be
 # accepted but never stored, so the request has to look like a browser.
 ua='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36'
 # shellcheck disable=SC2016  # the $-prefixed names are JSON keys, not shell
 code="$(curl -s -o "$dir/events.out" -w '%{http_code}' -A "$ua" -X POST "http://127.0.0.1:18080/api/events" \
   -H 'Origin: http://localhost:18080' -H 'Content-Type: application/json' \
-  -H 'X-Analytics-Key: ak_composetest' \
+  -H "X-Analytics-Key: $key" \
   -d '{"attributes":{"$platform":"ios","$app_version":"1.0","$install_id":"install-1"},
        "events":[
          {"name":"$pageview","attributes":{"$url":"http://localhost:18080/pricing"}},

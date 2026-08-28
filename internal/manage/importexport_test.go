@@ -79,7 +79,7 @@ func TestImportLegacyProjectsJSON(t *testing.T) {
 	ctx := context.Background()
 	reg.Reload(ctx)
 	ops := NewOps(reg, st)
-	// the shape projects.example.json documents today: a bare array
+	// the legacy projects.json shape (retired file, now import-only): a bare array
 	legacy := `[{"alias":"blog","name":"My blog","identity":"anonymous",
 	  "ingest_keys":[{"key":"ak_legacy1","label":"web"}],
 	  "allowed_origins":["https://blog.example.com"]}]`
