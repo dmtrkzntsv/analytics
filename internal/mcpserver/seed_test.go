@@ -56,6 +56,15 @@ func newTestHost(t *testing.T) (*host, *mcp.ClientSession) {
 	seed(`INSERT INTO web_hits (id, project, ts, received_at, actor_id, path, referrer_source,
 	      utm_source, utm_medium, utm_campaign, country, device, browser, os, user_id, group_id)
 	      VALUES ('h1','blog','2026-08-26T10:00:00Z','2026-08-26T10:00:00Z','a1','/live','','','','','','','','','u1','')`)
+	seed(`INSERT INTO agg_product_daily (project, day, event_name, count, unique_users)
+	      VALUES ('blog','2026-08-20','signup',5,4)`)
+	seed(`INSERT INTO agg_product_totals (project, day, total_events, active_users)
+	      VALUES ('blog','2026-08-20',5,4)`)
+	seed(`INSERT INTO agg_retention (project, surface, cohort_day, day_offset, actors)
+	      VALUES ('blog','web','2026-08-01',0,10), ('blog','web','2026-08-01',7,4)`)
+	seed(`INSERT INTO agg_identity_daily (project, day, kind, id, actors, users, hits, views, events)
+	      VALUES ('blog','2026-08-20','user','u1',1,1,5,0,2)`)
+	seed(`INSERT INTO identities (project, kind, id, name) VALUES ('blog','user','u1','Jane Doe')`)
 
 	db, err := OpenReadDB(path)
 	if err != nil {
