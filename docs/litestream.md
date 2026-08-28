@@ -125,7 +125,10 @@ without any coordination between the two.
 
 If you would rather not have cron on the host, `docker-compose.evidence.yml`
 carries a commented `restore` service that runs the same script on a loop
-inside a container.
+inside a container. The stock `litestream/litestream` image ships without
+`sqlite3`, so the service's entrypoint installs it (`apk add sqlite`) before
+starting the loop — without that, every cycle would fail at the
+`quick_check` step and no replica would ever appear.
 
 ## 5. Verifying
 

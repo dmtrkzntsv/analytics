@@ -20,10 +20,12 @@ services:
 
   # In-container alternative to host cron. Needs .env with the R2 credentials
   # and a litestream.yml next to this file.
+  # The stock litestream image has no sqlite3, which restore.sh needs for its
+  # quick_check verification, so the entrypoint installs it before starting.
   # restore:
   #   image: litestream/litestream:0.3.13
   #   restart: unless-stopped
-  #   entrypoint: ["/bin/sh", "/restore.sh"]
+  #   entrypoint: ["/bin/sh", "-c", "apk add --no-cache sqlite && exec /bin/sh /restore.sh"]
   #   volumes:
   #     - ./restore.sh:/restore.sh:ro
   #     - ./litestream.yml:/etc/litestream.yml:ro
