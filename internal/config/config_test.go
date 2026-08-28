@@ -1,33 +1,24 @@
 package config
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
 
-const minimalProjects = `[{"alias": "app", "name": "App",
-	"ingest_keys": [{"key": "ak_test", "label": "web"}],
-	"allowed_origins": ["https://app.com"]}]`
-
-// load runs FromEnv against a var map, writing projects to a temp file and
-// pointing PROJECTS_FILE at it unless the map already sets one.
-func load(t *testing.T, vars map[string]string, projects string) (*Config, error) {
+// load runs FromEnv against a var map. DATABASE_URL defaults to an unused
+// sqlite DSN so callers that only care about other fields can omit it.
+func load(t *testing.T, vars map[string]string) (*Config, error) {
 	t.Helper()
-	if _, ok := vars["PROJECTS_FILE"]; !ok && projects != "" {
-		path := filepath.Join(t.TempDir(), "projects.json")
-		if err := os.WriteFile(path, []byte(projects), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		vars["PROJECTS_FILE"] = path
+	m := map[string]string{"DATABASE_URL": "sqlite:///tmp/a.db"}
+	for k, v := range vars {
+		m[k] = v
 	}
-	return FromEnv(func(k string) (string, bool) { v, ok := vars[k]; return v, ok })
+	return FromEnv(func(k string) (string, bool) { v, ok := m[k]; return v, ok })
 }
 
 func TestDefaultsApplied(t *testing.T) {
-	c, err := load(t, map[string]string{"DATABASE_URL": "sqlite:///tmp/a.db"}, minimalProjects)
+	c, err := load(t, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +65,7 @@ func TestEnvOverrides(t *testing.T) {
 		"DASHBOARDS_INTERVAL":              "1m",
 		"DASHBOARDS_PROJECT_DIR":           "/tmp/evidence",
 		"DASHBOARDS_WORK_DIR":              "/tmp/work",
-	}, minimalProjects)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,47 +88,6 @@ func TestEnvOverrides(t *testing.T) {
 	}
 }
 
-func TestRetentionOverrideMerge(t *testing.T) {
-	c, err := load(t, map[string]string{"DATABASE_URL": "sqlite:///tmp/a.db"}, `[{
-	  "alias": "app", "name": "App", "allowed_origins": ["https://app.com"],
-	  "ingest_keys": [{"key": "ak_1", "label": "web"}],
-	  "retention": {"product": {"raw_days": 60}}
-	}]`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	r := c.RetentionFor("app")
-	if r.Product.RawDays != 60 {
-		t.Errorf("override lost: %+v", r)
-	}
-	if r.Product.AggregateDays != 365 || r.Web.RawDays != 7 {
-		t.Errorf("non-overridden fields must inherit: %+v", r)
-	}
-	if u := c.RetentionFor("unknown"); u.Web.RawDays != 7 {
-		t.Errorf("unknown project must get defaults: %+v", u)
-	}
-}
-
-func TestProductAggregationDefaults(t *testing.T) {
-	c, err := load(t, map[string]string{"DATABASE_URL": "sqlite:///tmp/a.db"}, `[
-	  {"alias": "a", "name": "A", "allowed_origins": ["https://a.com"],
-	   "ingest_keys": [{"key": "ak_a", "label": "web"}]},
-	  {"alias": "b", "name": "B", "allowed_origins": ["https://b.com"],
-	   "ingest_keys": [{"key": "ak_b", "label": "web"}],
-	   "product_aggregation": {"enabled": true, "attributes": {"subscribed": ["plan"]}}}
-	]`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c.Project("a").ProductAggregation != nil {
-		t.Error("absent block must stay nil (aggregation off by default, spec §4)")
-	}
-	pa := c.Project("b").ProductAggregation
-	if pa == nil || !pa.Enabled || pa.TopN != 50 {
-		t.Errorf("TopN default not applied: %+v", pa)
-	}
-}
-
 func TestValidationErrors(t *testing.T) {
 	base := func(over map[string]string) map[string]string {
 		vars := map[string]string{"DATABASE_URL": "sqlite:///tmp/a.db"}
@@ -146,54 +96,29 @@ func TestValidationErrors(t *testing.T) {
 		}
 		return vars
 	}
-	cases := map[string]struct {
-		vars     map[string]string
-		projects string
-	}{
-		"no database":               {map[string]string{}, minimalProjects},
-		"no projects":               {base(nil), `[]`},
-		"dup alias":                 {base(nil), `[{"alias":"a","name":"A","allowed_origins":["https://a.com"]},{"alias":"a","name":"A2","allowed_origins":["https://b.com"]}]`},
-		"bad geo scheme":            {base(map[string]string{"GEO_URL": "???"}), minimalProjects},
-		"negative raw_days":         {base(map[string]string{"RETENTION_WEB_RAW_DAYS": "-1"}), minimalProjects},
-		"bad integer":               {base(map[string]string{"BUFFER_CAPACITY": "many"}), minimalProjects},
-		"empty origin":              {base(nil), `[{"alias":"a","name":"A","allowed_origins":[""]}]`},
-		"empty alias":               {base(nil), `[{"alias":"","name":"A","allowed_origins":["https://a.com"]}]`},
-		"invalid duration":          {base(map[string]string{"BUFFER_FLUSH_INTERVAL": "fast"}), minimalProjects},
-		"unknown project key":       {base(nil), `[{"alias":"a","name":"A","allowed_origin":["https://a.com"]}]`},
-		"not an array":              {base(nil), `{"projects":[]}`},
-		"project negative override": {base(nil), `[{"alias":"a","name":"A","allowed_origins":["https://a.com"],"retention":{"web":{"raw_days":-2}}}]`},
+	cases := map[string]map[string]string{
+		"no database":       {"DATABASE_URL": ""},
+		"bad geo scheme":    base(map[string]string{"GEO_URL": "???"}),
+		"negative raw_days": base(map[string]string{"RETENTION_WEB_RAW_DAYS": "-1"}),
+		"bad integer":       base(map[string]string{"BUFFER_CAPACITY": "many"}),
+		"invalid duration":  base(map[string]string{"BUFFER_FLUSH_INTERVAL": "fast"}),
 	}
-	for name, tc := range cases {
-		if _, err := load(t, tc.vars, tc.projects); err == nil {
+	for name, vars := range cases {
+		if _, err := FromEnv(func(k string) (string, bool) { v, ok := vars[k]; return v, ok }); err == nil {
 			t.Errorf("%s: expected error", name)
 		}
 	}
 }
 
-func TestMissingProjectsFile(t *testing.T) {
-	_, err := load(t, map[string]string{
-		"DATABASE_URL":  "sqlite:///tmp/a.db",
-		"PROJECTS_FILE": filepath.Join(t.TempDir(), "absent.json"),
-	}, "")
-	if err == nil || !strings.Contains(err.Error(), "projects file") {
-		t.Errorf("expected projects-file error, got %v", err)
-	}
-}
-
 // Load reads the real process environment; cover the wrapper itself.
 func TestLoadFromProcessEnv(t *testing.T) {
-	projects := filepath.Join(t.TempDir(), "projects.json")
-	if err := os.WriteFile(projects, []byte(minimalProjects), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	t.Setenv("DATABASE_URL", "sqlite:///tmp/a.db")
-	t.Setenv("PROJECTS_FILE", projects)
 	t.Setenv("LOG_LEVEL", "warn")
 	c, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Log.Level != "warn" || len(c.Projects) != 1 {
+	if c.Log.Level != "warn" {
 		t.Errorf("Load() = %+v", c)
 	}
 }
@@ -240,20 +165,6 @@ func TestDashboardsNeedsADatabase(t *testing.T) {
 	}
 }
 
-func TestDashboardsIgnoresProjectsFile(t *testing.T) {
-	// A replica-only host has no project list; dashboards must not demand one.
-	c, err := FromEnvDashboards(mapLookup(map[string]string{
-		"DASHBOARDS_DB_PATH": "/data/replica.db",
-		"PROJECTS_FILE":      "/nonexistent/projects.json",
-	}))
-	if err != nil {
-		t.Fatalf("FromEnvDashboards: %v", err)
-	}
-	if len(c.Projects) != 0 {
-		t.Errorf("Projects = %v, want none", c.Projects)
-	}
-}
-
 func TestDashboardsReportsBadDurations(t *testing.T) {
 	if _, err := FromEnvDashboards(mapLookup(map[string]string{
 		"DASHBOARDS_DB_PATH":  "/data/replica.db",
@@ -263,21 +174,7 @@ func TestDashboardsReportsBadDurations(t *testing.T) {
 	}
 }
 
-// --- ingest keys, identity mode, app retention (app analytics spec §4/§5/§9) ---
-
-func loadProjects(t *testing.T, projects string) (*Config, error) {
-	t.Helper()
-	return load(t, map[string]string{"DATABASE_URL": "sqlite:///tmp/a.db"}, projects)
-}
-
-func mustLoadProjects(t *testing.T, projects string) *Config {
-	t.Helper()
-	c, err := loadProjects(t, projects)
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	return c
-}
+// --- legacy projects.json format (used only by `analytics config import`) ---
 
 func TestParseProjectsIngestKeys(t *testing.T) {
 	ps, err := ParseProjects(strings.NewReader(`[
@@ -298,75 +195,23 @@ func TestParseProjectsIngestKeys(t *testing.T) {
 	}
 }
 
-func TestIdentityDefaultsToAnonymous(t *testing.T) {
-	c := mustLoadProjects(t, `[{"alias":"a","name":"A","ingest_keys":[{"key":"ak_1","label":"w"}]}]`)
-	if got := c.Project("a").Identity; got != IdentityAnonymous {
-		t.Errorf("identity = %q, want anonymous", got)
+func TestParseProjectsRejectsUnknownFields(t *testing.T) {
+	if _, err := ParseProjects(strings.NewReader(`[{"alias":"a","name":"A","allowed_origin":["https://a.com"]}]`)); err == nil {
+		t.Fatal("want error for unknown field allowed_origin")
 	}
 }
 
-func TestRejectsUnknownIdentity(t *testing.T) {
-	if _, err := loadProjects(t, `[{"alias":"a","name":"A","identity":"pseudonymous",
-	  "ingest_keys":[{"key":"ak_1","label":"w"}]}]`); err == nil {
-		t.Fatal("want error for unknown identity mode")
-	}
-}
-
-func TestRejectsProjectWithoutKeys(t *testing.T) {
-	if _, err := loadProjects(t, `[{"alias":"a","name":"A"}]`); err == nil {
-		t.Fatal("want error when ingest_keys is missing")
-	}
-}
-
-func TestRejectsEmptyIngestKey(t *testing.T) {
-	if _, err := loadProjects(t, `[{"alias":"a","name":"A","ingest_keys":[{"key":"","label":"w"}]}]`); err == nil {
-		t.Fatal("want error for empty ingest key")
-	}
-}
-
-func TestRejectsDuplicateKeyAcrossProjects(t *testing.T) {
-	if _, err := loadProjects(t, `[
-	  {"alias":"a","name":"A","ingest_keys":[{"key":"dup","label":"w"}]},
-	  {"alias":"b","name":"B","ingest_keys":[{"key":"dup","label":"w"}]}]`); err == nil {
-		t.Fatal("want error for duplicate key across projects")
-	}
-}
-
-func TestProjectByKey(t *testing.T) {
-	c := mustLoadProjects(t, `[
-	  {"alias":"a","name":"A","ingest_keys":[{"key":"ak_1","label":"web"},{"key":"ak_off","label":"old","disabled":true}]},
-	  {"alias":"b","name":"B","ingest_keys":[{"key":"ak_2","label":"ios"}]}]`)
-
-	p, label, ok := c.ProjectByKey("ak_1")
-	if !ok || p.Alias != "a" || label != "web" {
-		t.Fatalf("ak_1 -> %v %q %v", p, label, ok)
-	}
-	if p, _, ok := c.ProjectByKey("ak_2"); !ok || p.Alias != "b" {
-		t.Errorf("ak_2 -> %v %v", p, ok)
-	}
-	if _, _, ok := c.ProjectByKey("ak_off"); ok {
-		t.Error("disabled key must not resolve")
-	}
-	if _, _, ok := c.ProjectByKey("nope"); ok {
-		t.Error("unknown key must not resolve")
-	}
-	if _, _, ok := c.ProjectByKey(""); ok {
-		t.Error("empty key must not resolve")
-	}
-}
-
-func TestDisabledKeyProjects(t *testing.T) {
-	c := mustLoadProjects(t, `[
-	  {"alias":"a","name":"A","ingest_keys":[{"key":"ak_1","label":"w","disabled":true}]},
-	  {"alias":"b","name":"B","ingest_keys":[{"key":"ak_2","label":"w"}]}]`)
-	got := c.DisabledKeyProjects()
-	if len(got) != 1 || got[0] != "a" {
-		t.Fatalf("DisabledKeyProjects() = %v, want [a]", got)
+func TestParseProjectsRejectsNonArray(t *testing.T) {
+	if _, err := ParseProjects(strings.NewReader(`{"projects":[]}`)); err == nil {
+		t.Fatal("want error when the top level is not an array")
 	}
 }
 
 func TestAppRetentionDefaultsAndMaxEventAge(t *testing.T) {
-	c := mustLoadProjects(t, `[{"alias":"a","name":"A","ingest_keys":[{"key":"k","label":"w"}]}]`)
+	c, err := load(t, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if c.Retention.App.RawDays != 30 || c.Retention.App.AggregateDays != 365 {
 		t.Fatalf("app retention = %+v", c.Retention.App)
 	}
@@ -377,10 +222,9 @@ func TestAppRetentionDefaultsAndMaxEventAge(t *testing.T) {
 
 func TestAppRetentionFromEnv(t *testing.T) {
 	c, err := load(t, map[string]string{
-		"DATABASE_URL":                 "sqlite:///tmp/a.db",
 		"RETENTION_APP_RAW_DAYS":       "14",
 		"RETENTION_APP_AGGREGATE_DAYS": "90",
-	}, minimalProjects)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,20 +233,23 @@ func TestAppRetentionFromEnv(t *testing.T) {
 	}
 }
 
-func TestRetentionForAppOverride(t *testing.T) {
-	c := mustLoadProjects(t, `[{"alias":"a","name":"A",
-	  "ingest_keys":[{"key":"k","label":"w"}],
-	  "retention":{"app":{"raw_days":14}}}]`)
-	r := c.RetentionFor("a")
-	if r.App.RawDays != 14 || r.App.AggregateDays != 365 {
-		t.Fatalf("merged app retention = %+v", r.App)
+func TestRejectsNegativeAppRetention(t *testing.T) {
+	if _, err := load(t, map[string]string{"RETENTION_APP_RAW_DAYS": "-1"}); err == nil {
+		t.Fatal("want error for negative app retention")
 	}
 }
 
-func TestRejectsNegativeAppRetention(t *testing.T) {
-	if _, err := loadProjects(t, `[{"alias":"a","name":"A",
-	  "ingest_keys":[{"key":"k","label":"w"}],
-	  "retention":{"app":{"raw_days":-1}}}]`); err == nil {
-		t.Fatal("want error for negative app retention")
+func TestLoadDoesNotRequireProjectsFile(t *testing.T) {
+	cfg, err := FromEnv(func(k string) (string, bool) {
+		if k == "DATABASE_URL" {
+			return "sqlite:///tmp/x.db", true
+		}
+		return "", false // PROJECTS_FILE unset, no file anywhere
+	})
+	if err != nil {
+		t.Fatalf("FromEnv: %v", err)
+	}
+	if cfg.Database != "sqlite:///tmp/x.db" {
+		t.Fatalf("cfg = %+v", cfg)
 	}
 }

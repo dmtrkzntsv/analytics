@@ -1,11 +1,12 @@
-// Package config loads infra settings from the environment (12-factor; the
-// process reads real env vars — systemd/compose/make load the env *file*)
-// and the project list from the JSON file named by PROJECTS_FILE (spec §4).
+// Package config loads infra settings from the process environment
+// (12-factor; systemd/compose/make load the env *file*, the process reads
+// real env vars). It no longer reads any file: the project list lives in
+// the registry (internal/manage), seeded once via `analytics config
+// import` from the legacy projects.json format.
 // stdlib only: encoding/json + net/url for DSN scheme checks.
 package config
 
 import (
-	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -67,12 +68,17 @@ type ProductAggregation struct {
 // website, an iOS app and a desktop app be retired independently. Disabled
 // rather than deleted: retirement is reversible during a botched rollout
 // without regenerating and redistributing.
+//
+// Legacy projects.json format, used only by `analytics config import`.
 type IngestKey struct {
 	Key      string `json:"key"`
 	Label    string `json:"label"`
 	Disabled bool   `json:"disabled"`
 }
 
+// Project is the legacy projects.json format, used only by `analytics
+// config import` to seed the registry (internal/manage) from a pre-upgrade
+// install. The running server never reads this type from a file.
 type Project struct {
 	Alias              string              `json:"alias"`
 	Name               string              `json:"name"`
@@ -101,32 +107,15 @@ type Config struct {
 	Buffer     BufferConfig
 	Retention  Retention
 	Dashboards DashboardsConfig
-	Projects   []Project
-
-	// keys is a flat list of non-disabled ingest keys. A slice rather than
-	// a map because lookup uses subtle.ConstantTimeCompare: a map index on
-	// a credential is not constant time.
-	keys []keyOwner
 }
 
-type keyOwner struct {
-	key     string
-	project *Project
-	label   string
-}
-
-// DefaultProjectsFile is where the installer puts projects.json; override
-// with PROJECTS_FILE.
-const DefaultProjectsFile = "/etc/analytics/projects.json"
-
-// Load builds the configuration from the process environment and the
-// projects file, for the commands that need the project list.
+// Load builds the configuration from the process environment.
 func Load() (*Config, error) {
 	return FromEnv(os.LookupEnv)
 }
 
 // LoadDashboards builds the configuration for `analytics dashboards`, which
-// renders whatever database it is pointed at and never reads the project list.
+// renders whatever database it is pointed at.
 func LoadDashboards() (*Config, error) {
 	return FromEnvDashboards(os.LookupEnv)
 }
@@ -175,18 +164,18 @@ func (e *env) dur(key string, def time.Duration) time.Duration {
 }
 
 // FromEnv parses the environment via lookup (os.LookupEnv in production,
-// a map lookup in tests) and loads the projects file it names.
+// a map lookup in tests).
 func FromEnv(lookup func(string) (string, bool)) (*Config, error) {
-	return parse(lookup, true)
-}
-
-// FromEnvDashboards is FromEnv without the projects file: a machine that only
-// reads a replica has no project list to give.
-func FromEnvDashboards(lookup func(string) (string, bool)) (*Config, error) {
 	return parse(lookup, false)
 }
 
-func parse(lookup func(string) (string, bool), withProjects bool) (*Config, error) {
+// FromEnvDashboards is FromEnv, plus the DASHBOARDS_DB_PATH fallback to
+// DATABASE_URL that only the dashboards renderer needs.
+func FromEnvDashboards(lookup func(string) (string, bool)) (*Config, error) {
+	return parse(lookup, true)
+}
+
+func parse(lookup func(string) (string, bool), dashboards bool) (*Config, error) {
 	e := &env{lookup: lookup}
 	c := &Config{
 		Listen:   e.str("LISTEN_ADDR", "127.0.0.1:8080"),
@@ -227,7 +216,7 @@ func parse(lookup func(string) (string, bool), withProjects bool) (*Config, erro
 	if e.err != nil {
 		return nil, e.err
 	}
-	if !withProjects {
+	if dashboards {
 		if c.Dashboards.DBPath == "" {
 			if c.Database == "" {
 				return nil, fmt.Errorf("config: DASHBOARDS_DB_PATH or DATABASE_URL is required")
@@ -236,17 +225,6 @@ func parse(lookup func(string) (string, bool), withProjects bool) (*Config, erro
 		}
 		return c, nil
 	}
-	path := e.str("PROJECTS_FILE", DefaultProjectsFile)
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("config: projects file: %w", err)
-	}
-	defer f.Close()
-	c.Projects, err = ParseProjects(f)
-	if err != nil {
-		return nil, fmt.Errorf("config: %s: %w", path, err)
-	}
-	c.applyDefaults()
 	if err := c.validate(); err != nil {
 		return nil, err
 	}
@@ -254,6 +232,8 @@ func parse(lookup func(string) (string, bool), withProjects bool) (*Config, erro
 }
 
 // ParseProjects reads a projects.json: a bare JSON array of projects.
+//
+// Legacy projects.json format, used only by `analytics config import`.
 func ParseProjects(r io.Reader) ([]Project, error) {
 	var ps []Project
 	dec := json.NewDecoder(r)
@@ -262,24 +242,6 @@ func ParseProjects(r io.Reader) ([]Project, error) {
 		return nil, fmt.Errorf("projects: %w", err)
 	}
 	return ps, nil
-}
-
-func (c *Config) applyDefaults() {
-	c.keys = nil
-	for i := range c.Projects {
-		p := &c.Projects[i]
-		if pa := p.ProductAggregation; pa != nil && pa.TopN == 0 {
-			pa.TopN = 50
-		}
-		if p.Identity == "" {
-			p.Identity = IdentityAnonymous
-		}
-		for _, k := range p.IngestKeys {
-			if !k.Disabled && k.Key != "" {
-				c.keys = append(c.keys, keyOwner{key: k.Key, project: p, label: k.Label})
-			}
-		}
-	}
 }
 
 func (c *Config) validate() error {
@@ -292,114 +254,13 @@ func (c *Config) validate() error {
 			return fmt.Errorf("config: invalid DSN %q", dsn)
 		}
 	}
-	if len(c.Projects) == 0 {
-		return fmt.Errorf("config: at least one project is required")
-	}
 	// Validate global retention (negative values only)
 	for _, rc := range []RetentionClass{c.Retention.Web, c.Retention.Product, c.Retention.App} {
 		if rc.RawDays < 0 || rc.AggregateDays < 0 {
 			return fmt.Errorf("config: retention days must not be negative: %+v", rc)
 		}
 	}
-	seen := map[string]bool{}
-	seenKey := map[string]string{}
-	for _, p := range c.Projects {
-		if p.Alias == "" {
-			return fmt.Errorf("config: project with empty alias")
-		}
-		if seen[p.Alias] {
-			return fmt.Errorf("config: duplicate project alias %q", p.Alias)
-		}
-		seen[p.Alias] = true
-		switch p.Identity {
-		case IdentityAnonymous, IdentityIdentified:
-		default:
-			return fmt.Errorf("config: project %q: identity must be %q or %q, got %q",
-				p.Alias, IdentityAnonymous, IdentityIdentified, p.Identity)
-		}
-		if len(p.IngestKeys) == 0 {
-			return fmt.Errorf("config: project %q has no ingest_keys; run `analytics keygen`", p.Alias)
-		}
-		for _, k := range p.IngestKeys {
-			if k.Key == "" {
-				return fmt.Errorf("config: project %q has an empty ingest key", p.Alias)
-			}
-			if owner, dup := seenKey[k.Key]; dup {
-				return fmt.Errorf("config: an ingest key of project %q is already used by project %q; keys must be globally unique", p.Alias, owner)
-			}
-			seenKey[k.Key] = p.Alias
-		}
-		for _, o := range p.AllowedOrigins {
-			if o == "" {
-				return fmt.Errorf("config: project %q has an empty allowed_origin", p.Alias)
-			}
-		}
-		// Validate merged retention for project
-		r := c.RetentionFor(p.Alias)
-		if r.Web.RawDays < 0 || r.Web.AggregateDays < 0 ||
-			r.Product.RawDays < 0 || r.Product.AggregateDays < 0 ||
-			r.App.RawDays < 0 || r.App.AggregateDays < 0 {
-			return fmt.Errorf("config: project %q has invalid merged retention (negative values): web=%+v product=%+v app=%+v", p.Alias, r.Web, r.Product, r.App)
-		}
-	}
 	return nil
-}
-
-func (c *Config) Project(alias string) *Project {
-	for i := range c.Projects {
-		if c.Projects[i].Alias == alias {
-			return &c.Projects[i]
-		}
-	}
-	return nil
-}
-
-func (c *Config) RetentionFor(project string) Retention {
-	r := c.Retention
-	p := c.Project(project)
-	if p == nil || p.Retention == nil {
-		return r
-	}
-	apply := func(dst *RetentionClass, o *RetentionClassOverride) {
-		if o == nil {
-			return
-		}
-		if o.RawDays != nil {
-			dst.RawDays = *o.RawDays
-		}
-		if o.AggregateDays != nil {
-			dst.AggregateDays = *o.AggregateDays
-		}
-	}
-	apply(&r.Web, p.Retention.Web)
-	apply(&r.Product, p.Retention.Product)
-	apply(&r.App, p.Retention.App)
-	return r
-}
-
-// ProjectByKey resolves a project from an ingest key. Disabled keys never
-// resolve. This is the only auth outcome: the key resolves or it does not,
-// so there is no unknown-project oracle to keep indistinguishable.
-//
-// Every candidate is compared with no early return on match, so the loop's
-// timing does not vary with key content. Length differences do leak through
-// ConstantTimeCompare's zero return; that is unavoidable and harmless for
-// 128-bit random keys.
-func (c *Config) ProjectByKey(key string) (*Project, string, bool) {
-	if key == "" {
-		return nil, "", false
-	}
-	match := -1
-	kb := []byte(key)
-	for i := range c.keys {
-		if subtle.ConstantTimeCompare([]byte(c.keys[i].key), kb) == 1 {
-			match = i
-		}
-	}
-	if match < 0 {
-		return nil, "", false
-	}
-	return c.keys[match].project, c.keys[match].label, true
 }
 
 // MaxEventAge is derived from the app raw window rather than separately
@@ -407,25 +268,4 @@ func (c *Config) ProjectByKey(key string) (*Project, string, bool) {
 // already-aggregated day.
 func (c *Config) MaxEventAge() time.Duration {
 	return time.Duration(c.Retention.App.RawDays) * 24 * time.Hour
-}
-
-// DisabledKeyProjects lists projects that can receive nothing because all
-// their keys are disabled. That is a legitimate retired state, so callers
-// warn rather than fail.
-func (c *Config) DisabledKeyProjects() []string {
-	var out []string
-	for i := range c.Projects {
-		p := &c.Projects[i]
-		active := false
-		for _, k := range p.IngestKeys {
-			if !k.Disabled {
-				active = true
-				break
-			}
-		}
-		if !active {
-			out = append(out, p.Alias)
-		}
-	}
-	return out
 }
