@@ -14,14 +14,18 @@ import (
 	"github.com/dmitry/analytics/internal/config"
 	"github.com/dmitry/analytics/internal/config/configtest"
 	"github.com/dmitry/analytics/internal/identity"
+	"github.com/dmitry/analytics/internal/manage"
 	"github.com/dmitry/analytics/internal/store"
 	_ "github.com/dmitry/analytics/internal/store/sqlite"
 	_ "modernc.org/sqlite"
 )
 
-const jobsProjects = `[{"alias": "app", "name": "App", "allowed_origins": ["https://a.com"],
-	"ingest_keys": [{"key": "ak_app", "label": "web"}],
-  "product_aggregation": {"enabled": true, "attributes": {"*": ["plan"]}, "top_n": 50}}]`
+func intPtr(n int) *int { return &n }
+
+var jobsProjectSpecs = []manage.ProjectSpec{
+	{Alias: "app", Name: "App", AllowedOrigins: []string{"https://a.com"},
+		Aggregation: &config.ProductAggregation{Enabled: true, Attributes: map[string][]string{"*": {"plan"}}, TopN: 50}},
+}
 
 // jobsVars pins the retention windows the assertions below rely on.
 var jobsVars = map[string]string{
@@ -71,13 +75,35 @@ func openStore(t *testing.T) store.Store {
 	return st
 }
 
-func setup(t *testing.T, projectsJSON string) (store.Store, *config.Config, *Runner) {
+// newRegistry builds a registry over st, seeded with specs via the audited
+// Ops path (mirrors production: registry rows come from CreateProject, not
+// a direct insert).
+func newRegistry(t *testing.T, st store.Store, cfg *config.Config, specs []manage.ProjectSpec) *manage.Registry {
 	t.Helper()
-	cfg := configtest.Load(t, jobsVars, projectsJSON)
+	ctx := context.Background()
+	reg := manage.New(st, cfg.Retention, slog.Default())
+	if err := reg.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ops := manage.NewOps(reg, st)
+	for _, spec := range specs {
+		if _, err := ops.CreateProject(ctx, "test", spec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return reg
+}
+
+// setup seeds a fresh store and registry from specs and returns a Runner
+// wired to both, using a fixed clock (2026-08-22T04:00:00Z).
+func setup(t *testing.T, vars map[string]string, specs []manage.ProjectSpec) (store.Store, *manage.Registry, *Runner) {
+	t.Helper()
+	cfg := configtest.Load(t, vars)
 	st, path := openStoreAt(t)
 	t.Setenv("JOBS_TEST_DB", path)
+	reg := newRegistry(t, st, cfg, specs)
 	now := func() time.Time { return time.Date(2026, 8, 22, 4, 0, 0, 0, time.UTC) }
-	return st, cfg, New(st, cfg, identity.NewSalter(st, now), slog.Default(), now)
+	return st, reg, New(st, cfg, reg, identity.NewSalter(st, now), slog.Default(), now)
 }
 
 func mustTime(s string) time.Time {
@@ -88,7 +114,7 @@ func mustTime(s string) time.Time {
 func mustDay(s string) civil.Date { d, _ := civil.Parse(s); return d }
 
 func TestRunDailyPassAggregatesOldDays(t *testing.T) {
-	st, _, r := setup(t, jobsProjects)
+	st, _, r := setup(t, jobsVars, jobsProjectSpecs)
 	ctx := context.Background()
 	// Old day (beyond the 7-day raw window relative to fake now 2026-08-22).
 	if err := st.WriteWebHits(ctx, []store.WebHit{
@@ -141,7 +167,7 @@ func TestRunDailyPassAggregatesOldDays(t *testing.T) {
 // The pass must rebuild v_events_flat from the keys actually present, so a
 // newly seen attribute becomes queryable without a restart.
 func TestRunDailyPassRebuildsFlatView(t *testing.T) {
-	st, _, r := setup(t, jobsProjects)
+	st, _, r := setup(t, jobsVars, jobsProjectSpecs)
 	ctx := context.Background()
 	// Inside the raw window, so it survives to be discovered.
 	if err := st.WriteProductEvents(ctx, []store.ProductEvent{
@@ -168,12 +194,17 @@ func TestRunDailyPassRebuildsFlatView(t *testing.T) {
 	}
 }
 
-// A project that exists in the database but has been removed from config
-// (archived) must still be maintained, using global retention.
+// A project that has been archived in the registry must still be
+// maintained, using global retention: it is still a registry row, so
+// store.ProjectAliases (all rows, including archived) still returns it.
 func TestRunDailyPassCoversArchivedProjects(t *testing.T) {
-	st, _, r := setup(t, jobsProjects)
+	st, reg, r := setup(t, jobsVars, jobsProjectSpecs)
 	ctx := context.Background()
-	if err := st.SyncProjects(ctx, []store.ProjectInfo{{Alias: "app", Name: "App"}, {Alias: "gone", Name: "Gone"}}); err != nil {
+	ops := manage.NewOps(reg, st)
+	if _, err := ops.CreateProject(ctx, "test", manage.ProjectSpec{Alias: "gone", Name: "Gone"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ops.ArchiveProject(ctx, "test", "gone"); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.WriteWebHits(ctx, []store.WebHit{
@@ -194,13 +225,12 @@ func TestRunDailyPassCoversArchivedProjects(t *testing.T) {
 
 // A per-project retention override must win over the global window.
 func TestRunDailyPassHonoursProjectRetention(t *testing.T) {
-	const projectsJSON = `[
-        {"alias": "app", "name": "App", "allowed_origins": ["https://a.com"],
-         "ingest_keys": [{"key": "ak_app2", "label": "web"}]},
-        {"alias": "keep", "name": "Keep", "allowed_origins": ["https://b.com"],
-         "ingest_keys": [{"key": "ak_keep", "label": "web"}],
-         "retention": {"web": {"raw_days": 90}}}]`
-	st, _, r := setup(t, projectsJSON)
+	specs := []manage.ProjectSpec{
+		{Alias: "app", Name: "App", AllowedOrigins: []string{"https://a.com"}},
+		{Alias: "keep", Name: "Keep", AllowedOrigins: []string{"https://b.com"},
+			Retention: &config.RetentionOverride{Web: &config.RetentionClassOverride{RawDays: intPtr(90)}}},
+	}
+	st, _, r := setup(t, jobsVars, specs)
 	ctx := context.Background()
 	hits := []store.WebHit{
 		{ID: "1", Project: "app", TS: mustTime("2026-08-10T10:00:00Z"), ActorID: "v", Path: "/"},
@@ -228,30 +258,16 @@ func TestRunDailyPassHonoursProjectRetention(t *testing.T) {
 	}
 }
 
-func TestAggSettingsFor(t *testing.T) {
-	if got := aggSettingsFor(nil); got.Enabled || got.TopN != 0 {
-		t.Errorf("nil project = %+v, want zero value", got)
-	}
-	if got := aggSettingsFor(&config.Project{}); got.Enabled {
-		t.Errorf("project without product_aggregation = %+v, want disabled", got)
-	}
-	p := &config.Project{ProductAggregation: &config.ProductAggregation{
-		Enabled: true, Attributes: map[string][]string{"*": {"plan"}}, TopN: 25}}
-	got := aggSettingsFor(p)
-	if !got.Enabled || got.TopN != 25 || len(got.Attributes["*"]) != 1 {
-		t.Errorf("aggSettingsFor = %+v", got)
-	}
-}
-
 // The scheduler must fire salt rotation at 00:00 and the daily pass at 03:00,
 // each at most once per day, and neither at other hours.
 func TestScheduleFiresOncePerDay(t *testing.T) {
-	cfg := configtest.Load(t, jobsVars, jobsProjects)
+	cfg := configtest.Load(t, jobsVars)
 	clock := time.Date(2026, 8, 22, 0, 0, 0, 0, time.UTC)
 	now := func() time.Time { return clock }
 	st := &countingStore{Store: openStore(t)}
+	reg := newRegistry(t, st, cfg, jobsProjectSpecs)
 	rot := &countingRotator{Salter: identity.NewSalter(st, now)}
-	r := New(st, cfg, rot, slog.Default(), now)
+	r := New(st, cfg, reg, rot, slog.Default(), now)
 	ctx := context.Background()
 
 	at := func(h, m int) {
@@ -290,11 +306,12 @@ func TestScheduleFiresOncePerDay(t *testing.T) {
 // Boot must run a catch-up pass immediately so downtime never skips a day,
 // and Run must return when the context is cancelled.
 func TestRunBootCatchUpAndCancel(t *testing.T) {
-	cfg := configtest.Load(t, jobsVars, jobsProjects)
+	cfg := configtest.Load(t, jobsVars)
 	now := func() time.Time { return time.Date(2026, 8, 22, 4, 0, 0, 0, time.UTC) }
 	st := &countingStore{Store: openStore(t)}
+	reg := newRegistry(t, st, cfg, jobsProjectSpecs)
 	rot := &countingRotator{Salter: identity.NewSalter(st, now)}
-	r := New(st, cfg, rot, slog.Default(), now)
+	r := New(st, cfg, reg, rot, slog.Default(), now)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -323,13 +340,13 @@ func TestRunBootCatchUpAndCancel(t *testing.T) {
 
 // --- app class, cohorts and identities ---
 
-const identifiedProjects = `[{"alias": "app", "name": "App", "identity": "identified",
-	"allowed_origins": ["https://a.com"],
-	"ingest_keys": [{"key": "ak_app", "label": "web"}]}]`
+var identifiedProjectSpecs = []manage.ProjectSpec{
+	{Alias: "app", Name: "App", Identity: "identified", AllowedOrigins: []string{"https://a.com"}},
+}
 
-const anonymousProjects = `[{"alias": "app", "name": "App", "identity": "anonymous",
-	"allowed_origins": ["https://a.com"],
-	"ingest_keys": [{"key": "ak_app", "label": "web"}]}]`
+var anonymousProjectSpecs = []manage.ProjectSpec{
+	{Alias: "app", Name: "App", Identity: "anonymous", AllowedOrigins: []string{"https://a.com"}},
+}
 
 // appVars uses a 7-day app raw window so the fixed 2026-08-10 fixture day is
 // already outside it relative to the fake now of 2026-08-22.
@@ -339,17 +356,18 @@ var appVars = map[string]string{
 	"RETENTION_APP_RAW_DAYS": "7", "RETENTION_APP_AGGREGATE_DAYS": "365",
 }
 
-func setupApp(t *testing.T, projectsJSON string) (store.Store, *Runner, *sql.DB) {
+func setupApp(t *testing.T, specs []manage.ProjectSpec) (store.Store, *Runner, *sql.DB) {
 	t.Helper()
-	cfg := configtest.Load(t, appVars, projectsJSON)
+	cfg := configtest.Load(t, appVars)
 	st, path := openStoreAt(t)
+	reg := newRegistry(t, st, cfg, specs)
 	now := func() time.Time { return time.Date(2026, 8, 22, 4, 0, 0, 0, time.UTC) }
 	raw, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { raw.Close() })
-	return st, New(st, cfg, identity.NewSalter(st, now), slog.Default(), now), raw
+	return st, New(st, cfg, reg, identity.NewSalter(st, now), slog.Default(), now), raw
 }
 
 func seedAppDay(t *testing.T, st store.Store, actors ...string) {
@@ -379,7 +397,7 @@ func count(t *testing.T, db *sql.DB, query string) int {
 }
 
 func TestRunDailyPassAggregatesAppDays(t *testing.T) {
-	st, r, db := setupApp(t, identifiedProjects)
+	st, r, db := setupApp(t, identifiedProjectSpecs)
 	ctx := context.Background()
 	seedAppDay(t, st, "a", "b")
 
@@ -411,7 +429,7 @@ func TestRunDailyPassAggregatesAppDays(t *testing.T) {
 }
 
 func TestRunDailyPassSkipsCohortsForAnonymousProjects(t *testing.T) {
-	st, r, db := setupApp(t, anonymousProjects)
+	st, r, db := setupApp(t, anonymousProjectSpecs)
 	ctx := context.Background()
 	seedAppDay(t, st, "a")
 
@@ -435,7 +453,7 @@ func TestRunDailyPassSkipsCohortsForAnonymousProjects(t *testing.T) {
 }
 
 func TestRunDailyPassIsIdempotentAcrossAppSteps(t *testing.T) {
-	st, r, db := setupApp(t, identifiedProjects)
+	st, r, db := setupApp(t, identifiedProjectSpecs)
 	ctx := context.Background()
 	seedAppDay(t, st, "a", "b")
 
@@ -453,7 +471,7 @@ func TestRunDailyPassIsIdempotentAcrossAppSteps(t *testing.T) {
 }
 
 func TestRunDailyPassPrunesActorsAndIdentities(t *testing.T) {
-	st, r, db := setupApp(t, identifiedProjects)
+	st, r, db := setupApp(t, identifiedProjectSpecs)
 	ctx := context.Background()
 
 	if err := st.UpsertIdentities(ctx, []store.Identity{
@@ -484,7 +502,7 @@ func TestRunDailyPassPrunesActorsAndIdentities(t *testing.T) {
 // they used to be driven off app_views alone, which meant a project with no
 // app never got either.
 func TestRunDailyPassCoversWebOnlyProjectsForCohorts(t *testing.T) {
-	st, r, db := setupApp(t, identifiedProjects)
+	st, r, db := setupApp(t, identifiedProjectSpecs)
 	ctx := context.Background()
 	ts := mustTime("2026-08-10T10:00:00Z")
 
@@ -512,7 +530,7 @@ func TestRunDailyPassCoversWebOnlyProjectsForCohorts(t *testing.T) {
 // deleting them, so they cover days still inside the window too — otherwise
 // the retention page would be a whole window stale.
 func TestRunDailyPassComputesCohortsForRecentDays(t *testing.T) {
-	st, r, db := setupApp(t, identifiedProjects)
+	st, r, db := setupApp(t, identifiedProjectSpecs)
 	ctx := context.Background()
 	// Two days before the fake now of 2026-08-22, well inside the 7-day
 	// app raw window used by appVars.

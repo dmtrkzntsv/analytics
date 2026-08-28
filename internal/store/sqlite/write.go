@@ -6,10 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/dmitry/analytics/internal/store"
-	"github.com/google/uuid"
 )
 
 const tsFormat = "2006-01-02T15:04:05Z"
@@ -127,35 +125,6 @@ func (d *DB) UpsertIdentities(ctx context.Context, ids []store.Identity) error {
 			}
 		}
 		return nil
-	})
-}
-
-func (d *DB) SyncProjects(ctx context.Context, ps []store.ProjectInfo) error {
-	return d.tx(ctx, func(tx *sql.Tx) error {
-		aliases := make([]string, 0, len(ps))
-		for _, p := range ps {
-			aliases = append(aliases, p.Alias)
-			id, err := uuid.NewV7()
-			if err != nil {
-				return fmt.Errorf("sync projects: %w", err)
-			}
-			// ON CONFLICT(alias) keeps the previously generated id.
-			if _, err := tx.ExecContext(ctx, `INSERT INTO projects (id, alias, name) VALUES (?,?,?)
-				ON CONFLICT(alias) DO UPDATE SET name=excluded.name, archived_at=NULL`,
-				id.String(), p.Alias, p.Name); err != nil {
-				return err
-			}
-		}
-		q := `UPDATE projects SET archived_at=datetime('now') WHERE archived_at IS NULL`
-		args := []any{}
-		if len(aliases) > 0 {
-			q += ` AND alias NOT IN (?` + strings.Repeat(",?", len(aliases)-1) + `)`
-			for _, a := range aliases {
-				args = append(args, a)
-			}
-		}
-		_, err := tx.ExecContext(ctx, q, args...)
-		return err
 	})
 }
 

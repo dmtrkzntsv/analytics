@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/dmitry/analytics/internal/civil"
 	"github.com/dmitry/analytics/internal/config"
 	"github.com/dmitry/analytics/internal/config/configtest"
+	"github.com/dmitry/analytics/internal/manage"
 	"github.com/dmitry/analytics/internal/store"
 	_ "github.com/dmitry/analytics/internal/store/sqlite"
 )
@@ -34,15 +36,50 @@ func freePort(t *testing.T) string {
 
 func mustDay(s string) civil.Date { d, _ := civil.Parse(s); return d }
 
+// seedProject writes a project and ingest key straight into the registry
+// (bypassing HTTP/CLI) before Serve boots, since the running server only
+// ever reads projects from the database now. A no-op if the alias already
+// exists, so a restart test can call it again against the same file.
+func seedProject(t *testing.T, dbPath string, spec manage.ProjectSpec, key, keyLabel string) {
+	t.Helper()
+	st, err := store.Open("sqlite://" + dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	reg := manage.New(st, config.Retention{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err := reg.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if reg.Snapshot(ctx).Project(spec.Alias) != nil {
+		return
+	}
+	ops := manage.NewOps(reg, st)
+	if _, err := ops.CreateProject(ctx, "test", spec); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.InsertIngestKey(ctx, store.RegistryKey{Key: key, Project: spec.Alias, Label: keyLabel},
+		store.AuditEntry{Actor: "test", Action: "key.issue", Subject: keyLabel}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func testConfig(t *testing.T, addr, dbPath string) *config.Config {
 	t.Helper()
+	seedProject(t, dbPath,
+		manage.ProjectSpec{Alias: "app", Name: "App", AllowedOrigins: []string{"https://app.com"}},
+		"ak_test", "web")
 	return configtest.Load(t, map[string]string{
 		"LISTEN_ADDR":             addr,
 		"DATABASE_URL":            "sqlite://" + dbPath,
 		"BUFFER_FLUSH_MAX_EVENTS": "2",
 		"BUFFER_FLUSH_INTERVAL":   "50ms",
 		"BUFFER_CAPACITY":         "100",
-	}, `[{"alias": "app", "name": "App", "ingest_keys": [{"key": "ak_test", "label": "web"}], "allowed_origins": ["https://app.com"]}]`)
+	})
 }
 
 func waitHealthy(t *testing.T, base string) {
@@ -146,7 +183,8 @@ func TestServeEndToEnd(t *testing.T) {
 	if err != nil || len(pdays) != 1 {
 		t.Fatalf("event not persisted: %v %v", pdays, err)
 	}
-	// The project must have been registered from config on boot.
+	// The seeded project must still be there after a full boot/shutdown
+	// cycle: Serve reads it, never rewrites the registry.
 	aliases, err := st.ProjectAliases(bg)
 	if err != nil {
 		t.Fatal(err)
@@ -333,5 +371,60 @@ func TestServeNeverPersistsIPOrUserAgent(t *testing.T) {
 	days, err := st.WebDaysBefore(context.Background(), "app", mustDay("2100-01-01"))
 	if err != nil || len(days) != 1 {
 		t.Fatalf("hit not persisted: %v %v", days, err)
+	}
+}
+
+// runServeAndCollectLogs boots Serve, waits for /healthz, then shuts it
+// down and returns everything logged in between.
+func runServeAndCollectLogs(t *testing.T, cfg *config.Config) string {
+	t.Helper()
+	var logs strings.Builder
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- Serve(ctx, cfg, logger) }()
+	waitHealthy(t, "http://"+cfg.Listen)
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("serve: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("serve did not shut down")
+	}
+	return logs.String()
+}
+
+// Spec §12: a pre-upgrade PROJECTS_FILE is no longer read on boot, but an
+// operator who still has one set must be told to run the one-time import
+// rather than have it silently ignored.
+func TestServeWarnsAboutLegacyProjectsFile(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "legacy.db")
+	cfg := testConfig(t, freePort(t), dbPath)
+
+	legacy := filepath.Join(t.TempDir(), "projects.json")
+	if err := os.WriteFile(legacy, []byte("[]"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PROJECTS_FILE", legacy)
+
+	logs := runServeAndCollectLogs(t, cfg)
+	if !strings.Contains(logs, "analytics config import") {
+		t.Errorf("logs = %q, want a warning naming `analytics config import`", logs)
+	}
+}
+
+// Without PROJECTS_FILE set (and no /etc/analytics/projects.json, which is
+// absent in CI) boot must stay quiet: nothing to import.
+func TestServeDoesNotWarnWithoutLegacyProjectsFile(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "nolegacy.db")
+	cfg := testConfig(t, freePort(t), dbPath)
+	t.Setenv("PROJECTS_FILE", "")
+
+	logs := runServeAndCollectLogs(t, cfg)
+	if strings.Contains(logs, "analytics config import") {
+		t.Errorf("logs = %q, want no legacy-file warning", logs)
 	}
 }

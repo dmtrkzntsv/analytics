@@ -66,7 +66,10 @@ func TestWriteProductEventsAttributesJSON(t *testing.T) {
 	}
 }
 
-func TestSyncProjectsArchiving(t *testing.T) {
+// ProjectAliases returns every registry row including archived ones: the
+// daily pass (internal/jobs) relies on this to keep maintaining a project
+// after it is archived, using global retention.
+func TestProjectAliasesIncludesArchived(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
 	must := func(err error) {
@@ -74,38 +77,17 @@ func TestSyncProjectsArchiving(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	must(db.SyncProjects(ctx, []store.ProjectInfo{{Alias: "a", Name: "A"}, {Alias: "b", Name: "B"}}))
-	var idA string
-	must(db.db.QueryRow(`SELECT id FROM projects WHERE alias='a'`).Scan(&idA))
-	if len(idA) != 36 {
-		t.Fatalf("generated id must be a UUID, got %q", idA)
-	}
-	// b disappears from config -> archived
-	must(db.SyncProjects(ctx, []store.ProjectInfo{{Alias: "a", Name: "A2"}}))
-	var name string
-	var archived *string
-	must(db.db.QueryRow(`SELECT name, archived_at FROM projects WHERE alias='a'`).Scan(&name, &archived))
-	if name != "A2" || archived != nil {
-		t.Fatalf("a: name=%q archived=%v", name, archived)
-	}
-	var idA2 string
-	must(db.db.QueryRow(`SELECT id FROM projects WHERE alias='a'`).Scan(&idA2))
-	if idA2 != idA {
-		t.Fatal("re-sync must retain the generated id")
-	}
-	must(db.db.QueryRow(`SELECT name, archived_at FROM projects WHERE alias='b'`).Scan(&name, &archived))
-	if archived == nil {
-		t.Fatal("b must be archived")
-	}
-	// b returns -> unarchived
-	must(db.SyncProjects(ctx, []store.ProjectInfo{{Alias: "a", Name: "A2"}, {Alias: "b", Name: "B"}}))
-	must(db.db.QueryRow(`SELECT archived_at FROM projects WHERE alias='b'`).Scan(&archived))
-	if archived != nil {
-		t.Fatal("b must be unarchived after reappearing")
-	}
+	audit := store.AuditEntry{Actor: "test", Action: "project.create"}
+	must(db.CreateProject(ctx, store.RegistryProject{Alias: "a", Name: "A", Identity: "anonymous", AllowedOrigins: "[]"}, audit))
+	must(db.CreateProject(ctx, store.RegistryProject{Alias: "b", Name: "B", Identity: "anonymous", AllowedOrigins: "[]"}, audit))
+	must(db.SetProjectArchived(ctx, "b", true, store.AuditEntry{Actor: "test", Action: "project.archive"}))
+
 	ids, err := db.ProjectAliases(ctx)
-	if err != nil || len(ids) != 2 {
-		t.Fatalf("ProjectAliases = %v, %v", ids, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 2 || ids[0] != "a" || ids[1] != "b" {
+		t.Fatalf("ProjectAliases = %v, want [a b] (archived rows included)", ids)
 	}
 }
 

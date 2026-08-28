@@ -128,3 +128,35 @@ func TestSnapshotPicksUpOutOfProcessWrite(t *testing.T) {
 		t.Fatal("poll did not pick up the write")
 	}
 }
+
+// KeylessProjects drives the boot-time warning in internal/app: a project
+// with no active key can receive nothing, which is a legitimate retired
+// state (not an error), and an archived project must not be flagged twice.
+func TestKeylessProjects(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	seedProject(t, st, "blog") // has an active key
+	if err := st.CreateProject(ctx, store.RegistryProject{
+		Alias: "retired", Name: "retired", Identity: "anonymous", AllowedOrigins: "[]",
+	}, store.AuditEntry{Actor: "test", Action: "project.create", Subject: "retired"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateProject(ctx, store.RegistryProject{
+		Alias: "gone", Name: "gone", Identity: "anonymous", AllowedOrigins: "[]",
+	}, store.AuditEntry{Actor: "test", Action: "project.create", Subject: "gone"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetProjectArchived(ctx, "gone", true,
+		store.AuditEntry{Actor: "test", Action: "project.archive", Subject: "gone"}); err != nil {
+		t.Fatal(err)
+	}
+
+	reg := New(st, defaults, discard())
+	if err := reg.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got := reg.Snapshot(ctx).KeylessProjects()
+	if len(got) != 1 || got[0] != "retired" {
+		t.Fatalf("KeylessProjects() = %v, want [retired] (blog has a key, gone is archived)", got)
+	}
+}

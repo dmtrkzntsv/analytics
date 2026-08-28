@@ -27,9 +27,12 @@ func TestSeedEvidenceFixture(t *testing.T) {
 	if err := db.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.SyncProjects(ctx, []store.ProjectInfo{
-		{Alias: "app", Name: "App"}, {Alias: "blog", Name: "Blog"}}); err != nil {
-		t.Fatal(err)
+	audit := store.AuditEntry{Actor: "seed", Action: "project.create"}
+	for _, alias := range []string{"app", "blog"} {
+		if err := db.CreateProject(ctx, store.RegistryProject{
+			Alias: alias, Name: alias, Identity: "anonymous", AllowedOrigins: "[]"}, audit); err != nil {
+			t.Fatal(err)
+		}
 	}
 	var hits []store.WebHit
 	var evs []store.ProductEvent

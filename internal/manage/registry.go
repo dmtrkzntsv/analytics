@@ -209,6 +209,22 @@ func (s *Snapshot) RetentionFor(alias string) config.Retention {
 	return r
 }
 
+// KeylessProjects lists active projects with no active key: a legitimate
+// retired state, so callers warn rather than fail.
+func (s *Snapshot) KeylessProjects() []string {
+	withKey := map[string]bool{}
+	for _, k := range s.keys {
+		withKey[k.project.Alias] = true
+	}
+	var out []string
+	for _, p := range s.ordered {
+		if !p.Archived && !withKey[p.Alias] {
+			out = append(out, p.Alias)
+		}
+	}
+	return out
+}
+
 func (s *Snapshot) AggregationFor(alias string) store.ProductAggSettings {
 	p := s.byAlias[alias]
 	if p == nil || p.Aggregation == nil {

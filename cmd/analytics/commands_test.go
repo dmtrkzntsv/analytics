@@ -8,17 +8,12 @@ import (
 	"testing"
 )
 
-// setEnv points the process environment at a scratch database and a valid
-// projects file; commands read config from the environment only.
+// setEnv points the process environment at a scratch database; commands
+// read config from the environment only. The project list lives in the
+// registry (that database), not in an env-named file.
 func setEnv(t *testing.T, dbPath string) {
 	t.Helper()
-	projects := filepath.Join(t.TempDir(), "projects.json")
-	body := `[{"alias": "app", "name": "App", "ingest_keys": [{"key": "ak_test", "label": "web"}], "allowed_origins": ["https://app.com"]}]`
-	if err := os.WriteFile(projects, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	t.Setenv("DATABASE_URL", "sqlite://"+dbPath)
-	t.Setenv("PROJECTS_FILE", projects)
 }
 
 func TestMigrateSubcommand(t *testing.T) {
@@ -53,14 +48,6 @@ func TestSubcommandsRejectBadConfig(t *testing.T) {
 			}
 			if out.Len() == 0 {
 				t.Error("want an error message on stdout")
-			}
-		})
-		t.Run(cmd+" missing projects file", func(t *testing.T) {
-			t.Setenv("DATABASE_URL", "sqlite://"+filepath.Join(t.TempDir(), "a.db"))
-			t.Setenv("PROJECTS_FILE", "/nonexistent/projects.json")
-			var out bytes.Buffer
-			if code := run([]string{cmd}, &out); code != 1 {
-				t.Fatalf("exit code = %d, want 1", code)
 			}
 		})
 		t.Run(cmd+" bad flag", func(t *testing.T) {

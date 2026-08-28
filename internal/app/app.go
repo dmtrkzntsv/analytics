@@ -15,6 +15,7 @@ import (
 	"github.com/dmitry/analytics/internal/geo"
 	"github.com/dmitry/analytics/internal/identity"
 	"github.com/dmitry/analytics/internal/jobs"
+	"github.com/dmitry/analytics/internal/manage"
 	"github.com/dmitry/analytics/internal/pipeline"
 	"github.com/dmitry/analytics/internal/server"
 	"github.com/dmitry/analytics/internal/store"
@@ -62,13 +63,16 @@ func Serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	if err := st.Migrate(ctx); err != nil {
 		return err
 	}
-	infos := make([]store.ProjectInfo, 0, len(cfg.Projects))
-	for _, p := range cfg.Projects {
-		infos = append(infos, store.ProjectInfo{Alias: p.Alias, Name: p.Name})
-	}
-	if err := st.SyncProjects(ctx, infos); err != nil {
+
+	reg := manage.New(st, cfg.Retention, logger)
+	if err := reg.Reload(ctx); err != nil {
 		return err
 	}
+	if len(reg.Snapshot(ctx).Projects()) == 0 {
+		logger.Warn("no projects configured; create one with `analytics project create` or an MCP management tool")
+	}
+	warnLegacyProjectsFile(cfg, logger)
+
 	// Seed the flat view so it exists before the first daily pass.
 	if keys, err := st.KnownAttributeKeys(ctx); err != nil {
 		logger.Warn("flat view seed: attribute scan", "error", err)
@@ -91,18 +95,18 @@ func Serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	pipeDone := make(chan struct{})
 	go func() { buf.Run(pipeCtx); close(pipeDone) }()
 
-	// A project whose keys are all disabled can receive nothing. That is a
+	// A project with no active ingest key can receive nothing. That is a
 	// legitimate retired state, so warn rather than refuse to start.
-	for _, alias := range cfg.DisabledKeyProjects() {
+	for _, alias := range reg.Snapshot(ctx).KeylessProjects() {
 		logger.Warn("project has no active ingest keys and can receive nothing", "project", alias)
 	}
 
-	runner := jobs.New(st, cfg, salter, logger, time.Now)
+	runner := jobs.New(st, cfg, reg, salter, logger, time.Now)
 	jobsCtx, stopJobs := context.WithCancel(context.Background())
 	jobsDone := make(chan struct{})
 	go func() { runner.Run(jobsCtx); close(jobsDone) }()
 
-	handler := server.New(cfg, buf, geoProvider, salter, st, logger)
+	handler := server.New(cfg, reg, buf, geoProvider, salter, st, logger)
 	sumCtx, stopSummary := context.WithCancel(context.Background())
 	summaryDone := make(chan struct{})
 	go func() { logIngestSummary(sumCtx, handler, logger); close(summaryDone) }()
@@ -114,7 +118,7 @@ func Serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	}
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.ListenAndServe() }()
-	logger.Info("serving", "addr", cfg.Listen, "projects", len(cfg.Projects))
+	logger.Info("serving", "addr", cfg.Listen, "projects", len(reg.Snapshot(ctx).Projects()))
 
 	select {
 	case <-ctx.Done():
@@ -148,6 +152,23 @@ func Serve(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 // the data dir (GeoLite2 DB lives next to the database).
 func databasePath(dsn string) string {
 	return strings.TrimPrefix(dsn, "sqlite://")
+}
+
+// warnLegacyProjectsFile warns once at boot when a pre-upgrade PROJECTS_FILE
+// (or the installer's default projects.json path) is still present: the
+// registry is now the sole source of project config, so the file is no
+// longer read and needs a one-time `analytics config import`. cfg is
+// unused today but kept in the signature so a future per-install override
+// does not need to change every call site; split out from Serve so the
+// warning is unit-testable without booting a full server.
+func warnLegacyProjectsFile(cfg *config.Config, logger *slog.Logger) {
+	if legacy := os.Getenv("PROJECTS_FILE"); legacy != "" {
+		logger.Warn("PROJECTS_FILE is no longer read; import it once with `analytics config import`", "file", legacy)
+		return
+	}
+	if _, err := os.Stat("/etc/analytics/projects.json"); err == nil {
+		logger.Warn("projects.json found but no longer read; import it once with `analytics config import /etc/analytics/projects.json`")
+	}
 }
 
 // logIngestSummary emits one line per active key label each minute instead

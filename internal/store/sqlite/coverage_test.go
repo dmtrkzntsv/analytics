@@ -137,7 +137,10 @@ func TestOperationsOnClosedDB(t *testing.T) {
 		"WriteProductEvents": func() error {
 			return db.WriteProductEvents(ctx, []store.ProductEvent{{ID: "e", Project: "app", EventName: "n", ActorID: "u", TS: ts("2026-08-10T10:00:00Z")}})
 		},
-		"SyncProjects":  func() error { return db.SyncProjects(ctx, []store.ProjectInfo{{Alias: "app", Name: "App"}}) },
+		"CreateProject": func() error {
+			return db.CreateProject(ctx, store.RegistryProject{Alias: "app", Name: "App", Identity: "anonymous", AllowedOrigins: "[]"},
+				store.AuditEntry{Actor: "test", Action: "project.create"})
+		},
 		"SetMeta":       func() error { return db.SetMeta(ctx, "k", "v") },
 		"WebDaysBefore": func() error { _, err := db.WebDaysBefore(ctx, "app", day("2026-01-01")); return err },
 		"ProjectAliases": func() error {

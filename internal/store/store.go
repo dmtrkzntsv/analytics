@@ -56,11 +56,6 @@ const (
 	KindGroup = "group"
 )
 
-// ProjectInfo represents basic information about a project.
-type ProjectInfo struct {
-	Alias, Name string
-}
-
 // RegistryProject represents a project configuration from the registry.
 type RegistryProject struct {
 	Alias, Name, Identity string
@@ -92,7 +87,6 @@ type ProductAggSettings struct {
 // Store defines the interface for analytics data storage.
 type Store interface {
 	Migrate(ctx context.Context) error
-	SyncProjects(ctx context.Context, ps []ProjectInfo) error
 	WriteWebHits(ctx context.Context, hits []WebHit) error
 	WriteProductEvents(ctx context.Context, evs []ProductEvent) error
 	WriteAppViews(ctx context.Context, views []AppView) error
