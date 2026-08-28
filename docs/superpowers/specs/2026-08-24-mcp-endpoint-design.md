@@ -17,8 +17,10 @@ tool can write to the database, by construction rather than by convention.
 - No built-in authorization server. The binary is an OAuth 2.1 *resource
   server* only; issuing tokens is somebody else's job.
 - No per-project authorization. A valid token reads every project (§5.3).
-- No write, configuration or administration tools. Ingestion stays on
-  `POST /api/events`; project configuration stays in `projects.json`.
+- No write, configuration or administration tools **in this spec**. The
+  management surface (project/key lifecycle over MCP and CLI) is specified
+  separately in `2026-08-27-managed-config-design.md`; the tools defined
+  here remain read-only.
 - No replacement for the Evidence dashboards. This is a second read path
   over the same views, not a migration away from them.
 
@@ -78,11 +80,13 @@ hosts):
 | --- | --- |
 | `MCP_ADDR` | Address the MCP surface binds. Defaults to `LISTEN_ADDR`. |
 | `MCP_DB_PATH` | Database to read. Defaults to the `DATABASE_URL` path. |
-| `MCP_AUTH_MODE` | `oauth` or `token`. **No default**; required with `-mcp`. |
+| `MCP_AUTH_MODE` | `oauth`, `cloudflare` or `token`. **No default**; required with `-mcp`. |
 | `MCP_RESOURCE_URL` | Canonical public URI of this server, e.g. `https://analytics.example.com/mcp`. Required in `oauth` mode. |
 | `MCP_AUTH_ISSUER` | Authorization server issuer URL. Required in `oauth` mode; optional in `token` mode, where setting it enables the metadata document. |
 | `MCP_AUTH_AUDIENCE` | Expected `aud`. Defaults to `MCP_RESOURCE_URL`. |
-| `MCP_READ_TOKENS` | Comma-separated `label:token` pairs. Required in `token` mode. See §4.1. |
+| `MCP_CF_TEAM_DOMAIN` | Zero Trust team domain, e.g. `myteam.cloudflareaccess.com`. Required in `cloudflare` mode. |
+| `MCP_CF_AUD` | The Access application's AUD tag. Required in `cloudflare` mode. |
+| `MCP_TOKEN` | The single static bearer token. Required in `token` mode. See §4.1. |
 | `MCP_QUERY_TIMEOUT` | Per-query deadline. Default `10s`. |
 | `MCP_QUERY_MAX_ROWS` | Row cap for the `query` tool. Default `1000`. |
 
@@ -91,42 +95,29 @@ unknown mode, or a mode missing its required variables all exit non-zero
 with a message naming the missing variable. There is no unauthenticated
 mode and no way to reach one by omission.
 
-`projects.json` is unchanged. Read tokens live in the environment, not the
-JSON file, for the same reason litestream credentials do: secrets should
-not sit in a file that is routinely edited and shared. The split is a rule,
-not a convenience — `projects.json` holds only values that are public by
-design (`ingest_keys` ship in page source and app binaries;
-`allowed_origins` is public), and every actual secret lives in
-`analytics.env` beside the R2 credentials.
+Project configuration lives in the database registry
+(`2026-08-27-managed-config-design.md`); `projects.json` is retired as a
+runtime input. The secrets rule stands: the registry holds only values
+that are public by design (`ingest_keys` ship in page source and app
+binaries; `allowed_origins` is public), and every actual secret — the MCP
+token included — lives in `analytics.env` beside the R2 credentials.
 
-### 4.1 Read token format and minting
+### 4.1 The MCP token
 
-`MCP_READ_TOKENS` is a comma-separated list of `label:token` pairs. Each
-entry is split on its **first** `:` so a token may itself contain colons;
-an entry with an empty label or an empty token is a startup error naming
-the offending position. A token containing a comma cannot be expressed and
-is rejected at startup rather than silently truncated.
+`MCP_TOKEN` is a single opaque bearer token — one operator, one token.
+Unlike ingest keys it is a true secret: it grants read access to every
+project including identified-mode personal data (and, per the companion
+spec, authorizes the management tools). So it uses 256 bits of entropy
+rather than 128, carries an `ar_` prefix to distinguish it from `ak_`
+ingest keys at a glance, and is minted by `keygen -mcp`, which prints an
+**env line for `analytics.env`** rather than a JSON block:
 
-The label is never compared and never logged as a credential — it is what
-appears as `TokenInfo.UserID`, so an operator can tell which token is in
-use from the logs without the token itself ever being written.
+    analytics keygen -mcp
 
-`keygen` gains `-read` to mint them:
+      MCP_TOKEN=ar_…
 
-    analytics keygen -read -n 2
-
-Unlike ingest keys, read tokens are true secrets: they grant read access to
-every project including identified-mode personal data. So they use 256 bits
-of entropy rather than 128, carry an `ar_` prefix to distinguish them from
-`ak_` ingest keys at a glance, and print an **env line for
-`analytics.env`** rather than a `projects.json` block:
-
-    Add to analytics.env:
-
-      MCP_READ_TOKENS=laptop:ar_…,ci:ar_…
-
-The two output shapes are the visible form of the rule above: `keygen`
-prints JSON for public identifiers and an env line for secrets.
+`keygen` printing JSON for public identifiers and an env line for secrets
+is the visible form of the secrets rule above.
 
 ## 5. Authentication and authorization
 
@@ -155,10 +146,10 @@ while `401` responses carry a bare `WWW-Authenticate: Bearer` with no
 The SDK supplies `auth.ProtectedResourceMetadataHandler` and the
 `auth.RequireBearerToken` middleware. We supply the `TokenVerifier`.
 
-### 5.2 The two verifiers
+### 5.2 The three verifiers
 
 `auth.TokenVerifier` is `func(ctx, token, req) (*auth.TokenInfo, error)`,
-so both modes are the same seam with different bodies.
+so all modes are the same seam with different bodies.
 
 **`oauth`** — at startup, fetch
 `MCP_AUTH_ISSUER/.well-known/oauth-authorization-server` (RFC 8414) and
@@ -177,16 +168,40 @@ Returns `auth.TokenInfo{UserID: sub, Scopes: …, Expiration: exp}`. Setting
 `UserID` also enables the SDK's session-hijacking check, which binds all
 requests in a session to one user.
 
-**`token`** — constant-time compare against the configured tokens, using
-`crypto/subtle` over a slice, matching how `config.keys` already avoids
-map indexing on a credential. Returns
-`auth.TokenInfo{UserID: label}` with the middleware constructed
-`AllowMissingExpiration: true`, since a static token carries no `exp`.
+**`cloudflare`** — for Cloudflare Access "managed OAuth" (GA 2026-03),
+which fronts the MCP hostname with an Access application. The division of
+labour differs from generic `oauth`, and the mode encodes it:
+
+- Access itself serves the RFC 8414/9728 discovery documents at the edge
+  and answers unauthenticated non-browser requests with the `401` +
+  `WWW-Authenticate` challenge, and its DCR support is what lets clients
+  self-register. In this mode the binary does **not** serve
+  `/.well-known/oauth-protected-resource` and does not emit its own
+  challenge — doing so would fight the edge.
+- The bearer token clients hold is **opaque**, validated by the edge, and
+  useless to us. What reaches the origin is the resolved identity as a JWT
+  in the `Cf-Access-Jwt-Assertion` header. The verifier therefore reads
+  that header (via the `req` parameter of the seam), and validates it
+  against the team JWKS at
+  `https://<MCP_CF_TEAM_DOMAIN>/cdn-cgi/access/certs` with
+  `iss = https://<MCP_CF_TEAM_DOMAIN>` and `aud` containing `MCP_CF_AUD`.
+  Same JWKS cache, same algorithm allowlist as `oauth`.
+
+Validating the assertion is also what closes the direct-to-origin bypass:
+a request that reaches the listener without having passed Access carries
+no valid assertion and is rejected.
+
+**`token`** — constant-time compare (`crypto/subtle`) against
+`MCP_TOKEN`. Returns `auth.TokenInfo{UserID: "mcp"}` with the middleware
+constructed `AllowMissingExpiration: true`, since a static token carries
+no `exp`.
 
 ### 5.3 Authorization
 
 A valid token reads every non-archived project. There is no per-project
-scoping and no filtering of identified-mode data.
+scoping and no filtering of identified-mode data. The same token also
+authorizes the management tools (companion spec §6, including the
+prompt-injection analysis that decision requires).
 
 This is a deliberate decision with a real consequence, recorded here so it
 is not rediscovered later: **the operator's IdP is the only control point
@@ -256,7 +271,7 @@ Every range tool takes `project`, `from`, `to`, the latter two as
 
 | Tool | Source | Returns |
 | --- | --- | --- |
-| `list_projects` | `projects` ⋈ config | `alias`, `name`, `identity`, `archived`, and first/last day present per surface |
+| `list_projects` | registry | `alias`, `name`, `identity`, `archived`, per-project settings, and first/last day present per surface |
 | `web_overview` | `v_web_daily` | `visitors`, `pageviews`, `sessions`, `bounces`, `duration_sec`, plus derived `bounce_rate` and `avg_session_sec` |
 | `web_breakdown` | `v_web_{pages,referrers,countries,devices,browsers,os,utm}` | `dimension` enum + `limit`; rows of value, `visitors`, `pageviews` |
 | `app_overview` | `v_app_daily` | `actives`, `views`, `sessions`, `duration_sec` |
@@ -379,13 +394,13 @@ are not edited.
   JWKS server. Cases: valid; expired; `nbf` in the future; wrong `aud`;
   wrong `iss`; `alg: none`; HMAC-signed with the public key as secret;
   unknown `kid`; `kid` rotation triggering a refetch.
+- **Verifier, `cloudflare`** — valid assertion; missing header; wrong
+  team `iss`; wrong AUD tag; expired; and that no metadata document or
+  challenge is served in this mode.
 - **Verifier, `token`** — match, non-match, and that comparison does not
   short-circuit on a prefix.
-- **`MCP_READ_TOKENS` parsing** — multiple pairs; a token containing a
-  colon; empty label; empty token; a token containing a comma. The last
-  three are startup errors.
-- **`keygen -read`** — `ar_` prefix, 256 bits, prints an env line and no
-  `projects.json` block.
+- **`keygen -mcp`** — `ar_` prefix, 256 bits, prints an env line and no
+  JSON block.
 - **Startup validation** — `-mcp` without `MCP_AUTH_MODE`, unknown mode,
   and each mode missing a required variable all exit non-zero.
 - **Flags** — bare `serve` exits non-zero with the usage message; each of
@@ -409,7 +424,7 @@ The 85% per-package coverage floor holds; `make check`, `make build-all`,
 ## 15. Package layout
 
     cmd/analytics/serve.go        -api / -mcp flags, usage error
-    cmd/analytics/keygen.go       -read: 256-bit ar_ tokens, env output
+    cmd/analytics/keygen.go       -mcp: 256-bit ar_ token, env output
     internal/app/app.go           two listeners, existing shutdown order
     internal/config/config.go     MCP_* loading and fail-fast validation
     internal/mcpserver/
