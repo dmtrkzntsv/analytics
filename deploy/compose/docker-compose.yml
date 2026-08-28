@@ -8,6 +8,11 @@
 #   docker compose exec analytics analytics project create -alias myapp
 # then issue a key with
 #   docker compose exec analytics analytics key issue -project myapp -label web
+#
+# The image's default CMD is `serve -api` — ingestion only. To also serve
+# the MCP endpoint, add `command: ["serve", "-api", "-mcp"]` under the
+# `analytics` service below and set MCP_AUTH_MODE (plus its mode's other
+# variables) in `.env`; see the README's MCP section.
 services:
   analytics:
     image: ghcr.io/dmtrkzntsv/analytics:${ANALYTICS_VERSION:-latest}

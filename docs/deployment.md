@@ -6,9 +6,9 @@ servers** runs ingestion on a public VPS and dashboards at home off a
 restored replica, so the dashboard machine never needs to be reachable from
 the internet.
 
-Replication is not part of the application: `serve` writes a SQLite file and
-`dashboards` reads one. The two-server topology needs something to move that
-file, and litestream is the supported answer —
+Replication is not part of the application: `serve -api` writes a SQLite
+file and `dashboards` reads one. The two-server topology needs something to
+move that file, and litestream is the supported answer —
 [docs/litestream.md](litestream.md) covers bucket setup, credentials, the
 writer, the reader and recovery. The one-server topology needs none of it.
 
@@ -182,7 +182,7 @@ sudo -u analytics sqlite3 /var/lib/analytics/analytics.db 'PRAGMA quick_check;'
 sudo systemctl start analytics litestream
 ```
 
-Restore first, always. Starting `analytics serve` against an empty data
+Restore first, always. Starting `analytics serve -api` against an empty data
 directory creates a fresh database, and litestream would then replicate that
 empty database over the good backup.
 
@@ -208,6 +208,7 @@ buffered in memory when the host died — bounded by `BUFFER_FLUSH_INTERVAL`.
 | Database size | `du -h /var/lib/analytics/analytics.db`. Dashboards need room for one more copy: each rebuild snapshots the database into `DASHBOARDS_WORK_DIR`. |
 | Replication status | `journalctl -u litestream --since -1h`, or `docker compose logs litestream` |
 | Dashboard rebuilds | `docker compose logs dashboards` — one `dashboards: rebuilt` line per successful build |
+| Recent config changes (audit log) | `sudo -u analytics sqlite3 /var/lib/analytics/analytics.db "SELECT * FROM audit_log ORDER BY ts DESC LIMIT 20"` |
 
 Aggregation, pruning and incremental vacuum run daily at 03:00 UTC, and the
 visitor salt rotates at 00:00 UTC. A catch-up pass runs at startup, so
@@ -215,6 +216,44 @@ downtime across those times does not skip a day.
 
 File logging (`log.file`) is optional and off by default; if enabled, install
 `deploy/logrotate/analytics` into `/etc/logrotate.d/`.
+
+### Enabling MCP on an installed host
+
+The installer's unit runs `serve -api` only; MCP is opt-in. Two ways to turn
+it on, both requiring an edit to `analytics.env` first:
+
+```bash
+sudo vi /etc/analytics/analytics.env
+# Set MCP_AUTH_MODE (token, oauth or cloudflare) plus that mode's other
+# variables — see the README's "Asking your analytics questions (MCP)"
+# section. For `token` mode, mint the value first:
+sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics keygen -mcp'
+```
+
+Then either add `-mcp` to the existing unit's `ExecStart=` so ingestion and
+MCP share one process and one port:
+
+```bash
+sudo sed -i 's/serve -api$/serve -api -mcp/' /etc/systemd/system/analytics.service
+sudo systemctl daemon-reload
+sudo systemctl restart analytics
+```
+
+or run a second unit with only `-mcp`, so the two surfaces can be restarted,
+scaled or exposed independently — copy `deploy/systemd/analytics.service` to
+e.g. `analytics-mcp.service`, change `ExecStart=` to `analytics serve -mcp`,
+and set `MCP_ADDR` in `analytics.env` if it should bind a different port
+than `LISTEN_ADDR`.
+
+In `cloudflare` mode, the Access application sits in front of the MCP
+hostname or path only — the ingestion path (`/api/events`) must stay outside
+it so devices can keep posting without an Access session. Scope the
+application narrowly (for example `analytics.example.com/mcp`, not the bare
+hostname), turn on "managed OAuth" for it, and set `MCP_CF_TEAM_DOMAIN` and
+`MCP_CF_AUD` from that application. Access then serves the OAuth discovery
+documents and the `401` challenge at the edge; the binary only validates the
+`Cf-Access-Jwt-Assertion` header Access forwards, and requests that reach the
+origin without having passed Access are rejected.
 
 ---
 

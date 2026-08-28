@@ -71,10 +71,11 @@ This project runs in **anonymous** identity mode: `user_id` is a hash that
 rotates at midnight, so a per-user report would be a list of hashes that means
 nothing tomorrow.
 
-Set `"identity": "identified"` in `projects.json` to enable per-user
-reporting. Note that identified mode stores a persistent `localStorage` id on
-the web, which is terminal-equipment storage under ePrivacy — the same legal
-category as a cookie.
+Run `analytics project update -alias {params.project} -identity identified`
+(or the `update_project` MCP tool) to enable per-user reporting. Note that
+identified mode stores a persistent `localStorage` id on the web, which is
+terminal-equipment storage under ePrivacy — the same legal category as a
+cookie.
 
 Group reporting works in both modes: see [Groups](/groups/{params.project}).
 

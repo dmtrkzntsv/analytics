@@ -257,6 +257,29 @@ func TestWriteEmptyBatchIsNoOp(t *testing.T) {
 	}
 }
 
+// ExecForTest is a thin pass-through exported for other packages' test
+// seeding (internal/mcpserver's seed helper is the real caller — see
+// seed_test.go there); a cross-package call does not register in this
+// package's own coverage profile, so it needs a direct exercise here too,
+// success and error path both.
+func TestExecForTest(t *testing.T) {
+	db := newTestDB(t)
+	if _, err := db.ExecForTest(`INSERT INTO meta (key, value) VALUES (?, ?)`,
+		"execfortest", "ok"); err != nil {
+		t.Fatalf("ExecForTest(valid insert) = %v, want nil", err)
+	}
+	var value string
+	if err := db.db.QueryRow(`SELECT value FROM meta WHERE key = 'execfortest'`).Scan(&value); err != nil {
+		t.Fatal(err)
+	}
+	if value != "ok" {
+		t.Errorf("value = %q, want %q", value, "ok")
+	}
+	if _, err := db.ExecForTest(`INSERT INTO no_such_table (x) VALUES (1)`); err == nil {
+		t.Error("ExecForTest(bad SQL) = nil, want error")
+	}
+}
+
 func TestPruneAggregatesReportsFailingWebTable(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()

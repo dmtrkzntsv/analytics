@@ -71,8 +71,9 @@ order by cohort_day desc, surface, day_offset
 Retention is undefined in **anonymous** identity mode: `actor_id` rotates at
 midnight, so every cohort would contain only its own first day.
 
-Set `"identity": "identified"` in `projects.json` to enable cohorts. Note that
-identified mode stores a persistent `localStorage` id on the web, which is
+Run `analytics project update -alias {params.project} -identity identified`
+(or the `update_project` MCP tool) to enable cohorts. Note that identified
+mode stores a persistent `localStorage` id on the web, which is
 terminal-equipment storage under ePrivacy — the same legal category as a
 cookie.
 

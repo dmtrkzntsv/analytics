@@ -1,9 +1,9 @@
 # Replication with litestream
 
-The application does not replicate anything. `analytics serve` writes a SQLite
-file and `analytics dashboards` reads a SQLite file; moving that file off the
-machine, or onto a second one, is a deployment choice. This document describes
-the choice most installations make.
+The application does not replicate anything. `analytics serve -api` writes a
+SQLite file and `analytics dashboards` reads a SQLite file; moving that file
+off the machine, or onto a second one, is a deployment choice. This document
+describes the choice most installations make.
 
 You do not need any of this for a single server that you are willing to back
 up some other way — or not at all. Nothing in the collector requires object
@@ -148,9 +148,9 @@ reachable from the previous generation.
 
 ## 6. Recovering onto a fresh host
 
-**Restore before starting the collector.** `analytics serve` creates an empty
-database if none exists, and litestream would then happily replicate that
-empty database over your backup.
+**Restore before starting the collector.** `analytics serve -api` creates an
+empty database if none exists, and litestream would then happily replicate
+that empty database over your backup.
 
 ```bash
 # install the binary and config first — see docs/deployment.md

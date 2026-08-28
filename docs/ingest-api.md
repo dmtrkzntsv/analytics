@@ -123,7 +123,9 @@ misclassified as desktop Chrome.
 
 ## 7. Identity
 
-Each project runs in one of two modes, set server-side in `projects.json`.
+Each project runs in one of two modes, set server-side on the project
+registry: `analytics project update -alias <alias> -identity identified`
+(or the `update_project` MCP tool).
 
 | Mode | `$user_id`, `$install_id` | `$group_id` | `$user_name` |
 |---|---|---|---|

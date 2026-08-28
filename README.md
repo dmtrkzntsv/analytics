@@ -100,7 +100,7 @@ arrangement.
 
 | Image | Contents | Modes |
 | --- | --- | --- |
-| `ghcr.io/dmtrkzntsv/analytics` | the binary on alpine, ~35 MB | `serve`, `migrate`, `version` |
+| `ghcr.io/dmtrkzntsv/analytics` | the binary on alpine, ~35 MB | `serve -api`, `migrate`, `version` |
 | `ghcr.io/dmtrkzntsv/analytics-evidence` | the binary, Node 22 and the Evidence project, ~1 GB | `dashboards` |
 
 They are separate because `serve` is the internet-facing process and has no
@@ -178,6 +178,82 @@ at 256 KiB and 500 events per batch.
 Full contract, including retry semantics and a worked offline-queue design:
 [docs/ingest-api.md](docs/ingest-api.md).
 
+## Asking your analytics questions (MCP)
+
+`analytics serve -mcp` runs a second surface: a Model Context Protocol
+endpoint you connect an MCP client (Claude.ai, Claude Code, Cursor) to, so
+you can ask "how many visitors did myapp get last week, broken down by
+country" in plain language instead of opening the Evidence dashboards. Ten
+read tools (`list_projects`, `web_overview`, `web_breakdown`,
+`app_overview`, `app_breakdown`, `product_events`, `product_attributes`,
+`retention`, `identities`) plus a guarded `query` tool cover ad-hoc SQL
+against the same `v_*` views the dashboards use, with two `schema://`
+resources so a model can discover column meanings before it queries. Eight
+management tools (`create_project`, `update_project`, `archive_project`,
+`restore_project`, `issue_ingest_key`, `disable_ingest_key`,
+`enable_ingest_key`, `list_ingest_keys`) let the same conversation create a
+project or mint a key — "set up analytics for my new blog" returns a
+paste-ready embed snippet. There is no `delete_project` tool: deletion is
+irreversible, so it stays CLI-only (`analytics project delete`, see
+[Configuration](#configuration)).
+
+The endpoint is read-only for analytics data by construction — no curated
+tool and no path through `query` can write — and it is always
+authenticated; there is no unauthenticated mode. Pick one of three auth
+modes with `MCP_AUTH_MODE`:
+
+**`token`** — one operator, one static bearer token, the simplest setup for
+a single person connecting their own client:
+
+```bash
+MCP_AUTH_MODE=token
+MCP_TOKEN=ar_…            # mint with `analytics keygen -mcp`
+```
+
+**`oauth`** — an external identity provider validates tokens; the binary is
+a resource server only and never issues tokens itself:
+
+```bash
+MCP_AUTH_MODE=oauth
+MCP_AUTH_ISSUER=https://idp.example.com
+MCP_RESOURCE_URL=https://analytics.example.com/mcp
+```
+
+**`cloudflare`** — Cloudflare Access's managed OAuth fronts the MCP
+hostname, so Access handles discovery, challenge and DCR at the edge and
+the binary only validates the resolved identity it forwards. Setup:
+
+1. Create an Access application scoped to the MCP path/hostname only (for
+   example `analytics.example.com/mcp`) — leave `/api/events` outside it so
+   ingestion stays public and unauthenticated.
+2. Turn on "managed OAuth" for that application.
+3. Note the team domain (`https://<team>.cloudflareaccess.com`) —
+   `MCP_CF_TEAM_DOMAIN`.
+4. Note the application's AUD tag — `MCP_CF_AUD`.
+5. Set both in `analytics.env` and restart with `-mcp` enabled:
+
+```bash
+MCP_AUTH_MODE=cloudflare
+MCP_CF_TEAM_DOMAIN=myteam.cloudflareaccess.com
+MCP_CF_AUD=<application AUD tag>
+```
+
+`serve` takes explicit surface flags — there is no implicit default:
+
+| Invocation | Result |
+| --- | --- |
+| `serve -api` | ingestion on `LISTEN_ADDR` |
+| `serve -mcp` | MCP on `MCP_ADDR` (= `LISTEN_ADDR` unless set) |
+| `serve -api -mcp` | both on `LISTEN_ADDR`, one port |
+| `serve -api -mcp` with `MCP_ADDR` set | two listeners, two ports |
+| `serve -api` and `serve -mcp` as two processes | full isolation |
+
+**Breaking change:** bare `analytics serve` now exits non-zero with a usage
+error — at least one of `-api`/`-mcp` is required. `install.sh` (rewrites
+the unit file on every run) and `docker compose pull` (the image's `CMD` is
+now `serve -api`) self-heal automatically. A hand-rolled systemd unit or
+`ExecStart=` override needs `-api` added by hand.
+
 ## Configuration
 
 Infra settings are environment variables. On installed hosts both systemd
@@ -224,6 +300,14 @@ analytics key issue -project myapp -label web
 analytics key list -project myapp
 analytics key disable -project myapp -label ios-2025
 ```
+
+`project update` (and the `update_project` MCP tool) merge rather than
+replace: a field you omit keeps its current value. `-origin` is the one
+exception worth knowing — supplying it at all replaces the whole origins
+list. Neither `project update` nor the MCP tool can clear origins down to
+an empty list (an empty list is treated the same as "not supplied"); to do
+that, edit the origins to `[]` in a `config export` dump and
+`config import` it back.
 
 Each project record has these fields:
 
@@ -336,6 +420,23 @@ put that data in the database — strip or rewrite it before it reaches the
 tracker. And `user_id` on product events is yours to choose: passing an email
 address makes the event data personally identifying, with the consent and
 erasure obligations that follow.
+
+### MCP
+
+Enabling `-mcp` on an instance that has any `identified` project exposes
+that project's stored user ids and `$user_name` display names — via the
+`identities` tool and the guarded `query` tool — to every holder of a valid
+token. There is no additional gate: the operator's IdP (in `oauth` and
+`cloudflare` modes) or the single static token (in `token` mode) is the
+whole of the access control, and a valid token also authorizes the
+management tools, since it is the same one seam (§6 of the managed-config
+design). Client-side approval prompts for write tools and the `audit_log`
+table are the operational guardrails there, not an additional permission
+check. `anonymous` projects are unaffected — the daily-rotating salt has
+already destroyed the linkage, so there is nothing personal for MCP to
+expose. For complete erasure, `analytics project delete` is the lever: it
+hard-deletes the project row and every row keyed by its alias, and it is
+deliberately CLI-only — not reachable through MCP at all.
 
 ## Raspberry Pi and low-resource hosts
 
