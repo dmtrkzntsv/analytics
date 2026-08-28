@@ -12,6 +12,7 @@ import (
 
 	"github.com/dmitry/analytics/internal/config"
 	"github.com/dmitry/analytics/internal/geo"
+	"github.com/dmitry/analytics/internal/manage"
 	"github.com/dmitry/analytics/internal/store"
 )
 
@@ -65,6 +66,7 @@ type Salt interface {
 // Server is the ingestion HTTP handler.
 type Server struct {
 	cfg      *config.Config
+	reg      *manage.Registry
 	queue    Enqueuer
 	geo      geo.Provider
 	salt     Salt
@@ -72,8 +74,6 @@ type Server struct {
 	counters *keyCounters
 	logger   *slog.Logger
 	mux      *http.ServeMux
-	// origin -> project index for O(1) allowed-origin checks
-	originOK map[string]map[string]bool // project -> set of origins
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.ServeHTTP(w, r) }
@@ -81,17 +81,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.Serve
 // Counters exposes ingest counters for the periodic summary log.
 func (s *Server) Counters() *keyCounters { return s.counters }
 
-func New(cfg *config.Config, q Enqueuer, g geo.Provider, salt Salt, names NameStore, logger *slog.Logger) *Server {
-	s := &Server{cfg: cfg, queue: q, geo: g, salt: salt, names: names,
-		counters: newKeyCounters(), logger: logger,
-		originOK: map[string]map[string]bool{}}
-	for _, p := range cfg.Projects {
-		set := map[string]bool{}
-		for _, o := range p.AllowedOrigins {
-			set[strings.TrimSuffix(o, "/")] = true
-		}
-		s.originOK[p.Alias] = set
-	}
+func New(cfg *config.Config, reg *manage.Registry, q Enqueuer, g geo.Provider, salt Salt, names NameStore, logger *slog.Logger) *Server {
+	s := &Server{cfg: cfg, reg: reg, queue: q, geo: g, salt: salt, names: names,
+		counters: newKeyCounters(), logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/events", s.handleEvents)
 	mux.HandleFunc("OPTIONS /api/events", s.handlePreflight)
@@ -111,8 +103,7 @@ func (s *Server) originAllowed(w http.ResponseWriter, r *http.Request, project s
 	if origin == "" {
 		return false
 	}
-	set, ok := s.originOK[project]
-	if !ok || !set[strings.TrimSuffix(origin, "/")] {
+	if !s.reg.Snapshot(r.Context()).OriginAllowed(project, origin) {
 		return false
 	}
 	h := w.Header()
@@ -121,21 +112,9 @@ func (s *Server) originAllowed(w http.ResponseWriter, r *http.Request, project s
 	return true
 }
 
-// anyOriginAllowed is used by preflight, where no body (and thus no
-// project id) is available: allow iff the origin belongs to any project.
-func (s *Server) anyOriginAllowed(origin string) bool {
-	o := strings.TrimSuffix(origin, "/")
-	for _, set := range s.originOK {
-		if set[o] {
-			return true
-		}
-	}
-	return false
-}
-
 func (s *Server) handlePreflight(w http.ResponseWriter, r *http.Request) {
 	origin := r.Header.Get("Origin")
-	if origin != "" && s.anyOriginAllowed(origin) {
+	if origin != "" && s.reg.Snapshot(r.Context()).AnyOriginAllowed(origin) {
 		h := w.Header()
 		h.Set("Access-Control-Allow-Origin", origin)
 		h.Set("Vary", "Origin")

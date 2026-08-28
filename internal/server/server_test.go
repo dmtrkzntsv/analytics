@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -11,9 +12,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dmitry/analytics/internal/config"
 	"github.com/dmitry/analytics/internal/config/configtest"
 	"github.com/dmitry/analytics/internal/geo"
+	"github.com/dmitry/analytics/internal/manage"
 	"github.com/dmitry/analytics/internal/store"
+	_ "github.com/dmitry/analytics/internal/store/sqlite"
 )
 
 type fakeQueue struct {
@@ -64,15 +68,54 @@ func testServer(t *testing.T) (*fakeQueue, http.Handler) {
 	return testServerWithIdentity(t, "anonymous")
 }
 
+// newTestRegistry seeds a temp-DB registry with the given projects.
+// Replaces the old inline cfg.Projects construction.
+func newTestRegistry(t *testing.T, cfg *config.Config, projects []manage.ProjectSpec, keys map[string][2]string) *manage.Registry {
+	t.Helper()
+	st, err := store.Open("sqlite://" + t.TempDir() + "/reg.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	ctx := context.Background()
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	reg := manage.New(st, cfg.Retention, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err := reg.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ops := manage.NewOps(reg, st)
+	for _, spec := range projects {
+		if _, err := ops.CreateProject(ctx, "test", spec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for project, kl := range keys { // project -> {key, label}
+		if err := st.InsertIngestKey(ctx, store.RegistryKey{
+			Key: kl[0], Project: project, Label: kl[1]},
+			store.AuditEntry{Actor: "test", Action: "key.issue", Subject: kl[1]}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := reg.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	return reg
+}
+
 func testServerWithIdentity(t *testing.T, mode string) (*fakeQueue, http.Handler) {
 	t.Helper()
-	cfg := configtest.Load(t, nil, `[{"alias": "app", "name": "App",
-		"identity": "`+mode+`",
-		"ingest_keys": [{"key": "`+testKey+`", "label": "web"}],
-		"allowed_origins": ["`+testOrigin+`"]}]`)
+	cfg := configtest.Load(t, nil)
+	reg := newTestRegistry(t, cfg,
+		[]manage.ProjectSpec{{
+			Alias: "app", Name: "App", Identity: mode,
+			AllowedOrigins: []string{testOrigin},
+		}},
+		map[string][2]string{"app": {testKey, "web"}})
 	g, _ := geo.New("cloudflare://", t.TempDir(), slog.Default())
 	q := &fakeQueue{}
-	return q, New(cfg, q, g, fixedSalt{}, q, slog.Default())
+	return q, New(cfg, reg, q, g, fixedSalt{}, q, slog.Default())
 }
 
 // post sends one envelope. headers may set Origin, X-Analytics-Key or a
