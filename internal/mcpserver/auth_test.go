@@ -39,7 +39,7 @@ func newJWKSFixture(t *testing.T) *jwksFixture {
 			"issuer": f.issuer, "jwks_uri": f.issuer + "/jwks",
 		})
 	})
-	mux.HandleFunc("/jwks", func(w http.ResponseWriter, _ *http.Request) {
+	jwksHandler := func(w http.ResponseWriter, _ *http.Request) {
 		atomic.AddInt64(&f.fetches, 1)
 		pub := f.key.Public().(*rsa.PublicKey)
 		json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]string{{
@@ -47,7 +47,12 @@ func newJWKSFixture(t *testing.T) *jwksFixture {
 			"n": base64.RawURLEncoding.EncodeToString(pub.N.Bytes()),
 			"e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pub.E)).Bytes()),
 		}}})
-	})
+	}
+	mux.HandleFunc("/jwks", jwksHandler)
+	// Same keys under Cloudflare Access's real JWKS path, so a fixture
+	// can double as an MCP_CF_TEAM_DOMAIN in cloudflare-mode tests
+	// without a second key set to keep in sync.
+	mux.HandleFunc("/cdn-cgi/access/certs", jwksHandler)
 	f.server = httptest.NewServer(mux)
 	f.issuer = f.server.URL
 	t.Cleanup(f.server.Close)

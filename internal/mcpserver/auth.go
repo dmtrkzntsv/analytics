@@ -45,6 +45,9 @@ func StaticVerifier(token string) auth.TokenVerifier {
 // jwks_uri. Called once at startup so a typo'd issuer fails the boot,
 // not the first request.
 func DiscoverJWKSURL(ctx context.Context, issuer string, client *http.Client) (string, error) {
+	if client == nil {
+		client = &http.Client{Timeout: 10 * time.Second}
+	}
 	req, err := http.NewRequestWithContext(ctx, "GET",
 		issuer+"/.well-known/oauth-authorization-server", nil)
 	if err != nil {

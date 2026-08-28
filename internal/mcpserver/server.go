@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/dmitry/analytics/internal/config"
 	"github.com/dmitry/analytics/internal/manage"
@@ -101,7 +102,16 @@ func wrapAuth(ctx context.Context, m config.MCPConfig, next http.Handler) (http.
 		// middleware instead of RequireBearerToken so a request whose
 		// Authorization header Access did not populate is still judged
 		// by the assertion alone (endpoint spec §5.2).
-		cache := NewJWKSCache("https://"+m.CFTeamDomain+"/cdn-cgi/access/certs", nil)
+		//
+		// CFTeamDomain is normally a bare team domain and gets an
+		// "https://" prefix here; scheme-tolerant like CloudflareVerifier
+		// itself so a caller (or test) that already has a full issuer URL
+		// isn't double-prefixed into a malformed one.
+		certsHost := m.CFTeamDomain
+		if !strings.HasPrefix(certsHost, "http://") && !strings.HasPrefix(certsHost, "https://") {
+			certsHost = "https://" + certsHost
+		}
+		cache := NewJWKSCache(certsHost+"/cdn-cgi/access/certs", nil)
 		v := CloudflareVerifier(m.CFTeamDomain, m.CFAud, cache)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			info, err := v(r.Context(), "", r)

@@ -326,5 +326,13 @@ func (c *Config) ValidateMCP() error {
 	default:
 		return fmt.Errorf("config: unknown MCP_AUTH_MODE %q (oauth, cloudflare or token)", m.AuthMode)
 	}
+	// An issuer with no resource URL produces a spec-broken RFC 9728
+	// surface regardless of mode: a relative resource_metadata pointer
+	// in WWW-Authenticate and a PRM document with an empty `resource`.
+	// oauth mode already requires both above; this catches token mode
+	// with MCP_AUTH_ISSUER set (which opts into the PRM route).
+	if m.Issuer != "" && m.ResourceURL == "" {
+		return fmt.Errorf("config: MCP_AUTH_ISSUER requires MCP_RESOURCE_URL")
+	}
 	return nil
 }

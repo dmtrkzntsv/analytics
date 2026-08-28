@@ -290,6 +290,8 @@ func TestValidateMCP(t *testing.T) {
 			"MCP_CF_TEAM_DOMAIN": "team.cloudflareaccess.com", "MCP_CF_AUD": "aud123"}, true},
 		{"cloudflare missing aud", map[string]string{"MCP_AUTH_MODE": "cloudflare", "MCP_TOKEN": "",
 			"MCP_CF_TEAM_DOMAIN": "team.cloudflareaccess.com"}, false},
+		{"token mode with issuer missing resource url", map[string]string{
+			"MCP_AUTH_ISSUER": "https://idp.example.com"}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
