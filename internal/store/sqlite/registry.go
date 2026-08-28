@@ -141,6 +141,15 @@ func (d *DB) SetProjectArchived(ctx context.Context, alias string, archived bool
 
 func (d *DB) InsertIngestKey(ctx context.Context, k store.RegistryKey, a store.AuditEntry) error {
 	return d.tx(ctx, func(tx *sql.Tx) error {
+		var c int
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM ingest_keys WHERE project=? AND label=?`,
+			k.Project, k.Label).Scan(&c); err != nil {
+			return err
+		}
+		if c > 0 {
+			return fmt.Errorf("key label %q already exists for project %q", k.Label, k.Project)
+		}
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO ingest_keys (key, project, label) VALUES (?,?,?)`,
 			k.Key, k.Project, k.Label); err != nil {
