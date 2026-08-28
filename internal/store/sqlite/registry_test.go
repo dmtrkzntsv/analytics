@@ -126,6 +126,33 @@ func TestArchiveRestoreProject(t *testing.T) {
 	}
 }
 
+func TestSetProjectArchivedErrors(t *testing.T) {
+	d := openRegistryDB(t)
+	ctx := context.Background()
+
+	// Archiving unknown alias should fail.
+	if err := d.SetProjectArchived(ctx, "ghost", true, store.AuditEntry{Actor: "cli", Action: "project.archive", Subject: "ghost"}); err == nil {
+		t.Fatal("archiving unknown alias did not fail")
+	}
+
+	// Create a project but don't archive it.
+	p := store.RegistryProject{Alias: "blog", Name: "a", Identity: "anonymous", AllowedOrigins: "[]"}
+	if err := d.CreateProject(ctx, p, store.AuditEntry{Actor: "cli", Action: "project.create", Subject: "blog"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Restore (archive=false) of non-archived project should be a no-op (nil error).
+	if err := d.SetProjectArchived(ctx, "blog", false, store.AuditEntry{Actor: "mcp", Action: "project.restore", Subject: "blog"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Project should still be unarchived.
+	ps, _, _ := d.LoadRegistry(ctx)
+	if ps[0].Archived {
+		t.Fatal("project was archived by restore no-op")
+	}
+}
+
 // TestMigrationUpgradeFrom004 ensures a database populated before 005
 // (with migrations 001-004 only) migrates cleanly and reads new columns
 // with their defaults.
