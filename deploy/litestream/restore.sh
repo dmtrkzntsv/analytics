@@ -26,14 +26,27 @@ SOURCE_DB="${SOURCE_DB:-/var/lib/analytics/analytics.db}"
 REPLICA_PATH="${REPLICA_PATH:-/var/lib/analytics/replica.db}"
 LITESTREAM_CONFIG="${LITESTREAM_CONFIG:-/etc/litestream.yml}"
 
+# Loop mode calls this as `restore_once || …`, and POSIX turns set -e off
+# inside a function invoked that way — so every step must check its own exit
+# status, or a failed restore falls through to the rename.
 restore_once() {
   tmp="$REPLICA_PATH.tmp"
   rm -f "$tmp"
   trap 'rm -f "$tmp"' EXIT
 
-  litestream restore -config "$LITESTREAM_CONFIG" -o "$tmp" "$SOURCE_DB"
+  litestream restore -config "$LITESTREAM_CONFIG" -o "$tmp" "$SOURCE_DB" || {
+    echo "restore: litestream restore failed" >&2
+    return 1
+  }
 
-  check="$(sqlite3 "$tmp" 'PRAGMA quick_check' 2>&1)" || {
+  # Guard against sqlite3 creating the file it is meant to verify: given a
+  # missing path it makes a zero-byte database whose quick_check says "ok".
+  # Require a non-empty file and open it read-only.
+  if [ ! -s "$tmp" ]; then
+    echo "restore: litestream produced no file at $tmp" >&2
+    return 1
+  fi
+  check="$(sqlite3 -readonly "$tmp" 'PRAGMA quick_check' 2>&1)" || {
     echo "restore: quick_check failed to run: $check" >&2
     return 1
   }
@@ -44,7 +57,7 @@ restore_once() {
 
   # Rename is atomic within a filesystem: a reader either sees the whole old
   # replica or the whole new one, never a half-written file.
-  mv "$tmp" "$REPLICA_PATH"
+  mv "$tmp" "$REPLICA_PATH" || return 1
   trap - EXIT
   echo "restore: replica updated at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
