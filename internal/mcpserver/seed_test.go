@@ -81,6 +81,7 @@ func newTestHost(t *testing.T) (*host, *mcp.ClientSession) {
 
 	srv := mcp.NewServer(&mcp.Implementation{Name: "analytics", Version: "test"}, nil)
 	h.register(srv)
+	h.registerResources(srv)
 	ct, stEnd := mcp.NewInMemoryTransports()
 	if _, err := srv.Connect(ctx, stEnd, nil); err != nil {
 		t.Fatal(err)

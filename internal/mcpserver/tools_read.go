@@ -260,5 +260,4 @@ func (h *host) register(s *mcp.Server) {
 	h.registerManage(s)
 }
 
-func (h *host) registerQuery(s *mcp.Server)  {} // Task 18 moves this to query.go
 func (h *host) registerManage(s *mcp.Server) {} // Task 19 moves this to tools_manage.go
