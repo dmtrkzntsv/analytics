@@ -6,7 +6,7 @@
 # next to this file. The application never talks to object storage itself.
 services:
   litestream:
-    image: litestream/litestream:0.3.13
+    image: litestream/litestream:0.5
     restart: unless-stopped
     command: ["replicate", "-config", "/etc/litestream.yml"]
     volumes:
