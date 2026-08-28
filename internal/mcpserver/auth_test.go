@@ -9,6 +9,8 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,6 +22,8 @@ type jwksFixture struct {
 	kid    string
 	server *httptest.Server
 	issuer string
+
+	fetches int64 // count of /jwks handler invocations
 }
 
 func newJWKSFixture(t *testing.T) *jwksFixture {
@@ -36,6 +40,7 @@ func newJWKSFixture(t *testing.T) *jwksFixture {
 		})
 	})
 	mux.HandleFunc("/jwks", func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt64(&f.fetches, 1)
 		pub := f.key.Public().(*rsa.PublicKey)
 		json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]string{{
 			"kty": "RSA", "kid": f.kid, "alg": "RS256", "use": "sig",
@@ -192,5 +197,102 @@ func TestCloudflareVerifier(t *testing.T) {
 	req2.Header.Set("Cf-Access-Jwt-Assertion", wrong)
 	if _, err := v(context.Background(), "x", req2); err == nil {
 		t.Fatal("wrong aud accepted")
+	}
+}
+
+// TestJWKSCacheThrottlesRefetch proves the default minRefetch window
+// suppresses a flood of fetches triggered by repeated unknown-kid
+// lookups: after the warm-up fetch, hammering Key with an unknown kid
+// must not cause more than one additional fetch to the JWKS endpoint.
+func TestJWKSCacheThrottlesRefetch(t *testing.T) {
+	f := newJWKSFixture(t)
+	url, err := DiscoverJWKSURL(context.Background(), f.issuer, f.server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache := NewJWKSCache(url, f.server.Client())
+	// warm the cache; leave cache.minRefetch at its default (time.Minute).
+	if _, err := cache.Key("k1"); err != nil {
+		t.Fatal(err)
+	}
+	warmFetches := atomic.LoadInt64(&f.fetches)
+	if warmFetches == 0 {
+		t.Fatal("warm-up did not fetch the JWKS endpoint")
+	}
+
+	for i := 0; i < 5; i++ {
+		_, err := cache.Key("unknown-kid")
+		if err == nil {
+			t.Fatal("unknown kid accepted")
+		}
+		if !strings.Contains(err.Error(), "unknown key id") {
+			t.Errorf("unexpected error: %v", err)
+		}
+	}
+
+	if got := atomic.LoadInt64(&f.fetches) - warmFetches; got > 1 {
+		t.Errorf("fetch count rose by %d beyond warm-up, want <=1 (throttle not applied)", got)
+	}
+}
+
+// TestJWKSCacheSkipsMalformedKeys proves a JWKS document containing
+// unparseable or unsupported entries doesn't panic and doesn't prevent
+// a well-formed key in the same document from being usable.
+func TestJWKSCacheSkipsMalformedKeys(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub := key.Public().(*rsa.PublicKey)
+	validN := base64.RawURLEncoding.EncodeToString(pub.N.Bytes())
+	validE := base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pub.E)).Bytes())
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/jwks", func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]string{
+			{"kty": "RSA", "kid": "bad-b64", "n": "not valid base64!!!", "e": validE},
+			{"kty": "oct", "kid": "unsupported-kty", "k": "irrelevant"},
+			{"kty": "RSA", "kid": "good", "n": validN, "e": validE},
+		}})
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	cache := NewJWKSCache(server.URL+"/jwks", server.Client())
+
+	got, err := cache.Key("good")
+	if err != nil {
+		t.Fatalf("valid key rejected: %v", err)
+	}
+	if _, ok := got.(*rsa.PublicKey); !ok {
+		t.Errorf("got %T, want *rsa.PublicKey", got)
+	}
+
+	for _, kid := range []string{"bad-b64", "unsupported-kty"} {
+		if _, err := cache.Key(kid); err == nil {
+			t.Errorf("%s: malformed/unsupported key accepted", kid)
+		}
+	}
+}
+
+func TestDiscoverJWKSURLNon200(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+
+	if _, err := DiscoverJWKSURL(context.Background(), server.URL, server.Client()); err == nil {
+		t.Fatal("non-200 issuer metadata response accepted")
+	}
+}
+
+func TestDiscoverJWKSURLMissingJWKSURI(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"issuer": "https://example.com"})
+	}))
+	t.Cleanup(server.Close)
+
+	if _, err := DiscoverJWKSURL(context.Background(), server.URL, server.Client()); err == nil {
+		t.Fatal("issuer metadata without jwks_uri accepted")
 	}
 }
