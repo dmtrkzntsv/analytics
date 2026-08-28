@@ -94,3 +94,54 @@ func TestImportLegacyProjectsJSON(t *testing.T) {
 		t.Fatal("legacy key not imported")
 	}
 }
+
+func TestExportImportArchivedState(t *testing.T) {
+	// Create and archive a project in store A
+	st := testStore(t)
+	reg := New(st, defaults, discard())
+	ctx := context.Background()
+	reg.Reload(ctx)
+	ops := NewOps(reg, st)
+	if _, err := ops.CreateProject(ctx, "cli", ProjectSpec{
+		Alias: "archived-blog", Name: "Archived blog", Identity: "anonymous"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ops.ArchiveProject(ctx, "cli", "archived-blog"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Export from store A
+	var buf bytes.Buffer
+	if err := ops.Export(ctx, &buf); err != nil {
+		t.Fatal(err)
+	}
+	exported := buf.String()
+
+	// Import into a fresh store B
+	st2 := testStore(t)
+	reg2 := New(st2, defaults, discard())
+	reg2.Reload(ctx)
+	ops2 := NewOps(reg2, st2)
+	res, err := ops2.Import(ctx, "cli", strings.NewReader(exported))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Created != 1 {
+		t.Fatalf("result.Created = %d, want 1", res.Created)
+	}
+
+	// Verify archived state is preserved in store B
+	p := reg2.Snapshot(ctx).Project("archived-blog")
+	if p == nil || !p.Archived {
+		t.Fatalf("archived-blog = %+v; must be archived", p)
+	}
+
+	// Re-export from store B and verify byte equality
+	var buf2 bytes.Buffer
+	if err := ops2.Export(ctx, &buf2); err != nil {
+		t.Fatal(err)
+	}
+	if buf2.String() != exported {
+		t.Errorf("round trip changed archived state:\n%s\nvs\n%s", exported, buf2.String())
+	}
+}

@@ -114,6 +114,22 @@ func (o *Ops) Import(ctx context.Context, actor string, r io.Reader) (ImportResu
 			}
 			res.Updated++
 		}
+
+		// Reconcile archived state for listed projects only. Unlisted
+		// projects remain untouched (never-destructive rule).
+		p := o.Reg.Snapshot(ctx).Project(ep.Alias)
+		if p != nil {
+			if ep.Archived && !p.Archived {
+				if err := o.ArchiveProject(ctx, actor, ep.Alias); err != nil {
+					return res, fmt.Errorf("import archive %q: %w", ep.Alias, err)
+				}
+			} else if !ep.Archived && p.Archived {
+				if err := o.RestoreProject(ctx, actor, ep.Alias); err != nil {
+					return res, fmt.Errorf("import restore %q: %w", ep.Alias, err)
+				}
+			}
+		}
+
 		existing := map[string]bool{}
 		_, ks, err := o.St.LoadRegistry(ctx)
 		if err != nil {
