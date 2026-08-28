@@ -175,3 +175,41 @@ func (d *DB) SetIngestKeyDisabled(ctx context.Context, project, label string, di
 		return auditAndBump(ctx, tx, a)
 	})
 }
+
+// projectTables is every table carrying a per-project `project` column.
+// Kept in one place so a future migration adding a table has one list to
+// extend; the delete test cross-checks the count against sqlite_master.
+var projectTables = []string{
+	"web_hits", "product_events", "app_views",
+	"agg_web_daily", "agg_web_pages", "agg_web_referrers", "agg_web_countries",
+	"agg_web_devices", "agg_web_browsers", "agg_web_os", "agg_web_utm",
+	"agg_product_daily", "agg_product_totals", "agg_product_attrs",
+	"agg_app_daily", "agg_app_screens", "agg_app_versions", "agg_app_os",
+	"agg_app_devices", "agg_app_countries",
+	"actors", "agg_retention", "identities", "agg_identity_daily",
+	"ingest_keys",
+}
+
+// DeleteProjectData hard-deletes the project and every row keyed by its
+// alias, in one transaction (spec §7.3). The audit row is written in the
+// same transaction and survives — audit_log has no project column.
+// Page reclamation is the caller's job (IncrementalVacuum), because a
+// vacuum inside the tx would deadlock the single connection.
+func (d *DB) DeleteProjectData(ctx context.Context, alias string, a store.AuditEntry) error {
+	return d.tx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `DELETE FROM projects WHERE alias=?`, alias)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return fmt.Errorf("delete: unknown alias %q", alias)
+		}
+		for _, table := range projectTables {
+			if _, err := tx.ExecContext(ctx,
+				`DELETE FROM `+table+` WHERE project=?`, alias); err != nil {
+				return fmt.Errorf("delete %s: %w", table, err)
+			}
+		}
+		return auditAndBump(ctx, tx, a)
+	})
+}

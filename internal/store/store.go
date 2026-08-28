@@ -122,6 +122,7 @@ type Store interface {
 	SetProjectArchived(ctx context.Context, alias string, archived bool, a AuditEntry) error
 	InsertIngestKey(ctx context.Context, k RegistryKey, a AuditEntry) error
 	SetIngestKeyDisabled(ctx context.Context, project, label string, disabled bool, a AuditEntry) error
+	DeleteProjectData(ctx context.Context, alias string, a AuditEntry) error
 	Close() error
 }
 

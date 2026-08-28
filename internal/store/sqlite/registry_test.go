@@ -267,6 +267,59 @@ func applyMigrationsUpTo(ctx context.Context, d *DB, maxVersion int) error {
 	return nil
 }
 
+func TestDeleteProjectDataCascades(t *testing.T) {
+	d := openRegistryDB(t)
+	ctx := context.Background()
+	p := store.RegistryProject{Alias: "blog", Name: "a", Identity: "anonymous", AllowedOrigins: "[]"}
+	if err := d.CreateProject(ctx, p, store.AuditEntry{Actor: "cli", Action: "project.create", Subject: "blog"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.InsertIngestKey(ctx, store.RegistryKey{Key: "ak_d", Project: "blog", Label: "web"},
+		store.AuditEntry{Actor: "cli", Action: "key.issue", Subject: "web"}); err != nil {
+		t.Fatal(err)
+	}
+	// one row in a raw table and one in an aggregate table
+	if _, err := d.db.Exec(`INSERT INTO web_hits (id, project, ts, received_at, actor_id, path,
+		referrer_source, utm_source, utm_medium, utm_campaign, country, device, browser, os,
+		user_id, group_id)
+		VALUES ('h1','blog','2026-08-01T10:00:00Z','2026-08-01T10:00:00Z','a','/x','','','','','','','','','','')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.db.Exec(`INSERT INTO agg_web_daily (project, day, visitors, pageviews,
+		sessions, bounces, duration_sec) VALUES ('blog','2026-07-01',1,1,1,0,0)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.DeleteProjectData(ctx, "blog", store.AuditEntry{
+		Actor: "cli", Action: "project.delete", Subject: "blog"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"projects", "ingest_keys", "web_hits", "agg_web_daily"} {
+		var c int
+		if err := d.db.QueryRow(
+			`SELECT COUNT(*) FROM ` + table + ` WHERE ` + projectCol(table) + `='blog'`).Scan(&c); err != nil {
+			t.Fatal(err)
+		}
+		if c != 0 {
+			t.Errorf("%s still has %d rows", table, c)
+		}
+	}
+	// the audit row survives the deletion — that is the point of it
+	var c int
+	if err := d.db.QueryRow(`SELECT COUNT(*) FROM audit_log WHERE action='project.delete'`).Scan(&c); err != nil {
+		t.Fatal(err)
+	}
+	if c != 1 {
+		t.Error("no audit row for the delete")
+	}
+}
+
+func projectCol(table string) string {
+	if table == "projects" {
+		return "alias"
+	}
+	return "project"
+}
+
 // parseVersion extracts the version number from a migration filename.
 func parseVersion(name string, version *int) (string, error) {
 	for i := 0; i < len(name); i++ {

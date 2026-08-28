@@ -166,6 +166,20 @@ func (o *Ops) EnableIngestKey(ctx context.Context, actor, project, label string)
 	return o.Reg.Reload(ctx)
 }
 
+// DeleteProject is exposed by the CLI only — never as an MCP tool
+// (spec §7.3: irreversible operations require a shell). Reclaims pages
+// afterwards; the tx cannot (single connection).
+func (o *Ops) DeleteProject(ctx context.Context, actor, alias string) error {
+	if err := o.St.DeleteProjectData(ctx, alias, store.AuditEntry{
+		Actor: actor, Action: "project.delete", Subject: alias}); err != nil {
+		return err
+	}
+	if err := o.St.IncrementalVacuum(ctx); err != nil {
+		return fmt.Errorf("delete succeeded but vacuum failed: %w", err)
+	}
+	return o.Reg.Reload(ctx)
+}
+
 // MintIngestKey mints "ak_" + 128 bits hex. Ingest keys are public by
 // design (they ship in page source); 128 bits makes guessing infeasible.
 func MintIngestKey() (string, error) { return mint("ak_", 16) }
