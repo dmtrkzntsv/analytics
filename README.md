@@ -183,7 +183,7 @@ Full contract, including retry semantics and a worked offline-queue design:
 `analytics serve -mcp` runs a second surface: a Model Context Protocol
 endpoint you connect an MCP client (Claude.ai, Claude Code, Cursor) to, so
 you can ask "how many visitors did myapp get last week, broken down by
-country" in plain language instead of opening the Evidence dashboards. Ten
+country" in plain language instead of opening the Evidence dashboards. Nine
 read tools (`list_projects`, `web_overview`, `web_breakdown`,
 `app_overview`, `app_breakdown`, `product_events`, `product_attributes`,
 `retention`, `identities`) plus a guarded `query` tool cover ad-hoc SQL
