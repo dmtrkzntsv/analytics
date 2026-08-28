@@ -61,6 +61,26 @@ type ProjectInfo struct {
 	Alias, Name string
 }
 
+// RegistryProject represents a project configuration from the registry.
+type RegistryProject struct {
+	Alias, Name, Identity string
+	AllowedOrigins        string // JSON array, "[]" if none
+	Retention             string // JSON object or ""
+	Aggregation           string // JSON object or ""
+	Archived              bool
+}
+
+// RegistryKey represents an API key in the registry.
+type RegistryKey struct {
+	Key, Project, Label string
+	Disabled            bool
+}
+
+// AuditEntry represents a single audit log entry.
+type AuditEntry struct {
+	Actor, Action, Subject, Detail string
+}
+
 // ProductAggSettings mirrors config.ProductAggregation; zero value =
 // aggregation disabled (raw rows deleted without rollup, spec §9).
 type ProductAggSettings struct {
@@ -95,6 +115,13 @@ type Store interface {
 	RebuildFlatView(ctx context.Context, keys []string) error
 	GetMeta(ctx context.Context, key string) (string, error) // "" if absent
 	SetMeta(ctx context.Context, key, value string) error
+	LoadRegistry(ctx context.Context) ([]RegistryProject, []RegistryKey, error)
+	ConfigVersion(ctx context.Context) (int64, error)
+	CreateProject(ctx context.Context, p RegistryProject, a AuditEntry) error
+	UpdateProject(ctx context.Context, p RegistryProject, a AuditEntry) error
+	SetProjectArchived(ctx context.Context, alias string, archived bool, a AuditEntry) error
+	InsertIngestKey(ctx context.Context, k RegistryKey, a AuditEntry) error
+	SetIngestKeyDisabled(ctx context.Context, project, label string, disabled bool, a AuditEntry) error
 	Close() error
 }
 
