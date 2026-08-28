@@ -18,7 +18,7 @@ echo "total coverage: ${total}%"
 awk -v t="$total" 'BEGIN { exit (t+0 >= 80.0) ? 0 : 1 }' \
   || { echo "FAIL: total coverage ${total}% < 80%"; exit 1; }
 
-core="internal/store internal/enrich internal/pipeline internal/identity internal/config"
+core="internal/store internal/enrich internal/pipeline internal/identity internal/config internal/manage internal/mcpserver"
 fail=0
 for pkg in $core; do
   pct=$(go tool cover -func=coverage.out \

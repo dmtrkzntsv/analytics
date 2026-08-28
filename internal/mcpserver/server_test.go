@@ -307,3 +307,50 @@ func TestRegisterOnWithoutHealthzOmitsRoute(t *testing.T) {
 		t.Fatalf("code = %d; /healthz must not be mounted when withHealthz=false", rec.Code)
 	}
 }
+
+// TestWrapAuthUnknownMode exercises wrapAuth's default branch directly:
+// ValidateMCP normally rejects an unknown AuthMode before Build ever
+// runs, so this branch only matters as a defense-in-depth invariant if
+// that validation is ever bypassed or a mode is added to one but not the
+// other.
+func TestWrapAuthUnknownMode(t *testing.T) {
+	_, err := wrapAuth(context.Background(), config.MCPConfig{AuthMode: "bogus"}, nil)
+	if err == nil {
+		t.Fatal("unknown auth mode accepted")
+	}
+}
+
+// TestBuildFailsWhenOAuthIssuerUnreachable exercises Build's own error
+// branch (wrapAuth failing after OpenReadDB already succeeded, so Build
+// must close the DB it just opened rather than leak it) — ValidateMCP
+// only checks that MCP_AUTH_ISSUER is set, not that it is reachable, so
+// an unreachable issuer surfaces here, at Build time.
+func TestBuildFailsWhenOAuthIssuerUnreachable(t *testing.T) {
+	path := seedDB(t)
+	base := map[string]string{
+		"DATABASE_URL":     "sqlite://" + path,
+		"MCP_AUTH_MODE":    "oauth",
+		"MCP_AUTH_ISSUER":  "http://127.0.0.1:0",
+		"MCP_RESOURCE_URL": "https://analytics.example.com/mcp",
+	}
+	cfg, err := config.FromEnv(func(k string) (string, bool) { v, ok := base[k]; return v, ok })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.ValidateMCP(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(cfg.Database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	reg := manage.New(st, cfg.Retention, logger)
+	if err := reg.Reload(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Build(context.Background(), cfg, reg, manage.NewOps(reg, st), logger); err == nil {
+		t.Fatal("Build succeeded against an unreachable oauth issuer")
+	}
+}

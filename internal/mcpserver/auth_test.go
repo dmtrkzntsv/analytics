@@ -2,6 +2,8 @@ package mcpserver
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/base64"
@@ -299,5 +301,111 @@ func TestDiscoverJWKSURLMissingJWKSURI(t *testing.T) {
 
 	if _, err := DiscoverJWKSURL(context.Background(), server.URL, server.Client()); err == nil {
 		t.Fatal("issuer metadata without jwks_uri accepted")
+	}
+}
+
+// ---- fetchLocked: branches beyond RSA parsing ----
+
+func TestJWKSCacheParsesECKeys(t *testing.T) {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	xb := priv.X.Bytes()
+	yb := priv.Y.Bytes()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/jwks", func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]string{
+			{"kty": "EC", "kid": "ec-good", "crv": "P-256",
+				"x": base64.RawURLEncoding.EncodeToString(xb),
+				"y": base64.RawURLEncoding.EncodeToString(yb)},
+			{"kty": "EC", "kid": "ec-bad-crv", "crv": "P-9000",
+				"x": base64.RawURLEncoding.EncodeToString(xb),
+				"y": base64.RawURLEncoding.EncodeToString(yb)},
+			{"kty": "EC", "kid": "ec-bad-x", "crv": "P-256",
+				"x": "not valid base64!!!",
+				"y": base64.RawURLEncoding.EncodeToString(yb)},
+			{"kty": "EC", "kid": "ec-bad-y", "crv": "P-256",
+				"x": base64.RawURLEncoding.EncodeToString(xb),
+				"y": "not valid base64!!!"},
+		}})
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	cache := NewJWKSCache(server.URL+"/jwks", server.Client())
+	got, err := cache.Key("ec-good")
+	if err != nil {
+		t.Fatalf("valid EC key rejected: %v", err)
+	}
+	if _, ok := got.(*ecdsa.PublicKey); !ok {
+		t.Errorf("got %T, want *ecdsa.PublicKey", got)
+	}
+	for _, kid := range []string{"ec-bad-crv", "ec-bad-x", "ec-bad-y"} {
+		if _, err := cache.Key(kid); err == nil {
+			t.Errorf("%s: malformed/unsupported EC key accepted", kid)
+		}
+	}
+}
+
+func TestJWKSCacheFetchNetworkError(t *testing.T) {
+	// Port 0 is never a live listener; the Get itself fails to connect.
+	cache := NewJWKSCache("http://127.0.0.1:0/jwks", &http.Client{Timeout: time.Second})
+	if _, err := cache.Key("anything"); err == nil {
+		t.Fatal("fetch against an unreachable JWKS endpoint succeeded")
+	}
+}
+
+func TestJWKSCacheFetchNon200(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+	cache := NewJWKSCache(server.URL, server.Client())
+	if _, err := cache.Key("k1"); err == nil {
+		t.Fatal("non-200 JWKS response accepted")
+	}
+}
+
+func TestJWKSCacheFetchMalformedJSON(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte("not json"))
+	}))
+	t.Cleanup(server.Close)
+	cache := NewJWKSCache(server.URL, server.Client())
+	if _, err := cache.Key("k1"); err == nil {
+		t.Fatal("malformed JWKS body accepted")
+	}
+}
+
+// TestCloudflareVerifierPrependsScheme proves a bare team domain (no
+// "http(s)://" prefix, the normal operator-facing form) is compared
+// against the token's iss with an "https://" prefix added — not left bare,
+// which would never match a real token's iss claim.
+func TestCloudflareVerifierPrependsScheme(t *testing.T) {
+	f := newJWKSFixture(t)
+	// f.issuer is an httptest URL like "http://127.0.0.1:PORT"; strip the
+	// scheme to get a bare "domain" the way an operator would configure
+	// MCP_CF_TEAM_DOMAIN, and sign a token whose iss has "https://" added
+	// back exactly the way CloudflareVerifier is documented to do it.
+	bareDomain := strings.TrimPrefix(f.issuer, "http://")
+	cache := NewJWKSCache(f.issuer+"/cdn-cgi/access/certs", f.server.Client())
+	v := CloudflareVerifier(bareDomain, "aud-tag-1", cache)
+
+	tok := f.sign(t, jwt.MapClaims{
+		"iss": "https://" + bareDomain, "aud": "aud-tag-1", "sub": "u",
+		"exp": time.Now().Add(time.Hour).Unix(),
+	})
+	req := httptest.NewRequest("POST", "/mcp", nil)
+	req.Header.Set("Cf-Access-Jwt-Assertion", tok)
+	if _, err := v(context.Background(), "ignored", req); err != nil {
+		t.Fatalf("bare team domain was not prefixed to match iss: %v", err)
+	}
+}
+
+func TestCloudflareVerifierRejectsNilRequest(t *testing.T) {
+	v := CloudflareVerifier("team.cloudflareaccess.com", "aud", NewJWKSCache("http://example.invalid/jwks", nil))
+	if _, err := v(context.Background(), "x", nil); err == nil {
+		t.Fatal("nil request accepted")
 	}
 }

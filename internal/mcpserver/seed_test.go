@@ -53,6 +53,8 @@ func newTestHost(t *testing.T) (*host, *mcp.ClientSession) {
 	      VALUES ('blog','2026-08-20',10,25,12,3,600), ('blog','2026-08-21',12,30,14,4,720)`)
 	seed(`INSERT INTO agg_web_pages (project, day, path, visitors, pageviews)
 	      VALUES ('blog','2026-08-20','/post-1',8,15), ('blog','2026-08-20','/post-2',4,10)`)
+	seed(`INSERT INTO agg_web_utm (project, day, utm_source, utm_medium, utm_campaign, visitors, pageviews)
+	      VALUES ('blog','2026-08-20','newsletter','email','august',6,9)`)
 	seed(`INSERT INTO web_hits (id, project, ts, received_at, actor_id, path, referrer_source,
 	      utm_source, utm_medium, utm_campaign, country, device, browser, os, user_id, group_id)
 	      VALUES ('h1','blog','2026-08-26T10:00:00Z','2026-08-26T10:00:00Z','a1','/live','','','','','','','','','u1','')`)
@@ -65,6 +67,29 @@ func newTestHost(t *testing.T) (*host, *mcp.ClientSession) {
 	seed(`INSERT INTO agg_identity_daily (project, day, kind, id, actors, users, hits, views, events)
 	      VALUES ('blog','2026-08-20','user','u1',1,1,5,0,2)`)
 	seed(`INSERT INTO identities (project, kind, id, name) VALUES ('blog','user','u1','Jane Doe')`)
+	seed(`INSERT INTO agg_identity_daily (project, day, kind, id, actors, users, hits, views, events)
+	      VALUES ('blog','2026-08-20','group','g1',1,0,5,0,2)`)
+	seed(`INSERT INTO identities (project, kind, id, name) VALUES ('blog','group','g1','Acme Inc')`)
+	// app data, for app_overview / app_breakdown
+	seed(`INSERT INTO agg_app_daily (project, day, actives, views, sessions, duration_sec)
+	      VALUES ('blog','2026-08-20',6,20,8,480), ('blog','2026-08-21',7,22,9,540)`)
+	seed(`INSERT INTO agg_app_screens (project, day, screen, actives, views)
+	      VALUES ('blog','2026-08-20','/settings',5,12), ('blog','2026-08-20','/home',3,8)`)
+	seed(`INSERT INTO agg_app_versions (project, day, platform, app_version, actives, views)
+	      VALUES ('blog','2026-08-20','ios','2.4.1',5,12)`)
+	seed(`INSERT INTO agg_app_os (project, day, platform, os_version, actives, views)
+	      VALUES ('blog','2026-08-20','ios','17.4',5,12)`)
+	seed(`INSERT INTO agg_app_devices (project, day, device_model, actives, views)
+	      VALUES ('blog','2026-08-20','iPhone15,3',5,12)`)
+	seed(`INSERT INTO agg_app_countries (project, day, country, actives, views)
+	      VALUES ('blog','2026-08-20','US',5,12)`)
+	// product_aggregation, enabled for blog only: docs stays at the
+	// default (aggregation off), which TestProductAttributesExplainsWhenOff
+	// depends on.
+	seed(`UPDATE projects SET product_aggregation =
+	      '{"enabled":true,"attributes":{"*":["plan"]},"top_n":50}' WHERE alias='blog'`)
+	seed(`INSERT INTO agg_product_attrs (project, day, event_name, attr_key, attr_value, count, unique_users)
+	      VALUES ('blog','2026-08-20','signup','plan','pro',3,3)`)
 
 	db, err := OpenReadDB(path)
 	if err != nil {
