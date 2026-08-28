@@ -38,19 +38,29 @@ func (h *host) createProject(ctx context.Context, _ *mcp.CallToolRequest, in pro
 	if err != nil {
 		return nil, projectToolOut{}, err
 	}
-	out := projectToolOut{Alias: p.Alias, Identity: p.Identity}
+	out := projectToolOut{Alias: in.Alias}
+	if p != nil {
+		out.Alias = p.Alias
+		out.Identity = p.Identity
+	}
 	// by default the quickstart story is one round trip to paste-ready
 	if !in.SkipKey {
-		key, err := h.ops.IssueIngestKey(ctx, "mcp", p.Alias, "default")
+		key, err := h.ops.IssueIngestKey(ctx, "mcp", in.Alias, "default")
 		if err != nil {
 			return nil, out, fmt.Errorf("project created but key issue failed: %w", err)
 		}
-		origin := ""
-		if len(p.AllowedOrigins) > 0 {
-			origin = p.AllowedOrigins[0]
-		}
 		out.Key = key
-		out.Snippet = manage.Snippet(origin, key, p.Identity)
+		// p should never be nil here (we just created it), but a
+		// concurrent delete between CreateProject and this point is not
+		// impossible; the key is already issued, so degrade to no
+		// snippet/origin enrichment rather than fail the call.
+		if p != nil {
+			origin := ""
+			if len(p.AllowedOrigins) > 0 {
+				origin = p.AllowedOrigins[0]
+			}
+			out.Snippet = manage.Snippet(origin, key, p.Identity)
+		}
 	}
 	return nil, out, nil
 }
@@ -60,10 +70,13 @@ func (h *host) createProject(ctx context.Context, _ *mcp.CallToolRequest, in pro
 // project's current values — including Retention and Aggregation, which
 // this tool has no fields for and must not silently clear — and overlays
 // only what the caller actually provided. AllowedOrigins is the one field
-// that is not field-merged: when the caller supplies it, it replaces the
-// origin list wholesale (a caller cannot add one origin to an existing
-// list without repeating the others), and consequently there is no way
-// to clear origins to empty through this tool — see the tool description.
+// that is not field-merged: when the caller supplies a non-empty list it
+// replaces the origin list wholesale (a caller cannot add one origin to
+// an existing list without repeating the others). An empty list is
+// treated the same as omitted (JSON has no way to distinguish "not
+// provided" from "explicitly empty" once decoded into a nil-or-empty
+// slice via omitempty), so there is no way to clear origins to empty
+// through this tool — see the tool description.
 func (h *host) updateProject(ctx context.Context, _ *mcp.CallToolRequest, in projectIn) (*mcp.CallToolResult, projectToolOut, error) {
 	cur := h.reg.Snapshot(ctx).Project(in.Alias)
 	if cur == nil {
@@ -83,7 +96,7 @@ func (h *host) updateProject(ctx context.Context, _ *mcp.CallToolRequest, in pro
 	if in.Identity != "" {
 		spec.Identity = in.Identity
 	}
-	if in.AllowedOrigins != nil {
+	if len(in.AllowedOrigins) > 0 {
 		spec.AllowedOrigins = in.AllowedOrigins
 	}
 	p, err := h.ops.UpdateProject(ctx, "mcp", spec)
@@ -129,12 +142,18 @@ func (h *host) issueKey(ctx context.Context, _ *mcp.CallToolRequest, in keyIn) (
 	if err != nil {
 		return nil, keyOut{}, err
 	}
-	p := h.reg.Snapshot(ctx).Project(in.Project)
-	origin := ""
-	if len(p.AllowedOrigins) > 0 {
-		origin = p.AllowedOrigins[0]
+	out := keyOut{Key: key, Status: "issued"}
+	// Project should still exist (the key issue above would have failed
+	// otherwise), but guard the lookup anyway: don't fail an
+	// already-issued key just because enrichment can't find the project.
+	if p := h.reg.Snapshot(ctx).Project(in.Project); p != nil {
+		origin := ""
+		if len(p.AllowedOrigins) > 0 {
+			origin = p.AllowedOrigins[0]
+		}
+		out.Snippet = manage.Snippet(origin, key, p.Identity)
 	}
-	return nil, keyOut{Key: key, Snippet: manage.Snippet(origin, key, p.Identity), Status: "issued"}, nil
+	return nil, out, nil
 }
 
 func (h *host) disableKey(ctx context.Context, _ *mcp.CallToolRequest, in keyIn) (*mcp.CallToolResult, okOut, error) {
@@ -188,7 +207,7 @@ func (h *host) registerManage(s *mcp.Server) {
 		Description: "Create a project and (by default) its first ingest key; returns a paste-ready embed snippet. Set skip_key to suppress the key."},
 		h.createProject)
 	mcp.AddTool(s, &mcp.Tool{Name: "update_project", Annotations: write,
-		Description: "Update a project's name, identity mode and/or allowed origins. Fields you omit are left unchanged (this is a merge, not a replace) — except allowed_origins, which if provided replaces the whole list; there is no way to clear origins to empty through this tool. Switching to identity=identified starts storing user ids and names as given — privacy-significant, say so to the user before doing it."},
+		Description: "Update a project's name, identity mode and/or allowed origins. Fields you omit are left unchanged (this is a merge, not a replace) — except allowed_origins, which if provided non-empty replaces the whole list; origins cannot be cleared to empty via this tool (use the CLI to clear origins). Switching to identity=identified starts storing user ids and names as given — privacy-significant, say so to the user before doing it."},
 		h.updateProject)
 	mcp.AddTool(s, &mcp.Tool{Name: "archive_project", Annotations: idem,
 		Description: "Archive a project: ingestion stops, data and dashboards keep working, fully reversible with restore_project. There is no delete over MCP — deletion requires the CLI."},

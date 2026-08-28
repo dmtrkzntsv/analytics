@@ -83,6 +83,13 @@ func TestNoDeleteToolExists(t *testing.T) {
 // "query" is included in the read-only side (not exempted): it already
 // carries ReadOnlyHint: true (Task 18), so there is no reason to carve it
 // out — doing so would hide a regression if it ever lost the hint.
+//
+// It also checks the two guardrails the write annotations exist to
+// encode (spec §6): every writer explicitly asserts DestructiveHint ==
+// false (never left at the SDK's true default, which would tell a client
+// this tool might destroy data), and the reversible-but-not-idempotent-
+// by-nature ones (archive/restore/disable/enable) assert IdempotentHint
+// == true, since calling them twice with the same arguments is a no-op.
 func TestManagementToolsAnnotatedNonReadOnly(t *testing.T) {
 	_, cs := newTestHost(t)
 	tools, err := cs.ListTools(context.Background(), &mcp.ListToolsParams{})
@@ -92,12 +99,23 @@ func TestManagementToolsAnnotatedNonReadOnly(t *testing.T) {
 	writers := map[string]bool{"create_project": true, "update_project": true,
 		"archive_project": true, "restore_project": true, "issue_ingest_key": true,
 		"disable_ingest_key": true, "enable_ingest_key": true}
+	idempotent := map[string]bool{"archive_project": true, "restore_project": true,
+		"disable_ingest_key": true, "enable_ingest_key": true}
 	for _, tool := range tools.Tools {
 		if writers[tool.Name] && tool.Annotations.ReadOnlyHint {
 			t.Errorf("%s marked read-only", tool.Name)
 		}
 		if !writers[tool.Name] && !tool.Annotations.ReadOnlyHint {
 			t.Errorf("%s not marked read-only", tool.Name)
+		}
+		if writers[tool.Name] {
+			d := tool.Annotations.DestructiveHint
+			if d == nil || *d != false {
+				t.Errorf("%s: DestructiveHint must be explicitly false, got %v", tool.Name, d)
+			}
+		}
+		if idempotent[tool.Name] && !tool.Annotations.IdempotentHint {
+			t.Errorf("%s: IdempotentHint must be true", tool.Name)
 		}
 	}
 }
@@ -158,6 +176,34 @@ func TestUpdateProjectMerges(t *testing.T) {
 	}
 	if blog.Name != "Blog Renamed" {
 		t.Errorf("name update did not apply, got %q", blog.Name)
+	}
+}
+
+// TestUpdateProjectEmptyOriginsPreservesExisting is the High-severity fix:
+// an explicit `allowed_origins: []` must not wipe existing origins. JSON
+// decoding gives an empty-but-non-nil slice here, so the merge guard must
+// check len(...) > 0, not != nil — otherwise a caller passing an empty
+// array (rather than omitting the field) silently clears origins, which
+// directly contradicts the tool description's claim that this tool
+// cannot clear origins.
+func TestUpdateProjectEmptyOriginsPreservesExisting(t *testing.T) {
+	h, cs := newTestHost(t)
+	ctx := context.Background()
+	if res := callTool(t, cs, "update_project", map[string]any{
+		"alias": "blog", "allowed_origins": []string{"https://blog.example.com"}}); res.IsError {
+		t.Fatalf("seed origin: %s", textOf(res))
+	}
+	res := callTool(t, cs, "update_project", map[string]any{
+		"alias": "blog", "allowed_origins": []string{}})
+	if res.IsError {
+		t.Fatalf("update: %s", textOf(res))
+	}
+	p := h.reg.Snapshot(ctx).Project("blog")
+	if p == nil {
+		t.Fatalf("blog vanished from registry")
+	}
+	if len(p.AllowedOrigins) != 1 || p.AllowedOrigins[0] != "https://blog.example.com" {
+		t.Errorf("explicit empty allowed_origins wiped existing origins, got %v", p.AllowedOrigins)
 	}
 }
 
