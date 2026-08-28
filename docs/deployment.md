@@ -56,7 +56,9 @@ sudo vi /etc/analytics/analytics.env    # R2 credentials from step 1, geo
 ```
 
 Install litestream (<https://litestream.io/install/>) if the installer
-reported it missing, then:
+reported it missing — currently v0.5.x, which is also what the compose files
+pin; writer and reader must run the same major/minor version (see
+[docs/litestream.md](litestream.md) §3) — then:
 
 ```bash
 sudo systemctl enable --now litestream
@@ -129,6 +131,9 @@ temporary file and only then renames, so the previous replica keeps serving.
 A backup you have never restored is not a backup. On the VPS:
 
 ```bash
+# What is in the bucket? (0.5 syntax; replaces the old `snapshots`/`generations`)
+litestream ltx -config /etc/litestream.yml /var/lib/analytics/analytics.db
+
 litestream restore -config /etc/litestream.yml -o /tmp/check.db \
   /var/lib/analytics/analytics.db
 
@@ -143,7 +148,11 @@ rm /tmp/check.db
 `REPLICA_PATH` at a scratch file to use it as the drill.
 
 Check the max day is recent. A restore that succeeds but is days stale means
-litestream is not replicating: inspect `journalctl -u litestream`.
+litestream is not replicating: inspect `journalctl -u litestream`. A restore
+that reports `no matching backups found` against a bucket that is being
+written usually means the litestream running the drill is a different
+major/minor version than the writer — see
+[docs/litestream.md](litestream.md) §3.
 
 ---
 
