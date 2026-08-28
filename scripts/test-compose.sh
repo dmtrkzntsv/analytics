@@ -54,14 +54,29 @@ key="$(docker compose -p "$project" -f "$dir/docker-compose.yml" exec -T analyti
 # accepted but never stored, so the request has to look like a browser.
 ua='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36'
 # shellcheck disable=SC2016  # the $-prefixed names are JSON keys, not shell
-code="$(curl -s -o "$dir/events.out" -w '%{http_code}' -A "$ua" -X POST "http://127.0.0.1:18080/api/events" \
-  -H 'Origin: http://localhost:18080' -H 'Content-Type: application/json' \
-  -H "X-Analytics-Key: $key" \
-  -d '{"attributes":{"$platform":"ios","$app_version":"1.0","$install_id":"install-1"},
-       "events":[
-         {"name":"$pageview","attributes":{"$url":"http://localhost:18080/pricing"}},
-         {"name":"$screen_view","attributes":{"$screen":"/settings"}},
-         {"name":"signup","attributes":{"plan":"pro"}}]}')"
+post_events() {
+  curl -s -o "$dir/events.out" -w '%{http_code}' -A "$ua" -X POST "http://127.0.0.1:18080/api/events" \
+    -H 'Origin: http://localhost:18080' -H 'Content-Type: application/json' \
+    -H "X-Analytics-Key: $key" \
+    -d '{"attributes":{"$platform":"ios","$app_version":"1.0","$install_id":"install-1"},
+         "events":[
+           {"name":"$pageview","attributes":{"$url":"http://localhost:18080/pricing"}},
+           {"name":"$screen_view","attributes":{"$screen":"/settings"}},
+           {"name":"signup","attributes":{"plan":"pro"}}]}'
+}
+# The key was just written out-of-process (docker compose exec), and the
+# server's in-memory registry only notices out-of-process writes via its
+# config_version poll (internal/manage/registry.go: pollInterval = 1s), so
+# the very first POST can race that poll and 401. Retry rather than sleep
+# blindly: it self-documents the propagation window instead of hard-coding
+# a guess at it.
+code=""
+for _ in $(seq 1 10); do
+  code="$(post_events)"
+  [ "$code" = "202" ] && break
+  [ "$code" = "401" ] || break
+  sleep 0.5
+done
 [ "$code" = "202" ] || fail "/api/events returned $code: $(cat "$dir/events.out")"
 
 echo "waiting for the first Evidence build (this takes about a minute)..."

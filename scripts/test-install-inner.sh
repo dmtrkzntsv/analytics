@@ -37,8 +37,11 @@ test -f /etc/logrotate.d/analytics     && echo "ok: logrotate installed"
 
 # Projects live in the database, not a shipped file: the installer's own
 # hint (as the service user, sourcing analytics.env) must actually create
-# one. No sudo in this minimal image, so drop privileges with su instead.
-out="$(su -s /bin/sh analytics -c '. /etc/analytics/analytics.env; analytics project create -alias myapp')"
+# one. No sudo in this minimal image, so drop privileges with su instead;
+# `sh -ac` (allexport), exactly like the hint install.sh prints, matters
+# here — a plain `. file` only sets shell variables, it does not export
+# them, so DATABASE_URL would never reach the analytics process.
+out="$(su -s /bin/sh analytics -c "sh -ac '. /etc/analytics/analytics.env; /usr/local/bin/analytics project create -alias myapp'")"
 echo "$out" | grep -q '"myapp" created' && echo "ok: project create via installer hint works"
 
 # Re-running must not clobber an edited config file.
