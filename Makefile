@@ -123,7 +123,7 @@ local/projects.json:
 run: build local/.env
 	set -a; . ./local/.env; set +a; \
 	./$(BIN) project create -alias dev 2>/dev/null || true; \
-	./$(BIN) serve -api
+	./$(BIN) serve
 
 smoke: build
 	./scripts/smoke.sh

@@ -61,15 +61,36 @@ func TestSubcommandsRejectBadConfig(t *testing.T) {
 	}
 }
 
-func TestBareServeIsUsageError(t *testing.T) {
-	var out bytes.Buffer
-	code := run([]string{"serve"}, &out)
-	if code == 0 {
-		t.Fatal("bare serve did not fail")
+func TestResolveSurfaces(t *testing.T) {
+	cases := []struct {
+		api, mcp                bool
+		runAPI, runMCP, lenient bool
+	}{
+		{false, false, true, true, true}, // bare serve: both, lenient
+		{true, false, true, false, false},
+		{false, true, false, true, false},
+		{true, true, true, true, false}, // explicit both: strict
 	}
-	want := "specify at least one surface: -api (ingestion), -mcp (MCP endpoint)"
-	if !strings.Contains(out.String(), want) {
-		t.Errorf("output %q missing %q", out.String(), want)
+	for _, c := range cases {
+		a, m, l := resolveSurfaces(c.api, c.mcp)
+		if a != c.runAPI || m != c.runMCP || l != c.lenient {
+			t.Errorf("resolveSurfaces(%v,%v) = %v,%v,%v; want %v,%v,%v",
+				c.api, c.mcp, a, m, l, c.runAPI, c.runMCP, c.lenient)
+		}
+	}
+}
+
+// Explicitly requesting -mcp without auth config stays a hard error;
+// bare serve degrades to a warning instead (exercised end to end by
+// scripts/smoke.sh, which boots bare `serve` with no MCP config).
+func TestExplicitMCPWithoutConfigFails(t *testing.T) {
+	withDB(t)
+	var out bytes.Buffer
+	if code := run([]string{"serve", "-mcp"}, &out); code != 1 {
+		t.Fatalf("serve -mcp without MCP_AUTH_MODE: exit %d, want 1: %s", code, out.String())
+	}
+	if !strings.Contains(out.String(), "MCP_AUTH_MODE") {
+		t.Errorf("error must name the missing variable: %s", out.String())
 	}
 }
 

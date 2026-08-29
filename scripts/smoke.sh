@@ -32,7 +32,7 @@ env LISTEN_ADDR="127.0.0.1:$port" \
     GEO_URL="none://" \
     LOG_LEVEL=debug LOG_FORMAT=text \
     BUFFER_FLUSH_INTERVAL=200ms \
-    ./analytics serve -api > "$dir/log" 2>&1 &
+    ./analytics serve > "$dir/log" 2>&1 &
 pid=$!
 
 for _ in $(seq 1 50); do

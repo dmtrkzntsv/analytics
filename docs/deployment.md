@@ -6,7 +6,7 @@ servers** runs ingestion on a public VPS and dashboards at home off a
 restored replica, so the dashboard machine never needs to be reachable from
 the internet.
 
-Replication is not part of the application: `serve -api` writes a SQLite
+Replication is not part of the application: `serve` writes a SQLite
 file and `dashboards` reads one. The two-server topology needs something to
 move that file, and litestream is the supported answer —
 [docs/litestream.md](litestream.md) covers bucket setup, credentials, the
@@ -189,7 +189,7 @@ sudo -u analytics sqlite3 /var/lib/analytics/analytics.db 'PRAGMA quick_check;'
 sudo systemctl start analytics litestream
 ```
 
-Restore first, always. Starting `analytics serve -api` against an empty data
+Restore first, always. Starting `analytics serve` against an empty data
 directory creates a fresh database, and litestream would then replicate that
 empty database over the good backup.
 
@@ -229,31 +229,25 @@ File logging (`log.file`) is optional and off by default; if enabled, install
 Auth-mode setup (token / Cloudflare Access / generic OAuth IdP) is covered
 step by step in [mcp-auth.md](mcp-auth.md).
 
-The installer's unit runs `serve -api` only; MCP is opt-in. Two ways to turn
-it on, both requiring an edit to `analytics.env` first:
+The installer's unit runs bare `serve`, which starts MCP automatically the
+moment its auth is configured — until then it logs "MCP endpoint disabled"
+at boot and serves ingestion alone. Enabling MCP is therefore one edit:
 
 ```bash
 sudo vi /etc/analytics/analytics.env
 # Set MCP_AUTH_MODE (token, oauth or cloudflare) plus that mode's other
-# variables — see the README's "Asking your analytics questions (MCP)"
-# section. For `token` mode, mint the value first:
+# variables — see mcp-auth.md. For `token` mode, mint the value first:
 sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics keygen -mcp'
-```
-
-Then either add `-mcp` to the existing unit's `ExecStart=` so ingestion and
-MCP share one process and one port:
-
-```bash
-sudo sed -i 's/serve -api$/serve -api -mcp/' /etc/systemd/system/analytics.service
-sudo systemctl daemon-reload
 sudo systemctl restart analytics
 ```
 
-or run a second unit with only `-mcp`, so the two surfaces can be restarted,
-scaled or exposed independently — copy `deploy/systemd/analytics.service` to
-e.g. `analytics-mcp.service`, change `ExecStart=` to `analytics serve -mcp`,
-and set `MCP_ADDR` in `analytics.env` if it should bind a different port
-than `LISTEN_ADDR`.
+Set `MCP_ADDR` to give MCP its own port; unset, it shares the ingestion
+listener (bare `serve` logs a warning naming the shared address). To run
+the surfaces as separate processes — independently restartable, scalable
+and exposable — copy `deploy/systemd/analytics.service` to e.g.
+`analytics-mcp.service`, change `ExecStart=` to `analytics serve -mcp`
+(explicitly requesting `-mcp` makes missing auth config a hard error),
+and change the original unit's `ExecStart=` to `analytics serve -api`.
 
 A `serve -mcp`-only process still starts the store/jobs runner and so still
 runs the daily aggregation pass against `DATABASE_URL` — `-mcp` only makes

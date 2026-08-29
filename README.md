@@ -99,7 +99,7 @@ arrangement.
 
 | Image | Contents | Modes |
 | --- | --- | --- |
-| `ghcr.io/dmtrkzntsv/analytics` | the binary on alpine, ~35 MB | `serve -api`, `migrate`, `version` |
+| `ghcr.io/dmtrkzntsv/analytics` | the binary on alpine, ~35 MB | `serve`, `migrate`, `version` |
 | `ghcr.io/dmtrkzntsv/analytics-evidence` | the binary, Node 22 and the Evidence project, ~1 GB | `dashboards` |
 
 They are separate because `serve` is the internet-facing process and has no
@@ -256,21 +256,24 @@ MCP_CF_TEAM_DOMAIN=myteam.cloudflareaccess.com
 MCP_CF_AUD=<application AUD tag>
 ```
 
-`serve` takes explicit surface flags — there is no implicit default:
+Bare `serve` runs both surfaces and degrades gracefully: with no MCP
+auth configured it logs a warning ("MCP endpoint disabled") and serves
+ingestion alone rather than failing, and when `MCP_ADDR` is unset it warns
+that MCP shares the ingestion listener. The `-api`/`-mcp` flags restrict
+to one surface — and naming a flag is an explicit request, so
+`serve -mcp` without auth config is a hard error:
 
 | Invocation | Result |
 | --- | --- |
-| `serve -api` | ingestion on `LISTEN_ADDR` |
-| `serve -mcp` | MCP on `MCP_ADDR` (= `LISTEN_ADDR` unless set) |
-| `serve -api -mcp` | both on `LISTEN_ADDR`, one port |
-| `serve -api -mcp` with `MCP_ADDR` set | two listeners, two ports |
+| `serve` | both; MCP skipped with a warning if unconfigured |
+| `serve -api` | ingestion only, on `LISTEN_ADDR` |
+| `serve -mcp` | MCP only, on `MCP_ADDR` (= `LISTEN_ADDR` unless set); auth config required |
+| `serve` with `MCP_ADDR` set | two listeners, two ports |
 | `serve -api` and `serve -mcp` as two processes | full isolation |
 
-**Breaking change:** bare `analytics serve` now exits non-zero with a usage
-error — at least one of `-api`/`-mcp` is required. `install.sh` (rewrites
-the unit file on every run) and `docker compose pull` (the image's `CMD` is
-now `serve -api`) self-heal automatically. A hand-rolled systemd unit or
-`ExecStart=` override needs `-api` added by hand.
+Enabling MCP on an existing install is therefore just setting
+`MCP_AUTH_MODE` (and its mode's variables) in `analytics.env` and
+restarting — no unit or compose changes.
 
 ## Configuration
 
