@@ -11,6 +11,7 @@ import (
 
 	"github.com/dmitry/analytics/internal/civil"
 	"github.com/dmitry/analytics/internal/config"
+	"github.com/dmitry/analytics/internal/manage"
 	"github.com/dmitry/analytics/internal/store"
 )
 
@@ -23,6 +24,7 @@ type Rotator interface {
 type Runner struct {
 	store  store.Store
 	cfg    *config.Config
+	reg    *manage.Registry
 	salt   Rotator
 	logger *slog.Logger
 	now    func() time.Time
@@ -33,19 +35,8 @@ type Runner struct {
 	lastAggDay  string
 }
 
-func New(st store.Store, cfg *config.Config, salt Rotator, logger *slog.Logger, now func() time.Time) *Runner {
-	return &Runner{store: st, cfg: cfg, salt: salt, logger: logger, now: now}
-}
-
-func aggSettingsFor(p *config.Project) store.ProductAggSettings {
-	if p == nil || p.ProductAggregation == nil {
-		return store.ProductAggSettings{}
-	}
-	return store.ProductAggSettings{
-		Enabled:    p.ProductAggregation.Enabled,
-		Attributes: p.ProductAggregation.Attributes,
-		TopN:       p.ProductAggregation.TopN,
-	}
+func New(st store.Store, cfg *config.Config, reg *manage.Registry, salt Rotator, logger *slog.Logger, now func() time.Time) *Runner {
+	return &Runner{store: st, cfg: cfg, reg: reg, salt: salt, logger: logger, now: now}
 }
 
 // RunDailyPass rolls up every day that has aged out of the raw window,
@@ -61,21 +52,14 @@ func (r *Runner) RunDailyPass(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// Config projects may not be synced yet on first boot; union them in.
-	seen := map[string]bool{}
+	// The registry is the sole source of project config now, so
+	// store.ProjectAliases (all rows, including archived) is the complete
+	// list -- no config-side union needed. An archived project keeps its
+	// retention overrides (it is still a registry row), where the old
+	// config-absence fallback silently reverted it to global defaults.
+	snap := r.reg.Snapshot(ctx)
 	for _, id := range ids {
-		seen[id] = true
-	}
-	for _, p := range r.cfg.Projects {
-		if !seen[p.Alias] {
-			ids = append(ids, p.Alias)
-		}
-	}
-	for _, id := range ids {
-		// Archived projects (in the DB, absent from config) fall back to
-		// global retention and zero-value aggregation settings, which means
-		// their raw rows are dropped without a product rollup.
-		ret := r.cfg.RetentionFor(id)
+		ret := snap.RetentionFor(id)
 
 		// Cohorts, actors and identity rollups read raw rows across all
 		// three classes and never delete them, so they run over every day
@@ -91,10 +75,8 @@ func (r *Runner) RunDailyPass(ctx context.Context) error {
 		// Retention is undefined for anonymous projects: actor_id rotates at
 		// midnight, so first_seen_day always equals the day itself and every
 		// cohort would hold nothing but offset 0.
-		identified := false
-		if p := r.cfg.Project(id); p != nil && p.Identity == config.IdentityIdentified {
-			identified = true
-		}
+		p := snap.Project(id)
+		identified := p != nil && p.Identity == config.IdentityIdentified
 		for _, day := range identityDays {
 			if identified {
 				if err := r.store.UpsertActors(ctx, id, day); err != nil {
@@ -123,7 +105,7 @@ func (r *Runner) RunDailyPass(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		settings := aggSettingsFor(r.cfg.Project(id))
+		settings := snap.AggregationFor(id)
 		for _, day := range prodDays {
 			if err := r.store.AggregateProductDay(ctx, id, day, settings); err != nil {
 				r.logger.Error("aggregate product failed", "project", id, "day", day.String(), "error", err)

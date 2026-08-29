@@ -10,6 +10,7 @@ import (
 	"github.com/dmitry/analytics/internal/config"
 	"github.com/dmitry/analytics/internal/enrich"
 	"github.com/dmitry/analytics/internal/identity"
+	"github.com/dmitry/analytics/internal/manage"
 	"github.com/dmitry/analytics/internal/store"
 	"github.com/google/uuid"
 )
@@ -46,7 +47,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if key == "" {
 		key = env.Key
 	}
-	p, label, ok := s.cfg.ProjectByKey(key)
+	p, label, ok := s.reg.Snapshot(r.Context()).ProjectByKey(key)
 	if !ok {
 		// One auth outcome. Because the key resolves the project, there is
 		// no unknown-project case to keep indistinguishable from a bad key.
@@ -193,7 +194,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 // group_id stays raw in both modes: it identifies an organization, not a
 // natural person, and hashing it would make dashboards unreadable for no
 // real privacy gain.
-func resolveIdentity(p *config.Project, rv resolved, salt, ip, ua string) (actor, user, group string) {
+func resolveIdentity(p *manage.Project, rv resolved, salt, ip, ua string) (actor, user, group string) {
 	raw := rv.UserID
 	if raw == "" {
 		raw = rv.InstallID
@@ -224,7 +225,7 @@ func resolveIdentity(p *config.Project, rv resolved, salt, ip, ua string) (actor
 // hash that rotates daily would both defeat the anonymisation and accumulate
 // a fresh row per user per day. $group_name is kept in both modes, on the
 // same reasoning that keeps group_id raw.
-func identityNames(p *config.Project, rv resolved) []store.Identity {
+func identityNames(p *manage.Project, rv resolved) []store.Identity {
 	var out []store.Identity
 	if rv.GroupID != "" && rv.GroupName != "" {
 		out = append(out, store.Identity{Kind: store.KindGroup, ID: rv.GroupID, Name: rv.GroupName})

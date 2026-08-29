@@ -6,9 +6,9 @@ servers** runs ingestion on a public VPS and dashboards at home off a
 restored replica, so the dashboard machine never needs to be reachable from
 the internet.
 
-Replication is not part of the application: `serve` writes a SQLite file and
-`dashboards` reads one. The two-server topology needs something to move that
-file, and litestream is the supported answer —
+Replication is not part of the application: `serve` writes a SQLite
+file and `dashboards` reads one. The two-server topology needs something to
+move that file, and litestream is the supported answer —
 [docs/litestream.md](litestream.md) covers bucket setup, credentials, the
 writer, the reader and recovery. The one-server topology needs none of it.
 
@@ -42,17 +42,18 @@ SHA256 before installing. Releases are published by CI on every push to
 
 The installer creates a system account, installs the binary to
 `/usr/local/bin/analytics`, creates `/var/lib/analytics` (0750, owned by the
-service account), installs example `analytics.env` (infra settings + R2 credentials, loaded
-by both units via `EnvironmentFile=`) and `projects.json` files, renders
-both systemd units with the chosen user, and enables them. It never
-overwrites an existing analytics.env or projects.json, so re-running it to
-deploy a new binary is safe.
+service account), installs an example `analytics.env` (infra settings + R2
+credentials, loaded by both units via `EnvironmentFile=`), renders both
+systemd units with the chosen user, and enables them. It never overwrites an
+existing analytics.env, so re-running it to deploy a new binary is safe.
 
-Then edit the two files it flagged:
+Then edit the file it flagged, and create your first project — projects live
+in the database, not a shipped file:
 
 ```bash
-sudo vi /etc/analytics/projects.json    # projects, allowed_origins
 sudo vi /etc/analytics/analytics.env    # R2 credentials from step 1, geo
+sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics project create -alias myapp'
+sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics key issue -project myapp -label web'
 ```
 
 Install litestream (<https://litestream.io/install/>) if the installer
@@ -94,8 +95,9 @@ Ingestion and dashboards in one compose stack, no credentials needed:
 mkdir analytics && cd analytics
 base=https://raw.githubusercontent.com/dmtrkzntsv/analytics/main
 curl -fsSLO $base/deploy/compose/docker-compose.yml
-curl -fsSL $base/projects.example.json -o projects.json
 docker compose up -d
+docker compose exec analytics analytics project create -alias myapp
+docker compose exec analytics analytics key issue -project myapp -label web
 ```
 
 `:3000` answers `503` until Evidence finishes its first build — roughly a
@@ -177,7 +179,6 @@ major/minor version than the writer — see
 # On a fresh host:
 git clone <repo> && cd analytics && make build
 sudo ./install.sh --user analytics --yes
-sudo vi /etc/analytics/projects.json
 sudo vi /etc/analytics/analytics.env       # same R2 credentials
 
 # Restore before starting the collector, so it does not create an empty db:
@@ -207,10 +208,14 @@ buffered in memory when the host died — bounded by `BUFFER_FLUSH_INTERVAL`.
 | Upgrade (systemd) | `curl -fsSL …/install.sh \| sudo bash -s -- --yes && sudo systemctl restart analytics` (or `make build && sudo ./install.sh --yes` from a checkout) |
 | Upgrade (compose) | `docker compose pull && docker compose up -d`. Never `down -v`: the database lives in the named volume. Pin a release with `ANALYTICS_VERSION=v26.825.1` in `.env`. |
 | Apply migrations only | `sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics migrate'` |
-| Generate an ingest key | `analytics keygen -n 1` |
+| Create a project | `sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics project create -alias myapp'` |
+| Issue an ingest key | `sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics key issue -project myapp -label web'` |
+| Export the registry (backup/inspect) | `sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics config export' > registry.json` |
+| Import/migrate the registry | `sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics config import registry.json'` — also accepts a pre-upgrade `projects.json`; never archives or deletes anything absent from the file |
 | Database size | `du -h /var/lib/analytics/analytics.db`. Dashboards need room for one more copy: each rebuild snapshots the database into `DASHBOARDS_WORK_DIR`. |
 | Replication status | `journalctl -u litestream --since -1h`, or `docker compose logs litestream` |
 | Dashboard rebuilds | `docker compose logs dashboards` — one `dashboards: rebuilt` line per successful build |
+| Recent config changes (audit log) | `sudo -u analytics sqlite3 /var/lib/analytics/analytics.db "SELECT * FROM audit_log ORDER BY ts DESC LIMIT 20"` |
 
 Aggregation, pruning and incremental vacuum run daily at 03:00 UTC, and the
 visitor salt rotates at 00:00 UTC. A catch-up pass runs at startup, so
@@ -218,6 +223,51 @@ downtime across those times does not skip a day.
 
 File logging (`log.file`) is optional and off by default; if enabled, install
 `deploy/logrotate/analytics` into `/etc/logrotate.d/`.
+
+### Enabling MCP on an installed host
+
+Auth-mode setup (token / Cloudflare Access / generic OAuth IdP) is covered
+step by step in [mcp-auth.md](mcp-auth.md).
+
+The installer's unit runs bare `serve`, which starts MCP automatically the
+moment its auth is configured — until then it logs "MCP endpoint disabled"
+at boot and serves ingestion alone. Enabling MCP is therefore one edit:
+
+```bash
+sudo vi /etc/analytics/analytics.env
+# Set MCP_AUTH_MODE (token, oauth or cloudflare) plus that mode's other
+# variables — see mcp-auth.md. For `token` mode, mint the value first:
+sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics keygen -mcp'
+sudo systemctl restart analytics
+```
+
+Set `MCP_ADDR` to give MCP its own port; unset, it shares the ingestion
+listener (bare `serve` logs a warning naming the shared address). To run
+the surfaces as separate processes — independently restartable, scalable
+and exposable — copy `deploy/systemd/analytics.service` to e.g.
+`analytics-mcp.service`, change `ExecStart=` to `analytics serve -mcp`
+(explicitly requesting `-mcp` makes missing auth config a hard error),
+and change the original unit's `ExecStart=` to `analytics serve -api`.
+
+A `serve -mcp`-only process still starts the store/jobs runner and so still
+runs the daily aggregation pass against `DATABASE_URL` — `-mcp` only makes
+the HTTP listener conditional, not the background jobs. Point a `-mcp`-only
+unit at a Litestream replica and it will write to that replica on every
+pass. Set `MCP_DB_PATH` (the path MCP reads for queries) and `DATABASE_URL`
+(the path the aggregation pass writes to) deliberately for your topology:
+either keep `DATABASE_URL` on a database this process is meant to own, or
+accept that a two-process topology (one `-api`, one `-mcp`, each with its
+own `DATABASE_URL`) runs the idempotent daily aggregation twice.
+
+In `cloudflare` mode, the Access application sits in front of the MCP
+hostname or path only — the ingestion path (`/api/events`) must stay outside
+it so devices can keep posting without an Access session. Scope the
+application narrowly (for example `analytics.example.com/mcp`, not the bare
+hostname), turn on "managed OAuth" for it, and set `MCP_CF_TEAM_DOMAIN` and
+`MCP_CF_AUD` from that application. Access then serves the OAuth discovery
+documents and the `401` challenge at the edge; the binary only validates the
+`Cf-Access-Jwt-Assertion` header Access forwards, and requests that reach the
+origin without having passed Access are rejected.
 
 ---
 
@@ -230,10 +280,9 @@ upgrading a running install.
 ### Breaking changes
 
 1. **`ingest_keys` is required.** The service refuses to start until every
-   project in `projects.json` has at least one. This is deliberate: the
-   gentler alternative — key optional, warn when absent — leaves a silently
-   unauthenticated project, which is the exact condition the change exists to
-   remove.
+   project has at least one. This is deliberate: the gentler alternative —
+   key optional, warn when absent — leaves a silently unauthenticated
+   project, which is the exact condition the change exists to remove.
 2. **Every embedded snippet must be rewritten.** `data-key` and
    `data-identity` replace `data-project`. Old snippets receive `401`.
 3. **`/api/hit` and `/api/event` are removed**, not deprecated. Everything
@@ -258,9 +307,9 @@ Steps 2 and 3 are the coordinated pair. Between them, old snippets get `401`,
 so schedule them together — ideally within the same maintenance window.
 
 ```bash
-# 1. Generate a key per client and add them to projects.json.
-analytics keygen -n 2
-sudo -e /etc/analytics/projects.json
+# 1. Issue a key per client — this both mints and registers it.
+sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics key issue -project myapp -label web'
+sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics key issue -project myapp -label ios'
 
 # 2. Deploy the new binary. Migrations 003/004 run on boot.
 curl -fsSL https://…/install.sh | sudo bash -s -- --yes
@@ -275,7 +324,7 @@ journalctl -u analytics -f | grep 'ingest summary'
 ```
 
 Step 4 is also how you retire a key later: watch its label fall to zero, then
-set `"disabled": true`.
+run `analytics key disable -project myapp -label ios`.
 
 ### Rolling back
 

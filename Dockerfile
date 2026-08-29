@@ -46,8 +46,7 @@ USER analytics
 # LISTEN_ADDR binds all interfaces here (unlike the bare-metal loopback
 # default) because published ports reach the container's own IP, not lo.
 ENV LISTEN_ADDR=0.0.0.0:8080 \
-    DATABASE_URL=sqlite:///var/lib/analytics/analytics.db \
-    PROJECTS_FILE=/etc/analytics/projects.json
+    DATABASE_URL=sqlite:///var/lib/analytics/analytics.db
 ENTRYPOINT ["/usr/local/bin/analytics"]
 CMD ["serve"]
 
@@ -71,11 +70,10 @@ USER analytics
 # image build — rather than a deployment — if a source query does not match
 # the migrations.
 RUN set -eu; \
-    printf '[{"alias":"warm","name":"Warm","allowed_origins":["http://localhost"],"ingest_keys":[{"key":"ak_warm","label":"warm"}]}]' > /tmp/warm.json; \
-    DATABASE_URL=sqlite:///tmp/warm.db PROJECTS_FILE=/tmp/warm.json analytics migrate; \
+    DATABASE_URL=sqlite:///tmp/warm.db analytics migrate; \
     cd /opt/evidence; \
     EVIDENCE_SOURCE__analytics__filename=../../../../tmp/warm.db npm run sources; \
-    rm -f /tmp/warm.db /tmp/warm.json
+    rm -f /tmp/warm.db
 ENV DASHBOARDS_ADDR=0.0.0.0:3000 \
     DASHBOARDS_PROJECT_DIR=/opt/evidence \
     DASHBOARDS_WORK_DIR=/var/lib/dashboards \

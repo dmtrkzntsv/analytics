@@ -7,10 +7,10 @@ import (
 	"testing"
 )
 
-// The shipped examples must stay loadable; a typo here breaks every fresh
-// install, since install.sh copies them to /etc/analytics/. The env example
-// is parsed the way systemd's EnvironmentFile= reads it: KEY=VALUE lines,
-// with commented lines documenting defaults — those are uncommented here so
+// The shipped .env.example must stay loadable; a typo here breaks every
+// fresh install, since install.sh copies it to /etc/analytics/. It is
+// parsed the way systemd's EnvironmentFile= reads it: KEY=VALUE lines, with
+// commented lines documenting defaults — those are uncommented here so
 // every documented key round-trips through FromEnv.
 func TestExamplesLoad(t *testing.T) {
 	f, err := os.Open("../../.env.example")
@@ -18,13 +18,13 @@ func TestExamplesLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	vars := map[string]string{"PROJECTS_FILE": "../../projects.example.json"}
+	vars := map[string]string{}
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		line = strings.TrimPrefix(line, "#")
 		k, v, ok := strings.Cut(line, "=")
-		if !ok || strings.ContainsAny(k, " \t") || k == "PROJECTS_FILE" {
+		if !ok || strings.ContainsAny(k, " \t") {
 			continue // prose comment, not a documented default
 		}
 		vars[k] = v
@@ -40,9 +40,6 @@ func TestExamplesLoad(t *testing.T) {
 	cfg, err := FromEnv(func(k string) (string, bool) { v, ok := vars[k]; return v, ok })
 	if err != nil {
 		t.Fatal(err)
-	}
-	if len(cfg.Projects) != 1 || cfg.Projects[0].Alias != "myapp" {
-		t.Errorf("projects = %+v", cfg.Projects)
 	}
 	if cfg.Dashboards.Interval.Minutes() != 15 {
 		t.Errorf("dashboards interval = %v", cfg.Dashboards.Interval)

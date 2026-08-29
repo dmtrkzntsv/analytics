@@ -97,6 +97,12 @@ type maxmind struct {
 	logger *slog.Logger
 	ctx    context.Context
 	cancel context.CancelFunc
+	// stopped closes once refreshLoop's goroutine returns. Not needed by
+	// Close() itself (which is fire-and-forget, matching Provider elsewhere
+	// in this package), but tests that mutate the downloadDB/refreshInterval
+	// package vars need to know the background goroutine is no longer
+	// reading them before doing so, to avoid a data race across tests.
+	stopped chan struct{}
 }
 
 func newMaxmind(u *url.URL, dataDir string, logger *slog.Logger) (Provider, error) {
@@ -105,7 +111,8 @@ func newMaxmind(u *url.URL, dataDir string, logger *slog.Logger) (Provider, erro
 		return nil, fmt.Errorf("geo: maxmind DSN requires a license key (maxmind://KEY)")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	m := &maxmind{path: filepath.Join(dataDir, "GeoLite2-Country.mmdb"), logger: logger, ctx: ctx, cancel: cancel}
+	m := &maxmind{path: filepath.Join(dataDir, "GeoLite2-Country.mmdb"), logger: logger, ctx: ctx, cancel: cancel,
+		stopped: make(chan struct{})}
 	if err := m.ensureFresh(key); err != nil {
 		cancel()
 		return nil, err
@@ -116,7 +123,11 @@ func newMaxmind(u *url.URL, dataDir string, logger *slog.Logger) (Provider, erro
 		return nil, fmt.Errorf("geo: open mmdb: %w", err)
 	}
 	m.reader = r
-	go m.refreshLoop(key)
+	// refreshInterval is read once here, synchronously, rather than inside
+	// the goroutine: it is a package var tests shrink to avoid waiting a
+	// week for the ticker, and reading it lazily from the background
+	// goroutine would race against a later test's write to it.
+	go m.refreshLoop(key, refreshInterval)
 	return m, nil
 }
 
@@ -136,8 +147,14 @@ func (m *maxmind) ensureFresh(key string) error {
 	return nil
 }
 
-func (m *maxmind) refreshLoop(key string) {
-	t := time.NewTicker(7 * 24 * time.Hour)
+// refreshInterval is how often refreshLoop re-checks the database. Package
+// var (like downloadDB above) so tests can shrink it instead of waiting a
+// week for the ticker to fire.
+var refreshInterval = 7 * 24 * time.Hour
+
+func (m *maxmind) refreshLoop(key string, interval time.Duration) {
+	defer close(m.stopped)
+	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
 		select {

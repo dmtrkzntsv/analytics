@@ -3,6 +3,8 @@ dist/
 coverage.out
 *.db
 docs/
+!docs/embed.go
+!docs/ingest-api.md
 local/
 evidence/node_modules
 evidence/.evidence

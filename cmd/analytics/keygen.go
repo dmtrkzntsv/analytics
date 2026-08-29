@@ -6,6 +6,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+
+	"github.com/dmitry/analytics/internal/manage"
 )
 
 func init() {
@@ -22,9 +24,23 @@ func runKeygen(args []string, stdout io.Writer) int {
 	fs := flag.NewFlagSet("keygen", flag.ContinueOnError)
 	fs.SetOutput(stdout)
 	n := fs.Int("n", 1, "number of keys to generate")
+	mcp := fs.Bool("mcp", false, "mint the MCP access token instead")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+
+	if *mcp {
+		tok, err := manage.MintMCPToken()
+		if err != nil {
+			fmt.Fprintf(stdout, "keygen: entropy: %v\n", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, "Add to analytics.env:")
+		fmt.Fprintln(stdout)
+		fmt.Fprintf(stdout, "  MCP_TOKEN=%s\n", tok)
+		return 0
+	}
+
 	if *n < 1 {
 		fmt.Fprintln(stdout, "keygen: -n must be at least 1")
 		return 2
@@ -40,6 +56,8 @@ func runKeygen(args []string, stdout io.Writer) int {
 		keys[i] = "ak_" + hex.EncodeToString(buf)
 	}
 
+	fmt.Fprintln(stdout, "note: prefer 'analytics key issue', which registers the key as it mints it")
+	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, "Add to projects.json:")
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, `  "ingest_keys": [`)

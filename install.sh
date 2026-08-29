@@ -90,20 +90,6 @@ if [ ! -f /etc/analytics/analytics.env ]; then
   install -m 0640 -g "$SERVICE_USER" "$root/.env.example" /etc/analytics/analytics.env
   echo "Installed /etc/analytics/analytics.env — EDIT IT (R2 credentials, geo)."
 fi
-if [ ! -f /etc/analytics/projects.json ]; then
-  install -m 0640 -g "$SERVICE_USER" "$root/projects.example.json" /etc/analytics/projects.json
-  # The example ships a placeholder key; substitute a real one so a fresh
-  # install has a usable credential rather than a value someone might keep.
-  if key=$(/usr/local/bin/analytics keygen 2>/dev/null | grep -o 'ak_[0-9a-f]\{32\}' | head -1) \
-     && [ -n "$key" ]; then
-    sed -i "s/REPLACE_ME_RUN_ANALYTICS_KEYGEN/$key/" /etc/analytics/projects.json
-    echo "Installed /etc/analytics/projects.json with a generated ingest key — EDIT IT (projects, origins)."
-    echo "  ingest key: $key"
-  else
-    echo "Installed /etc/analytics/projects.json — EDIT IT (projects, origins, ingest_keys)."
-    echo "  run 'analytics keygen' to generate an ingest key."
-  fi
-fi
 if [ ! -f /etc/litestream.yml ] && [ -f "$root/deploy/litestream/litestream.yml" ]; then
   install -m 0644 "$root/deploy/litestream/litestream.yml" /etc/litestream.yml
 fi
@@ -136,14 +122,12 @@ fi
 cat <<EOF_DONE
 
 Installed. Next steps:
-  1. Edit /etc/analytics/projects.json (projects, allowed_origins, ingest_keys)
-     Every project needs at least one ingest key or the service will not start.
-     Generate more with: analytics keygen -n 3
-  2. Edit /etc/analytics/analytics.env (R2 credentials, geo)
-  3. systemctl start analytics   (and litestream once installed)
-  4. Put Cloudflare/Caddy/nginx in front of 127.0.0.1:8080 for TLS
-  5. Embed, using the ingest key from projects.json:
-       <script defer src="https://YOUR_DOMAIN/js/script.js"
-               data-key="ak_..." data-identity="anonymous"></script>
-  6. Apps post to https://YOUR_DOMAIN/api/events — see docs/ingest-api.md
+  1. Edit /etc/analytics/analytics.env (R2 credentials, geo)
+  2. systemctl start analytics   (and litestream once installed)
+  3. Put Cloudflare/Caddy/nginx in front of 127.0.0.1:8080 for TLS
+  4. Create your first project:
+       sudo -u $SERVICE_USER sh -ac '. /etc/analytics/analytics.env; analytics project create -alias myapp'
+     Then issue an ingest key (prints a ready-to-paste web snippet):
+       sudo -u $SERVICE_USER sh -ac '. /etc/analytics/analytics.env; analytics key issue -project myapp -label web'
+  5. Apps post to https://YOUR_DOMAIN/api/events — see docs/ingest-api.md
 EOF_DONE

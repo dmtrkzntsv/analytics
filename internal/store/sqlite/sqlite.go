@@ -65,3 +65,6 @@ func openAt(path string) (*DB, error) {
 }
 
 func (d *DB) Close() error { return d.db.Close() }
+
+// ExecForTest is exported for test seeding only.
+func (d *DB) ExecForTest(q string, args ...any) (sql.Result, error) { return d.db.Exec(q, args...) }

@@ -12,6 +12,17 @@ func TestUnknownScheme(t *testing.T) {
 	}
 }
 
+func TestInvalidDSNRejected(t *testing.T) {
+	// No "://" at all: url.Parse succeeds but leaves Scheme empty.
+	if _, err := New("not-a-dsn", t.TempDir(), slog.Default()); err == nil {
+		t.Fatal("DSN without a scheme must error")
+	}
+	// A control character makes url.Parse itself fail.
+	if _, err := New("cloud\x7fflare://", t.TempDir(), slog.Default()); err == nil {
+		t.Fatal("unparseable DSN must error")
+	}
+}
+
 func TestCloudflareProvider(t *testing.T) {
 	p, err := New("cloudflare://", t.TempDir(), slog.Default())
 	if err != nil {
@@ -38,5 +49,8 @@ func TestNoneProvider(t *testing.T) {
 	r := httptest.NewRequest("POST", "/api/hit", nil)
 	if p.Country(r, "8.8.8.8") != "" {
 		t.Fatal("none provider must return empty")
+	}
+	if err := p.Close(); err != nil {
+		t.Errorf("none.Close() = %v, want nil", err)
 	}
 }

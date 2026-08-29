@@ -8,17 +8,12 @@ import (
 	"testing"
 )
 
-// setEnv points the process environment at a scratch database and a valid
-// projects file; commands read config from the environment only.
+// setEnv points the process environment at a scratch database; commands
+// read config from the environment only. The project list lives in the
+// registry (that database), not in an env-named file.
 func setEnv(t *testing.T, dbPath string) {
 	t.Helper()
-	projects := filepath.Join(t.TempDir(), "projects.json")
-	body := `[{"alias": "app", "name": "App", "ingest_keys": [{"key": "ak_test", "label": "web"}], "allowed_origins": ["https://app.com"]}]`
-	if err := os.WriteFile(projects, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	t.Setenv("DATABASE_URL", "sqlite://"+dbPath)
-	t.Setenv("PROJECTS_FILE", projects)
 }
 
 func TestMigrateSubcommand(t *testing.T) {
@@ -42,25 +37,19 @@ func TestMigrateSubcommand(t *testing.T) {
 }
 
 // A missing or unusable configuration must fail loudly rather than starting
-// with defaults.
+// with defaults. serve needs a surface flag to get past the usage check and
+// reach config loading at all.
 func TestSubcommandsRejectBadConfig(t *testing.T) {
+	argsFor := map[string][]string{"serve": {"serve", "-api"}, "migrate": {"migrate"}}
 	for _, cmd := range []string{"serve", "migrate"} {
 		t.Run(cmd+" missing DATABASE_URL", func(t *testing.T) {
 			t.Setenv("DATABASE_URL", "")
 			var out bytes.Buffer
-			if code := run([]string{cmd}, &out); code != 1 {
+			if code := run(argsFor[cmd], &out); code != 1 {
 				t.Fatalf("exit code = %d, want 1", code)
 			}
 			if out.Len() == 0 {
 				t.Error("want an error message on stdout")
-			}
-		})
-		t.Run(cmd+" missing projects file", func(t *testing.T) {
-			t.Setenv("DATABASE_URL", "sqlite://"+filepath.Join(t.TempDir(), "a.db"))
-			t.Setenv("PROJECTS_FILE", "/nonexistent/projects.json")
-			var out bytes.Buffer
-			if code := run([]string{cmd}, &out); code != 1 {
-				t.Fatalf("exit code = %d, want 1", code)
 			}
 		})
 		t.Run(cmd+" bad flag", func(t *testing.T) {
@@ -69,6 +58,39 @@ func TestSubcommandsRejectBadConfig(t *testing.T) {
 				t.Fatalf("exit code = %d, want 2", code)
 			}
 		})
+	}
+}
+
+func TestResolveSurfaces(t *testing.T) {
+	cases := []struct {
+		api, mcp                bool
+		runAPI, runMCP, lenient bool
+	}{
+		{false, false, true, true, true}, // bare serve: both, lenient
+		{true, false, true, false, false},
+		{false, true, false, true, false},
+		{true, true, true, true, false}, // explicit both: strict
+	}
+	for _, c := range cases {
+		a, m, l := resolveSurfaces(c.api, c.mcp)
+		if a != c.runAPI || m != c.runMCP || l != c.lenient {
+			t.Errorf("resolveSurfaces(%v,%v) = %v,%v,%v; want %v,%v,%v",
+				c.api, c.mcp, a, m, l, c.runAPI, c.runMCP, c.lenient)
+		}
+	}
+}
+
+// Explicitly requesting -mcp without auth config stays a hard error;
+// bare serve degrades to a warning instead (exercised end to end by
+// scripts/smoke.sh, which boots bare `serve` with no MCP config).
+func TestExplicitMCPWithoutConfigFails(t *testing.T) {
+	withDB(t)
+	var out bytes.Buffer
+	if code := run([]string{"serve", "-mcp"}, &out); code != 1 {
+		t.Fatalf("serve -mcp without MCP_AUTH_MODE: exit %d, want 1: %s", code, out.String())
+	}
+	if !strings.Contains(out.String(), "MCP_AUTH_MODE") {
+		t.Errorf("error must name the missing variable: %s", out.String())
 	}
 }
 

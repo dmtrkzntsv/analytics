@@ -36,7 +36,7 @@ dist: build-all
 		stage=dist/stage-$$arch; rm -rf $$stage; mkdir -p $$stage; \
 		cp dist/$(BIN)-linux-$$arch $$stage/$(BIN); \
 		cp -r deploy $$stage/deploy; \
-		cp install.sh .env.example projects.example.json $$stage/; \
+		cp install.sh .env.example $$stage/; \
 		tar -czf dist/$(BIN)-linux-$$arch.tar.gz -C $$stage .; \
 		rm -rf $$stage; \
 		echo "packaged dist/$(BIN)-linux-$$arch.tar.gz"; \
@@ -56,7 +56,6 @@ GEO_URL=none://
 LOG_LEVEL=debug
 LOG_FORMAT=text
 BUFFER_FLUSH_INTERVAL=1s
-PROJECTS_FILE=local/projects.json
 endef
 export LOCAL_ENV
 
@@ -116,9 +115,15 @@ local/projects.json:
 	@echo "wrote $@"
 
 # The binary reads plain env vars; the launcher loads the env file (same
-# division of labour as systemd's EnvironmentFile= in production).
-run: build local/.env local/projects.json
-	set -a; . ./local/.env; set +a; ./$(BIN) serve
+# division of labour as systemd's EnvironmentFile= in production). Projects
+# live in the database now, not a file: make sure a `dev` project exists
+# (idempotent — a second run just fails quietly on the duplicate alias, hence
+# the 2>/dev/null). Issue a key for it with `./analytics key issue -project
+# dev -label local`.
+run: build local/.env
+	set -a; . ./local/.env; set +a; \
+	./$(BIN) project create -alias dev 2>/dev/null || true; \
+	./$(BIN) serve
 
 smoke: build
 	./scripts/smoke.sh

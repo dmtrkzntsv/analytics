@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/dmitry/analytics/internal/civil"
 	"github.com/dmitry/analytics/internal/config"
 	"github.com/dmitry/analytics/internal/config/configtest"
+	"github.com/dmitry/analytics/internal/manage"
 	"github.com/dmitry/analytics/internal/store"
 	_ "github.com/dmitry/analytics/internal/store/sqlite"
 )
@@ -34,15 +36,50 @@ func freePort(t *testing.T) string {
 
 func mustDay(s string) civil.Date { d, _ := civil.Parse(s); return d }
 
+// seedProject writes a project and ingest key straight into the registry
+// (bypassing HTTP/CLI) before Serve boots, since the running server only
+// ever reads projects from the database now. A no-op if the alias already
+// exists, so a restart test can call it again against the same file.
+func seedProject(t *testing.T, dbPath string, spec manage.ProjectSpec, key, keyLabel string) {
+	t.Helper()
+	st, err := store.Open("sqlite://" + dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	reg := manage.New(st, config.Retention{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err := reg.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if reg.Snapshot(ctx).Project(spec.Alias) != nil {
+		return
+	}
+	ops := manage.NewOps(reg, st)
+	if _, err := ops.CreateProject(ctx, "test", spec); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.InsertIngestKey(ctx, store.RegistryKey{Key: key, Project: spec.Alias, Label: keyLabel},
+		store.AuditEntry{Actor: "test", Action: "key.issue", Subject: keyLabel}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func testConfig(t *testing.T, addr, dbPath string) *config.Config {
 	t.Helper()
+	seedProject(t, dbPath,
+		manage.ProjectSpec{Alias: "app", Name: "App", AllowedOrigins: []string{"https://app.com"}},
+		"ak_test", "web")
 	return configtest.Load(t, map[string]string{
 		"LISTEN_ADDR":             addr,
 		"DATABASE_URL":            "sqlite://" + dbPath,
 		"BUFFER_FLUSH_MAX_EVENTS": "2",
 		"BUFFER_FLUSH_INTERVAL":   "50ms",
 		"BUFFER_CAPACITY":         "100",
-	}, `[{"alias": "app", "name": "App", "ingest_keys": [{"key": "ak_test", "label": "web"}], "allowed_origins": ["https://app.com"]}]`)
+	})
 }
 
 func waitHealthy(t *testing.T, base string) {
@@ -67,7 +104,7 @@ func TestServeEndToEnd(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- Serve(ctx, cfg, slog.Default()) }()
+	go func() { done <- Serve(ctx, cfg, slog.Default(), true, false) }()
 
 	base := "http://" + addr
 	waitHealthy(t, base)
@@ -146,7 +183,8 @@ func TestServeEndToEnd(t *testing.T) {
 	if err != nil || len(pdays) != 1 {
 		t.Fatalf("event not persisted: %v %v", pdays, err)
 	}
-	// The project must have been registered from config on boot.
+	// The seeded project must still be there after a full boot/shutdown
+	// cycle: Serve reads it, never rewrites the registry.
 	aliases, err := st.ProjectAliases(bg)
 	if err != nil {
 		t.Fatal(err)
@@ -167,7 +205,7 @@ func TestServeRestartsOnExistingDatabase(t *testing.T) {
 		addr := freePort(t)
 		ctx, cancel := context.WithCancel(bg)
 		done := make(chan error, 1)
-		go func() { done <- Serve(ctx, testConfig(t, addr, dbPath), slog.Default()) }()
+		go func() { done <- Serve(ctx, testConfig(t, addr, dbPath), slog.Default(), true, false) }()
 		base := "http://" + addr
 		waitHealthy(t, base)
 		req, err := http.NewRequest("POST", base+"/api/events", strings.NewReader(body))
@@ -211,6 +249,117 @@ func TestServeRestartsOnExistingDatabase(t *testing.T) {
 	}
 }
 
+// mcpTestConfig is testConfig plus the MCP surface's env: token auth mode
+// so a request with no bearer token is a deterministic 401, and (when
+// mcpAddr is non-empty) a second listener address for the split-listener
+// sub-run.
+func mcpTestConfig(t *testing.T, addr, dbPath, mcpAddr string) *config.Config {
+	t.Helper()
+	seedProject(t, dbPath,
+		manage.ProjectSpec{Alias: "app", Name: "App", AllowedOrigins: []string{"https://app.com"}},
+		"ak_test", "web")
+	vars := map[string]string{
+		"LISTEN_ADDR":             addr,
+		"DATABASE_URL":            "sqlite://" + dbPath,
+		"BUFFER_FLUSH_MAX_EVENTS": "2",
+		"BUFFER_FLUSH_INTERVAL":   "50ms",
+		"BUFFER_CAPACITY":         "100",
+		"MCP_AUTH_MODE":           "token",
+		"MCP_TOKEN":               "ar_apptest",
+	}
+	if mcpAddr != "" {
+		vars["MCP_ADDR"] = mcpAddr
+	}
+	return configtest.Load(t, vars)
+}
+
+// Spec §3.2/Task 21: -api and -mcp together share one listener when
+// MCP_ADDR equals LISTEN_ADDR, and use two listeners otherwise. Both
+// arrangements must serve both surfaces correctly and shut down cleanly.
+func TestServeSharedListenerServesBothSurfaces(t *testing.T) {
+	run := func(t *testing.T, cfg *config.Config) {
+		t.Helper()
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- Serve(ctx, cfg, slog.Default(), true, true) }()
+		waitHealthy(t, "http://"+cfg.Listen)
+
+		t.Cleanup(func() {
+			cancel()
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatalf("serve: %v", err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("serve did not shut down within 5s of ctx cancel")
+			}
+		})
+
+		if resp, err := http.Get("http://" + cfg.Listen + "/healthz"); err != nil {
+			t.Fatalf("healthz: %v", err)
+		} else {
+			resp.Body.Close()
+			if resp.StatusCode != 200 {
+				t.Errorf("healthz on %s = %d, want 200", cfg.Listen, resp.StatusCode)
+			}
+		}
+
+		if resp, err := http.Post("http://"+cfg.Listen+"/api/events", "application/json",
+			strings.NewReader(`{"key":"ak_test","events":[{"name":"x"}]}`)); err != nil {
+			t.Fatalf("events: %v", err)
+		} else {
+			resp.Body.Close()
+			if resp.StatusCode == 404 {
+				t.Errorf("events on %s = 404, want the ingest surface to answer", cfg.Listen)
+			}
+		}
+
+		postMCP := func(addr string) *http.Response {
+			t.Helper()
+			resp, err := http.Post("http://"+addr+"/mcp", "application/json", strings.NewReader(`{}`))
+			if err != nil {
+				t.Fatalf("mcp post to %s: %v", addr, err)
+			}
+			return resp
+		}
+
+		if cfg.MCP.Addr == cfg.Listen {
+			resp := postMCP(cfg.Listen)
+			resp.Body.Close()
+			if resp.StatusCode != 401 {
+				t.Errorf("POST /mcp (shared, no token) = %d, want 401", resp.StatusCode)
+			}
+		} else {
+			resp := postMCP(cfg.Listen)
+			resp.Body.Close()
+			if resp.StatusCode != 404 {
+				t.Errorf("POST /mcp on ingest port %s = %d, want 404", cfg.Listen, resp.StatusCode)
+			}
+			resp = postMCP(cfg.MCP.Addr)
+			resp.Body.Close()
+			if resp.StatusCode != 401 {
+				t.Errorf("POST /mcp on MCP port %s (no token) = %d, want 401", cfg.MCP.Addr, resp.StatusCode)
+			}
+		}
+	}
+
+	t.Run("shared listener", func(t *testing.T) {
+		dbPath := filepath.Join(t.TempDir(), "shared.db")
+		addr := freePort(t)
+		cfg := mcpTestConfig(t, addr, dbPath, "")
+		run(t, cfg)
+	})
+
+	t.Run("separate listeners", func(t *testing.T) {
+		dbPath := filepath.Join(t.TempDir(), "split.db")
+		addr := freePort(t)
+		mcpAddr := freePort(t)
+		cfg := mcpTestConfig(t, addr, dbPath, mcpAddr)
+		run(t, cfg)
+	})
+}
+
 // A listen address already in use must surface as an error, not a hang.
 func TestServeReportsListenFailure(t *testing.T) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -220,7 +369,7 @@ func TestServeReportsListenFailure(t *testing.T) {
 	defer l.Close()
 	cfg := testConfig(t, l.Addr().String(), filepath.Join(t.TempDir(), "busy.db"))
 	errCh := make(chan error, 1)
-	go func() { errCh <- Serve(context.Background(), cfg, slog.Default()) }()
+	go func() { errCh <- Serve(context.Background(), cfg, slog.Default(), true, false) }()
 	select {
 	case err := <-errCh:
 		if err == nil {
@@ -234,7 +383,7 @@ func TestServeReportsListenFailure(t *testing.T) {
 func TestServeRejectsBadDatabaseDSN(t *testing.T) {
 	cfg := testConfig(t, freePort(t), filepath.Join(t.TempDir(), "x.db"))
 	cfg.Database = "bogus://nope"
-	if err := Serve(context.Background(), cfg, slog.Default()); err == nil {
+	if err := Serve(context.Background(), cfg, slog.Default(), true, false); err == nil {
 		t.Fatal("want an error for an unknown DSN scheme")
 	}
 }
@@ -278,7 +427,7 @@ func TestServeNeverPersistsIPOrUserAgent(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- Serve(ctx, cfg, logger) }()
+	go func() { done <- Serve(ctx, cfg, logger, true, false) }()
 	base := "http://" + addr
 	waitHealthy(t, base)
 
@@ -333,5 +482,60 @@ func TestServeNeverPersistsIPOrUserAgent(t *testing.T) {
 	days, err := st.WebDaysBefore(context.Background(), "app", mustDay("2100-01-01"))
 	if err != nil || len(days) != 1 {
 		t.Fatalf("hit not persisted: %v %v", days, err)
+	}
+}
+
+// runServeAndCollectLogs boots Serve, waits for /healthz, then shuts it
+// down and returns everything logged in between.
+func runServeAndCollectLogs(t *testing.T, cfg *config.Config) string {
+	t.Helper()
+	var logs strings.Builder
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- Serve(ctx, cfg, logger, true, false) }()
+	waitHealthy(t, "http://"+cfg.Listen)
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("serve: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("serve did not shut down")
+	}
+	return logs.String()
+}
+
+// Spec §12: a pre-upgrade PROJECTS_FILE is no longer read on boot, but an
+// operator who still has one set must be told to run the one-time import
+// rather than have it silently ignored.
+func TestServeWarnsAboutLegacyProjectsFile(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "legacy.db")
+	cfg := testConfig(t, freePort(t), dbPath)
+
+	legacy := filepath.Join(t.TempDir(), "projects.json")
+	if err := os.WriteFile(legacy, []byte("[]"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PROJECTS_FILE", legacy)
+
+	logs := runServeAndCollectLogs(t, cfg)
+	if !strings.Contains(logs, "analytics config import") {
+		t.Errorf("logs = %q, want a warning naming `analytics config import`", logs)
+	}
+}
+
+// Without PROJECTS_FILE set (and no /etc/analytics/projects.json, which is
+// absent in CI) boot must stay quiet: nothing to import.
+func TestServeDoesNotWarnWithoutLegacyProjectsFile(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "nolegacy.db")
+	cfg := testConfig(t, freePort(t), dbPath)
+	t.Setenv("PROJECTS_FILE", "")
+
+	logs := runServeAndCollectLogs(t, cfg)
+	if strings.Contains(logs, "analytics config import") {
+		t.Errorf("logs = %q, want no legacy-file warning", logs)
 	}
 }

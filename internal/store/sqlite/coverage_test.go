@@ -137,7 +137,10 @@ func TestOperationsOnClosedDB(t *testing.T) {
 		"WriteProductEvents": func() error {
 			return db.WriteProductEvents(ctx, []store.ProductEvent{{ID: "e", Project: "app", EventName: "n", ActorID: "u", TS: ts("2026-08-10T10:00:00Z")}})
 		},
-		"SyncProjects":  func() error { return db.SyncProjects(ctx, []store.ProjectInfo{{Alias: "app", Name: "App"}}) },
+		"CreateProject": func() error {
+			return db.CreateProject(ctx, store.RegistryProject{Alias: "app", Name: "App", Identity: "anonymous", AllowedOrigins: "[]"},
+				store.AuditEntry{Actor: "test", Action: "project.create"})
+		},
 		"SetMeta":       func() error { return db.SetMeta(ctx, "k", "v") },
 		"WebDaysBefore": func() error { _, err := db.WebDaysBefore(ctx, "app", day("2026-01-01")); return err },
 		"ProjectAliases": func() error {
@@ -251,6 +254,29 @@ func TestWriteEmptyBatchIsNoOp(t *testing.T) {
 	}
 	if err := db.WriteProductEvents(ctx, []store.ProductEvent{}); err != nil {
 		t.Errorf("WriteProductEvents(empty) = %v", err)
+	}
+}
+
+// ExecForTest is a thin pass-through exported for other packages' test
+// seeding (internal/mcpserver's seed helper is the real caller — see
+// seed_test.go there); a cross-package call does not register in this
+// package's own coverage profile, so it needs a direct exercise here too,
+// success and error path both.
+func TestExecForTest(t *testing.T) {
+	db := newTestDB(t)
+	if _, err := db.ExecForTest(`INSERT INTO meta (key, value) VALUES (?, ?)`,
+		"execfortest", "ok"); err != nil {
+		t.Fatalf("ExecForTest(valid insert) = %v, want nil", err)
+	}
+	var value string
+	if err := db.db.QueryRow(`SELECT value FROM meta WHERE key = 'execfortest'`).Scan(&value); err != nil {
+		t.Fatal(err)
+	}
+	if value != "ok" {
+		t.Errorf("value = %q, want %q", value, "ok")
+	}
+	if _, err := db.ExecForTest(`INSERT INTO no_such_table (x) VALUES (1)`); err == nil {
+		t.Error("ExecForTest(bad SQL) = nil, want error")
 	}
 }
 
