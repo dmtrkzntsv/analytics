@@ -11,13 +11,22 @@
 
 # Build stage must satisfy the toolchain floor in go.mod; bumping go.mod
 # without bumping this tag fails the build rather than silently degrading.
-FROM golang:1.25-alpine AS go-build
+# --platform=$BUILDPLATFORM pins this stage to the native runner and lets Go
+# cross-compile to TARGET*, instead of QEMU emulating the compiler itself. The
+# binary is CGO_ENABLED=0, so there is no C toolchain to cross-target. Building
+# arm64/arm under emulation cost ~11 min per release against ~80s natively.
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS go-build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 ARG VERSION=dev
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
+ARG TARGETOS
+ARG TARGETARCH
+ARG TARGETVARIANT
+# GOARM takes the bare number ("7"), TARGETVARIANT the tag form ("v7").
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GOARM=${TARGETVARIANT#v} \
+    go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
     -o /out/analytics ./cmd/analytics
 
 # @evidence-dev/sqlite depends on node-gyp's sqlite3, which publishes no musl
