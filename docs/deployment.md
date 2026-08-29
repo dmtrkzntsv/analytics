@@ -27,20 +27,18 @@ store works; only `endpoint` and `bucket` change.
 
 ```bash
 # From a published release (no checkout needed):
-curl -fsSL https://raw.githubusercontent.com/dmtrkzntsv/analytics/main/deploy/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/dmtrkzntsv/analytics/main/install.sh | sudo bash
 
 # Or from a checkout:
 git clone <repo> && cd analytics
 make build
-sudo ./deploy/install.sh          # --user NAME to skip the prompt, --yes for defaults
+sudo ./install.sh                 # --user NAME to skip the prompt, --yes for defaults
 ```
 
 The curl form detects the architecture, downloads the matching tarball from
-the latest GitHub release (`--version vX.Y.Z` to pin) and verifies its
-SHA256 before installing. While the repository is private it needs a token:
-prepend `-H "Authorization: Bearer $GITHUB_TOKEN"` to the curl and run
-`sudo GITHUB_TOKEN="$GITHUB_TOKEN" bash`. Releases are published by CI on
-every `v*` tag.
+the latest GitHub release (`--version vYY.MMDD.{build}` to pin) and verifies its
+SHA256 before installing. Releases are published by CI on every push to
+`main`.
 
 The installer creates a system account, installs the binary to
 `/usr/local/bin/analytics`, creates `/var/lib/analytics` (0750, owned by the
@@ -59,7 +57,9 @@ sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics key issue -p
 ```
 
 Install litestream (<https://litestream.io/install/>) if the installer
-reported it missing, then:
+reported it missing — currently v0.5.x, which is also what the compose files
+pin; writer and reader must run the same major/minor version (see
+[docs/litestream.md](litestream.md) §3) — then:
 
 ```bash
 sudo systemctl enable --now litestream
@@ -133,6 +133,9 @@ temporary file and only then renames, so the previous replica keeps serving.
 A backup you have never restored is not a backup. On the VPS:
 
 ```bash
+# What is in the bucket? (0.5 syntax; replaces the old `snapshots`/`generations`)
+litestream ltx -config /etc/litestream.yml /var/lib/analytics/analytics.db
+
 litestream restore -config /etc/litestream.yml -o /tmp/check.db \
   /var/lib/analytics/analytics.db
 
@@ -147,7 +150,11 @@ rm /tmp/check.db
 `REPLICA_PATH` at a scratch file to use it as the drill.
 
 Check the max day is recent. A restore that succeeds but is days stale means
-litestream is not replicating: inspect `journalctl -u litestream`.
+litestream is not replicating: inspect `journalctl -u litestream`. A restore
+that reports `no matching backups found` against a bucket that is being
+written usually means the litestream running the drill is a different
+major/minor version than the writer — see
+[docs/litestream.md](litestream.md) §3.
 
 ---
 
@@ -171,7 +178,7 @@ litestream is not replicating: inspect `journalctl -u litestream`.
 ```bash
 # On a fresh host:
 git clone <repo> && cd analytics && make build
-sudo ./deploy/install.sh --user analytics --yes
+sudo ./install.sh --user analytics --yes
 sudo vi /etc/analytics/analytics.env       # same R2 credentials
 
 # Restore before starting the collector, so it does not create an empty db:
@@ -198,8 +205,8 @@ buffered in memory when the host died — bounded by `BUFFER_FLUSH_INTERVAL`.
 | --- | --- |
 | Logs | `journalctl -u analytics -f` |
 | Restart | `systemctl restart analytics` |
-| Upgrade (systemd) | `curl -fsSL …/deploy/install.sh \| sudo bash -s -- --yes && sudo systemctl restart analytics` (or `make build && sudo ./deploy/install.sh --yes` from a checkout) |
-| Upgrade (compose) | `docker compose pull && docker compose up -d`. Never `down -v`: the database lives in the named volume. Pin a release with `ANALYTICS_VERSION=v0.3.0` in `.env`. |
+| Upgrade (systemd) | `curl -fsSL …/install.sh \| sudo bash -s -- --yes && sudo systemctl restart analytics` (or `make build && sudo ./install.sh --yes` from a checkout) |
+| Upgrade (compose) | `docker compose pull && docker compose up -d`. Never `down -v`: the database lives in the named volume. Pin a release with `ANALYTICS_VERSION=v26.825.1` in `.env`. |
 | Apply migrations only | `sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics migrate'` |
 | Create a project | `sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics project create -alias myapp'` |
 | Issue an ingest key | `sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics key issue -project myapp -label web'` |
@@ -308,7 +315,7 @@ sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics key issue -p
 sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics key issue -project myapp -label ios'
 
 # 2. Deploy the new binary. Migrations 003/004 run on boot.
-curl -fsSL https://…/deploy/install.sh | sudo bash -s -- --yes
+curl -fsSL https://…/install.sh | sudo bash -s -- --yes
 sudo systemctl restart analytics
 
 # 3. Update every site snippet, then deploy the sites.

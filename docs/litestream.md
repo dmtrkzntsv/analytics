@@ -90,6 +90,15 @@ journalctl -u litestream -f
 
 The credentials live in `/etc/analytics/analytics.env`, which both units load.
 
+**Writer and reader must run the same litestream major/minor version.**
+Litestream 0.5 stores backups in a new bucket format (LTX) that 0.3 cannot
+see, and vice versa — a mismatched restore reports `no matching backups
+found` rather than an error, which looks exactly like an empty bucket. The
+compose files pin `litestream/litestream:0.5` to match what
+<https://litestream.io/install/> currently installs; if you pin a different
+version anywhere, pin it everywhere — the writer, every reader, and any
+recovery host.
+
 ## 4. On the machine that reads
 
 The reader restores a fresh copy periodically and points `dashboards` at it.
@@ -132,7 +141,7 @@ inside a container.
 A backup you have never restored is not a backup. Monthly, on the writer:
 
 ```bash
-litestream snapshots -config /etc/litestream.yml /var/lib/analytics/analytics.db
+litestream ltx -config /etc/litestream.yml /var/lib/analytics/analytics.db
 litestream restore -config /etc/litestream.yml -o /tmp/check.db \
   /var/lib/analytics/analytics.db
 sqlite3 /tmp/check.db 'PRAGMA quick_check;'                 # expect: ok
@@ -140,17 +149,24 @@ sqlite3 /tmp/check.db 'SELECT MAX(day) FROM v_web_daily;'   # expect: recent
 rm /tmp/check.db
 ```
 
+`litestream ltx` lists the LTX files in the bucket — recent timestamps mean
+replication is alive. (Litestream 0.5 removed the 0.3-era `snapshots` and
+`generations` subcommands; `ltx`, `info` and `status` replace them.)
+
 A restore that succeeds but is days stale means replication has stopped:
-check `journalctl -u litestream` or `docker compose logs litestream`. Watch
-for the generation changing unexpectedly — `litestream generations` lists
-them, and a new one means the WAL chain was broken and older data is only
-reachable from the previous generation.
+check `journalctl -u litestream` or `docker compose logs litestream`. A
+restore that reports `no matching backups found` against a bucket you know
+is being written usually means a version mismatch — see §3.
 
 ## 6. Recovering onto a fresh host
 
 **Restore before starting the collector.** `analytics serve -api` creates an
 empty database if none exists, and litestream would then happily replicate
 that empty database over your backup.
+
+Install the same litestream major/minor version the writer ran — a newer or
+older one cannot see the backup and reports `no matching backups found`, as
+if the bucket were empty (see §3).
 
 ```bash
 # install the binary and config first — see docs/deployment.md

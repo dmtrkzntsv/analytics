@@ -1,20 +1,36 @@
 name: release
 on:
   push:
-    tags: ['v*']
+    branches: [main]
+    # A prose-only commit ships no artifact, so it must not burn a version
+    # number, a release tag or a QEMU image build. A push that mixes docs
+    # with code does not match these patterns exhaustively and still
+    # releases, so nothing shippable can slip through unreleased.
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
 permissions:
   contents: write
   packages: write
+# Serialize runs so releases are published in commit order.
+concurrency:
+  group: release
 jobs:
   release:
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+      - id: tag
+        # vYY.MMDD.{build}: UTC date with the month unpadded (v26.825.N,
+        # v26.105.N); the run number makes the tag unique by construction.
+        run: echo "tag=v$(date -u +%-y.%-m%d).${{ github.run_number }}" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@v5
         with: { go-version-file: go.mod }
       - run: make check
       - run: make dist
-      - run: gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/SHA256SUMS --generate-notes
+      - run: gh release create "${{ steps.tag.outputs.tag }}" dist/*.tar.gz dist/SHA256SUMS --target "$GITHUB_SHA" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -41,9 +57,9 @@ jobs:
           target: runtime
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: true
-          build-args: VERSION=${{ github.ref_name }}
+          build-args: VERSION=${{ needs.release.outputs.tag }}
           tags: |
-            ghcr.io/${{ github.repository_owner }}/analytics:${{ github.ref_name }}
+            ghcr.io/${{ github.repository_owner }}/analytics:${{ needs.release.outputs.tag }}
             ghcr.io/${{ github.repository_owner }}/analytics:latest
           cache-from: type=gha,scope=analytics
           cache-to: type=gha,mode=max,scope=analytics
@@ -57,9 +73,9 @@ jobs:
           target: evidence
           platforms: linux/amd64,linux/arm64
           push: true
-          build-args: VERSION=${{ github.ref_name }}
+          build-args: VERSION=${{ needs.release.outputs.tag }}
           tags: |
-            ghcr.io/${{ github.repository_owner }}/analytics-evidence:${{ github.ref_name }}
+            ghcr.io/${{ github.repository_owner }}/analytics-evidence:${{ needs.release.outputs.tag }}
             ghcr.io/${{ github.repository_owner }}/analytics-evidence:latest
           cache-from: type=gha,scope=evidence
           cache-to: type=gha,mode=max,scope=evidence

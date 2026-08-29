@@ -8,3 +8,4 @@ local/
 dist/
 .env
 backoffice/evidence/build/
+backoffice/evidence/.evidence/

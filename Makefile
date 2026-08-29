@@ -2,7 +2,7 @@ BIN := analytics
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test check vet build-all dist docker run smoke test-install test-compose dashboards seed-demo clean
+.PHONY: build test check vet build-all dist docker run smoke test-install test-compose test-restore dashboards seed-demo clean
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o $(BIN) ./cmd/analytics
@@ -17,8 +17,11 @@ test:
 vet:
 	go vet $(GOPKGS)
 
+# test-restore is in check because, unlike the docker-backed test-install and
+# test-compose, it only needs sqlite3 and runs in a couple of seconds.
 check: vet
 	./scripts/coverage.sh
+	./scripts/test-restore.sh
 
 build-all:
 	for target in linux/amd64 linux/arm64 linux/arm; do \
@@ -33,7 +36,7 @@ dist: build-all
 		stage=dist/stage-$$arch; rm -rf $$stage; mkdir -p $$stage; \
 		cp dist/$(BIN)-linux-$$arch $$stage/$(BIN); \
 		cp -r deploy $$stage/deploy; \
-		cp .env.example $$stage/; \
+		cp install.sh .env.example $$stage/; \
 		tar -czf dist/$(BIN)-linux-$$arch.tar.gz -C $$stage .; \
 		rm -rf $$stage; \
 		echo "packaged dist/$(BIN)-linux-$$arch.tar.gz"; \
@@ -133,6 +136,11 @@ test-install: build
 # `make check`.
 test-compose:
 	./scripts/test-compose.sh
+
+# Runs restore.sh against a stubbed litestream and asserts a failed cycle
+# never replaces the previous replica. Also part of `make check`.
+test-restore:
+	./scripts/test-restore.sh
 
 # Fills local/analytics.db with 180 days of believable traffic so the dashboards
 # have something to plot, one profile per project in local/projects.json. Needs

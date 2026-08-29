@@ -19,9 +19,10 @@ services:
       - DASHBOARDS_DB_PATH=/data/replica.db
 
   # In-container alternative to host cron. Needs .env with the R2 credentials
-  # and a litestream.yml next to this file.
+  # and a litestream.yml next to this file. The 0.5 image ships sqlite3 and
+  # flock, which restore.sh needs — no extra packages required.
   # restore:
-  #   image: litestream/litestream:0.3.13
+  #   image: litestream/litestream:0.5
   #   restart: unless-stopped
   #   entrypoint: ["/bin/sh", "/restore.sh"]
   #   volumes:

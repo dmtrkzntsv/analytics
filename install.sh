@@ -2,17 +2,11 @@
 # Installer for the analytics collector (spec §11).
 #
 # From a checkout (after `make build`):
-#   sudo ./deploy/install.sh [--user NAME] [--yes]
+#   sudo ./install.sh [--user NAME] [--yes]
 #
 # Straight from GitHub — downloads the latest release for this machine:
-#   curl -fsSL https://raw.githubusercontent.com/dmtrkzntsv/analytics/main/deploy/install.sh | sudo bash
-#   curl -fsSL ...install.sh | sudo bash -s -- --yes --version v0.2.0
-#
-# While the repository is private, both the curl above and the release
-# download need a token with repo read access:
-#   curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
-#     https://raw.githubusercontent.com/dmtrkzntsv/analytics/main/deploy/install.sh \
-#     | sudo GITHUB_TOKEN="$GITHUB_TOKEN" bash
+#   curl -fsSL https://raw.githubusercontent.com/dmtrkzntsv/analytics/main/install.sh | sudo bash
+#   curl -fsSL ...install.sh | sudo bash -s -- --yes --version v26.825.1
 set -euo pipefail
 
 REPO="dmtrkzntsv/analytics"
@@ -36,10 +30,6 @@ tmp=""
 cleanup() { if [ -n "$tmp" ]; then rm -rf "$tmp"; fi; }
 trap cleanup EXIT
 
-gh_curl() {
-  curl -fsSL ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} "$@"
-}
-
 arch() {
   case "$(uname -m)" in
     x86_64)        echo amd64 ;;
@@ -49,11 +39,10 @@ arch() {
   esac
 }
 
-here="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-if [ -f "$here/systemd/analytics.service" ]; then
+root="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+if [ -f "$root/deploy/systemd/analytics.service" ]; then
   # Local mode: running from a checkout or an unpacked release tarball.
-  bin="$here/../analytics"
-  [ -x "$bin" ] || bin="$here/analytics"
+  bin="$root/analytics"
   [ -x "$bin" ] || die "analytics binary not found next to installer; run 'make build' first"
 else
   # Remote mode (curl | bash): fetch a release tarball and install from it.
@@ -63,38 +52,17 @@ else
   asset="analytics-linux-$a.tar.gz"
   tmp="$(mktemp -d)"
   echo "Downloading $asset ($VERSION) from github.com/$REPO"
-  if [ -n "${GITHUB_TOKEN:-}" ]; then
-    # Private repo: release assets are only reachable through the API,
-    # by asset id, with an octet-stream Accept header.
-    command -v python3 >/dev/null 2>&1 || die "python3 is required for token-authenticated downloads"
-    api="https://api.github.com/repos/$REPO/releases"
-    case "$VERSION" in
-      latest) rel="$api/latest" ;;
-      *)      rel="$api/tags/$VERSION" ;;
-    esac
-    json="$(gh_curl "$rel")" || die "release $VERSION not found (is one published?)"
-    for name in "$asset" SHA256SUMS; do
-      id="$(printf '%s' "$json" | python3 -c '
-import json, sys
-rel = json.load(sys.stdin)
-ids = [a["id"] for a in rel["assets"] if a["name"] == sys.argv[1]]
-if not ids: sys.exit(1)
-print(ids[0])' "$name")" || die "release has no asset named $name"
-      gh_curl -H "Accept: application/octet-stream" -o "$tmp/$name" "$api/assets/$id"
-    done
-  else
-    case "$VERSION" in
-      latest) base="https://github.com/$REPO/releases/latest/download" ;;
-      *)      base="https://github.com/$REPO/releases/download/$VERSION" ;;
-    esac
-    gh_curl -o "$tmp/$asset" "$base/$asset" \
-      || die "download failed — no release published yet, or the repo is private (set GITHUB_TOKEN)"
-    gh_curl -o "$tmp/SHA256SUMS" "$base/SHA256SUMS"
-  fi
+  case "$VERSION" in
+    latest) base="https://github.com/$REPO/releases/latest/download" ;;
+    *)      base="https://github.com/$REPO/releases/download/$VERSION" ;;
+  esac
+  curl -fsSL -o "$tmp/$asset" "$base/$asset" \
+    || die "download failed — is a release published?"
+  curl -fsSL -o "$tmp/SHA256SUMS" "$base/SHA256SUMS"
   (cd "$tmp" && sha256sum --check --ignore-missing --quiet SHA256SUMS) \
     || die "checksum verification failed"
   tar -xzf "$tmp/$asset" -C "$tmp"
-  here="$tmp/deploy"
+  root="$tmp"
   bin="$tmp/analytics"
   [ -x "$bin" ] || die "release tarball did not contain the analytics binary"
 fi
@@ -119,18 +87,26 @@ install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" /var/lib/analytics
 install -d -m 0755 /etc/analytics
 
 if [ ! -f /etc/analytics/analytics.env ]; then
-  install -m 0640 -g "$SERVICE_USER" "$here/../.env.example" /etc/analytics/analytics.env
+  install -m 0640 -g "$SERVICE_USER" "$root/.env.example" /etc/analytics/analytics.env
   echo "Installed /etc/analytics/analytics.env — EDIT IT (R2 credentials, geo)."
 fi
-if [ ! -f /etc/litestream.yml ] && [ -f "$here/litestream/litestream.yml" ]; then
-  install -m 0644 "$here/litestream/litestream.yml" /etc/litestream.yml
+if [ ! -f /etc/litestream.yml ] && [ -f "$root/deploy/litestream/litestream.yml" ]; then
+  install -m 0644 "$root/deploy/litestream/litestream.yml" /etc/litestream.yml
 fi
-if [ -d /etc/logrotate.d ] && [ -f "$here/logrotate/analytics" ]; then
-  install -m 0644 "$here/logrotate/analytics" /etc/logrotate.d/analytics
+if [ -d /etc/logrotate.d ] && [ -f "$root/deploy/logrotate/analytics" ]; then
+  install -m 0644 "$root/deploy/logrotate/analytics" /etc/logrotate.d/analytics
 fi
 
+# Litestream is not installed by us — it may live in /usr/local/bin (manual
+# tarball) or /usr/bin (package manager), so bake in wherever it actually is.
+# The fallback keeps the unit sensible when it is installed later by hand.
+litestream_bin="$(command -v litestream || true)"
+litestream_bin="${litestream_bin:-/usr/local/bin/litestream}"
+
 for unit in analytics litestream; do
-  sed "s/__USER__/$SERVICE_USER/g" "$here/systemd/$unit.service" \
+  sed -e "s/__USER__/$SERVICE_USER/g" \
+      -e "s|__LITESTREAM__|$litestream_bin|g" \
+      "$root/deploy/systemd/$unit.service" \
     > "/etc/systemd/system/$unit.service"
 done
 systemctl daemon-reload
@@ -138,7 +114,9 @@ systemctl enable analytics.service
 if command -v litestream >/dev/null 2>&1; then
   systemctl enable litestream.service
 else
-  echo "NOTE: litestream binary not found; install it (https://litestream.io/install/) then: systemctl enable --now litestream"
+  echo "NOTE: litestream binary not found; install it (https://litestream.io/install/)."
+  echo "  If it does not land at $litestream_bin, fix ExecStart= in"
+  echo "  /etc/systemd/system/litestream.service, then: systemctl enable --now litestream"
 fi
 
 cat <<EOF_DONE

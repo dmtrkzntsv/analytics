@@ -52,18 +52,17 @@ the only channel between them; neither machine needs to reach the other.
 On the VPS — either straight from a GitHub release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dmtrkzntsv/analytics/main/deploy/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/dmtrkzntsv/analytics/main/install.sh | sudo bash
 ```
 
-(add `-s -- --yes` for a non-interactive install, `-s -- --version v0.2.0` to
-pin; while the repository is private, pass a token:
-`curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" …/install.sh | sudo GITHUB_TOKEN="$GITHUB_TOKEN" bash`)
+(add `-s -- --yes` for a non-interactive install, `-s -- --version v26.825.1`
+to pin)
 
 or from a checkout:
 
 ```bash
 make build
-sudo ./deploy/install.sh              # prompts for a service account
+sudo ./install.sh                     # prompts for a service account
 ```
 
 then in both cases:
@@ -139,6 +138,10 @@ Call `analytics.reset()` when a user logs out. Without it the next person to
 use a shared browser inherits the previous user's identity. Events already
 sent stay unattributed: there is no retroactive stitching, so a pageview
 fired before `identify()` keeps no user id.
+
+Migrating a site off Plausible? The tagged-event classes on its CTAs need a
+shim, because this snippet has no class-based binding —
+[docs/plausible/](docs/plausible/) has one ready to paste.
 
 The snippet stays silent on localhost, `file://` URLs and automated browsers.
 To exclude yourself:
@@ -493,7 +496,7 @@ green.
 ```bash
 make run          # build, ensure a `dev` project exists, serve on 127.0.0.1:8080
 make smoke        # boot the real binary, POST a batch, verify rows land
-make test-install # run deploy/install.sh in a Debian container, assert artifacts
+make test-install # run install.sh in a Debian container, assert artifacts
 make test-compose # build both images, run the compose stack, assert a rendered page
 make seed-demo    # fill local/analytics.db with 180 days of demo traffic
 make dashboards   # Evidence dev server against local/analytics.db (port 3000)
@@ -546,9 +549,7 @@ and that re-running preserves an edited config.
 
 ### Releasing
 
-Push a tag and CI builds the tarballs and publishes the GitHub release that
-`curl … install.sh` consumes:
-
-```bash
-git tag v0.1.0 && git push origin v0.1.0
-```
+Every push to `main` makes CI build the tarballs and publish the GitHub
+release that `curl … install.sh` consumes, tagged `vYY.MMDD.{build}` — the
+UTC date with the month unpadded, then the workflow run number (e.g.
+`v26.825.1`, or `v26.105.2` for January 5th).
