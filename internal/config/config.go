@@ -117,6 +117,7 @@ type Config struct {
 	Listen     string
 	Database   string
 	Geo        string
+	PublicURL  string
 	Log        LogConfig
 	Buffer     BufferConfig
 	Retention  Retention
@@ -196,6 +197,10 @@ func parse(lookup func(string) (string, bool), dashboards bool) (*Config, error)
 		Listen:   e.str("LISTEN_ADDR", "127.0.0.1:8080"),
 		Database: e.str("DATABASE_URL", ""),
 		Geo:      e.str("GEO_URL", "cloudflare://"),
+		// The collector's public base URL (https://analytics.example.com).
+		// Embed snippets and MCP integration guidance are built from it;
+		// unset, they carry a placeholder and tell the model to ask.
+		PublicURL: strings.TrimSuffix(e.str("PUBLIC_URL", ""), "/"),
 		Log: LogConfig{
 			Level:  e.str("LOG_LEVEL", "info"),
 			Format: e.str("LOG_FORMAT", "json"),

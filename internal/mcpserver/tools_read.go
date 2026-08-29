@@ -21,7 +21,11 @@ type host struct {
 	ops     *manage.Ops
 	timeout time.Duration
 	maxRows int
-	logger  *slog.Logger
+	// publicURL is the collector's public base (PUBLIC_URL); snippets and
+	// the integration guide are built from it. Empty means "unknown —
+	// placeholder + tell the operator".
+	publicURL string
+	logger    *slog.Logger
 }
 
 var dayRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
@@ -273,4 +277,5 @@ func (h *host) register(s *mcp.Server) {
 	h.registerProduct(s)
 	h.registerQuery(s)
 	h.registerManage(s)
+	h.registerGuide(s)
 }

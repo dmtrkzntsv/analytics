@@ -200,6 +200,19 @@ paste-ready embed snippet. There is no `delete_project` tool: deletion is
 irreversible, so it stays CLI-only (`analytics project delete`, see
 [Configuration](#configuration)).
 
+The endpoint also knows how to integrate: an `integration_guide` tool
+returns tailored instructions per project and platform (`web`, `spa`,
+`server`, `mobile`) with the real ingest key, collector URL and
+identity-mode guidance baked in, and three docs resources —
+`docs://events` (the `$pageview` / `$screen_view` / product event model
+and `product_aggregation` config), `docs://js-sdk` (snippet attributes,
+`track`/`identify`/`reset`) and `docs://ingest-api` (the normative wire
+format, embedded from [docs/ingest-api.md](docs/ingest-api.md)) — give a
+model everything it needs to instrument a landing page or an app in one
+conversation. Set `PUBLIC_URL` so generated snippets and examples carry
+your collector's real address. The docs resources are drift-proof: their
+load-bearing facts are asserted against the SDK and ingest code by tests.
+
 The endpoint is read-only for analytics data by construction — no curated
 tool and no path through `query` can write — and it is always
 authenticated; there is no unauthenticated mode. Pick one of three auth
@@ -267,6 +280,7 @@ the binary itself only reads the real environment. See
 | Variable | Meaning |
 | --- | --- |
 | `LISTEN_ADDR` | Address to bind. Default `127.0.0.1:8080` (the docker image sets `0.0.0.0:8080`). |
+| `PUBLIC_URL` | The collector's public base URL (`https://analytics.example.com`). Embed snippets and MCP integration guidance are built from it; unset, they carry a placeholder. |
 | `DATABASE_URL` | Store DSN. Only `sqlite://<path>` today. Required. |
 | `GEO_URL` | Country lookup: `cloudflare://` (header), `maxmind://<license-key>`, or `none://`. |
 | `LOG_LEVEL` | `debug`, `info`, `warn`, `error`. Default `info`. |

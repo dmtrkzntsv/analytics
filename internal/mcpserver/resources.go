@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/dmitry/analytics/docs"
+
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -49,7 +51,27 @@ Cost note: the views' live halves sessionize raw rows with window
 functions; a WHERE on day may not prune that work. Narrow ranges and the
 agg_* tables are cheaper. Queries are row-capped and time-limited.`
 
+// textResource registers a static text resource.
+func textResource(s *mcp.Server, uri, name, desc, text string) {
+	s.AddResource(&mcp.Resource{URI: uri, Name: name, Description: desc,
+		MIMEType: "text/markdown"},
+		func(_ context.Context, _ *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+			return &mcp.ReadResourceResult{Contents: []*mcp.ResourceContents{{
+				URI: uri, MIMEType: "text/markdown", Text: text}}}, nil
+		})
+}
+
 func (h *host) registerResources(s *mcp.Server) {
+	textResource(s, "docs://events", "events",
+		"The event model: $pageview (web), $screen_view (app) and custom product events — what each family feeds, reserved attributes, identity, and product_aggregation config. Read before instrumenting anything.",
+		docsEvents)
+	textResource(s, "docs://js-sdk", "js-sdk",
+		"The browser snippet: script-tag attributes, analytics.track/identify/reset, SPA auto-tracking, localhost silence, opt-out.",
+		docsJSSDK)
+	textResource(s, "docs://ingest-api", "ingest-api",
+		"Normative HTTP wire format for POST /api/events: envelope, batching, retries, timestamps, idempotency, offline replay. For server-side and native clients.",
+		docs.IngestAPI)
+
 	s.AddResource(&mcp.Resource{
 		URI: "schema://views", Name: "views",
 		Description: "Queryable views, their columns, and the caveats needed to write correct SQL. Read before using the query tool.",

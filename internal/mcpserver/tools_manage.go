@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/dmitry/analytics/internal/config"
+
 	"github.com/dmitry/analytics/internal/manage"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -19,9 +21,28 @@ type projectIn struct {
 	Name           string   `json:"name,omitempty" jsonschema:"display name, defaults to alias"`
 	Identity       string   `json:"identity,omitempty" jsonschema:"anonymous (default) or identified. identified stores user ids and names as given — a privacy-significant setting; see the GDPR docs"`
 	AllowedOrigins []string `json:"allowed_origins,omitempty" jsonschema:"origins allowed to post events"`
+	// ProductAggregation opts the project into product-event rollups and
+	// attribute breakdowns. Pointer: nil (omitted) keeps the current
+	// setting on update_project. A local type rather than
+	// config.ProductAggregation so every field is optional in the
+	// inferred schema.
+	ProductAggregation *aggregationIn `json:"product_aggregation,omitempty" jsonschema:"opt-in product event rollups; attribute keys are per event name or * for every event"`
 	// SkipKey rather than IssueKey: JSON booleans have no "unset", and
 	// the zero value must give the default behaviour (issue a key).
 	SkipKey bool `json:"skip_key,omitempty" jsonschema:"create_project only: set true to NOT issue a first ingest key"`
+}
+
+type aggregationIn struct {
+	Enabled    bool                `json:"enabled,omitempty" jsonschema:"turn product-event rollups on"`
+	Attributes map[string][]string `json:"attributes,omitempty" jsonschema:"event name (or *) -> attribute keys to break down"`
+	TopN       int                 `json:"top_n,omitempty" jsonschema:"distinct values kept per attribute, default 50; the rest collapse into (other)"`
+}
+
+func (a *aggregationIn) toConfig() *config.ProductAggregation {
+	if a == nil {
+		return nil
+	}
+	return &config.ProductAggregation{Enabled: a.Enabled, Attributes: a.Attributes, TopN: a.TopN}
 }
 
 type projectToolOut struct {
@@ -29,12 +50,13 @@ type projectToolOut struct {
 	Identity string `json:"identity"`
 	Key      string `json:"key,omitempty"`
 	Snippet  string `json:"snippet,omitempty"`
+	Note     string `json:"note,omitempty"`
 }
 
 func (h *host) createProject(ctx context.Context, _ *mcp.CallToolRequest, in projectIn) (*mcp.CallToolResult, projectToolOut, error) {
 	p, err := h.ops.CreateProject(ctx, "mcp", manage.ProjectSpec{
 		Alias: in.Alias, Name: in.Name, Identity: in.Identity,
-		AllowedOrigins: in.AllowedOrigins})
+		AllowedOrigins: in.AllowedOrigins, Aggregation: in.ProductAggregation.toConfig()})
 	if err != nil {
 		return nil, projectToolOut{}, err
 	}
@@ -55,11 +77,10 @@ func (h *host) createProject(ctx context.Context, _ *mcp.CallToolRequest, in pro
 		// impossible; the key is already issued, so degrade to no
 		// snippet/origin enrichment rather than fail the call.
 		if p != nil {
-			origin := ""
-			if len(p.AllowedOrigins) > 0 {
-				origin = p.AllowedOrigins[0]
+			out.Snippet = manage.Snippet(h.publicURL, key, p.Identity)
+			if h.publicURL == "" {
+				out.Note = "PUBLIC_URL is not configured; the snippet uses the placeholder " + manage.SnippetPlaceholderBase + " — ask the operator for the collector's public URL"
 			}
-			out.Snippet = manage.Snippet(origin, key, p.Identity)
 		}
 	}
 	return nil, out, nil
@@ -89,6 +110,9 @@ func (h *host) updateProject(ctx context.Context, _ *mcp.CallToolRequest, in pro
 		AllowedOrigins: cur.AllowedOrigins,
 		Retention:      cur.Retention,
 		Aggregation:    cur.Aggregation,
+	}
+	if in.ProductAggregation != nil {
+		spec.Aggregation = in.ProductAggregation.toConfig()
 	}
 	if in.Name != "" {
 		spec.Name = in.Name
@@ -135,6 +159,7 @@ type keyOut struct {
 	Key     string `json:"key,omitempty"`
 	Snippet string `json:"snippet,omitempty"`
 	Status  string `json:"status"`
+	Note    string `json:"note,omitempty"`
 }
 
 func (h *host) issueKey(ctx context.Context, _ *mcp.CallToolRequest, in keyIn) (*mcp.CallToolResult, keyOut, error) {
@@ -147,11 +172,10 @@ func (h *host) issueKey(ctx context.Context, _ *mcp.CallToolRequest, in keyIn) (
 	// otherwise), but guard the lookup anyway: don't fail an
 	// already-issued key just because enrichment can't find the project.
 	if p := h.reg.Snapshot(ctx).Project(in.Project); p != nil {
-		origin := ""
-		if len(p.AllowedOrigins) > 0 {
-			origin = p.AllowedOrigins[0]
+		out.Snippet = manage.Snippet(h.publicURL, key, p.Identity)
+		if h.publicURL == "" {
+			out.Note = "PUBLIC_URL is not configured; the snippet uses the placeholder " + manage.SnippetPlaceholderBase + " — ask the operator for the collector's public URL"
 		}
-		out.Snippet = manage.Snippet(origin, key, p.Identity)
 	}
 	return nil, out, nil
 }
@@ -207,7 +231,7 @@ func (h *host) registerManage(s *mcp.Server) {
 		Description: "Create a project and (by default) its first ingest key; returns a paste-ready embed snippet. Set skip_key to suppress the key."},
 		h.createProject)
 	mcp.AddTool(s, &mcp.Tool{Name: "update_project", Annotations: write,
-		Description: "Update a project's name, identity mode and/or allowed origins. Fields you omit are left unchanged (this is a merge, not a replace) — except allowed_origins, which if provided non-empty replaces the whole list; origins cannot be cleared to empty via this tool (clear origins via `analytics config import`, an explicit empty allowed_origins list in the document). Switching to identity=identified starts storing user ids and names as given — privacy-significant, say so to the user before doing it."},
+		Description: "Update a project's name, identity mode, allowed origins and/or product_aggregation (opt-in attribute breakdowns for product events). Fields you omit are left unchanged (this is a merge, not a replace) — except allowed_origins, which if provided non-empty replaces the whole list; origins cannot be cleared to empty via this tool (clear origins via `analytics config import`, an explicit empty allowed_origins list in the document). Switching to identity=identified starts storing user ids and names as given — privacy-significant, say so to the user before doing it."},
 		h.updateProject)
 	mcp.AddTool(s, &mcp.Tool{Name: "archive_project", Annotations: idem,
 		Description: "Archive a project: ingestion stops, data and dashboards keep working, fully reversible with restore_project. There is no delete over MCP — deletion requires the CLI."},

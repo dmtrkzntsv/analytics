@@ -23,7 +23,7 @@ func cmdKey(args []string, stdout io.Writer) int {
 		fmt.Fprintln(stdout, "usage: analytics key <issue|list|disable|enable> [flags]")
 		return 2
 	}
-	ops, closeStore, code := openOps(stdout, *envFile)
+	ops, cfg, closeStore, code := openOps(stdout, *envFile)
 	if code != 0 {
 		return code
 	}
@@ -49,12 +49,11 @@ func cmdKey(args []string, stdout io.Writer) int {
 			fmt.Fprintf(stdout, "issued %s (label %q) but project %q vanished before the snippet could be built; run `analytics key list` to confirm\n", key, *label, *project)
 			return 1
 		}
-		origin := ""
-		if len(p.AllowedOrigins) > 0 {
-			origin = p.AllowedOrigins[0]
-		}
 		fmt.Fprintf(stdout, "issued %s (label %q)\n\nWeb snippet:\n\n%s\n",
-			key, *label, manage.Snippet(origin, key, p.Identity))
+			key, *label, manage.Snippet(cfg.PublicURL, key, p.Identity))
+		if cfg.PublicURL == "" {
+			fmt.Fprintln(stdout, "\nnote: PUBLIC_URL is not set; replace "+manage.SnippetPlaceholderBase+" with your collector URL")
+		}
 		return 0
 	case "list":
 		// list reads the raw rows so disabled keys are visible; the

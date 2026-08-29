@@ -196,13 +196,20 @@ func mint(prefix string, n int) (string, error) {
 	return prefix + hex.EncodeToString(buf), nil
 }
 
+// SnippetPlaceholderBase is what Snippet falls back to when PUBLIC_URL is
+// not configured. Callers that surface a snippet built on it should say so
+// (the operator must substitute the real collector URL).
+const SnippetPlaceholderBase = "https://analytics.example.com"
+
 // Snippet renders the paste-ready embed tag returned by create_project,
-// issue_ingest_key and `analytics key issue`.
-func Snippet(origin, key, identity string) string {
-	if origin == "" {
-		origin = "https://analytics.example.com"
+// issue_ingest_key and `analytics key issue`. base is the COLLECTOR's
+// public URL (script.js and /api/events live there) — never the
+// customer's site origin.
+func Snippet(base, key, identity string) string {
+	if base == "" {
+		base = SnippetPlaceholderBase
 	}
 	return fmt.Sprintf(`<script defer src="%s/js/script.js"
         data-key=%q
-        data-identity=%q></script>`, origin, key, identity)
+        data-identity=%q></script>`, base, key, identity)
 }

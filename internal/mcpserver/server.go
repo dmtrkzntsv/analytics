@@ -26,7 +26,8 @@ func Build(ctx context.Context, cfg *config.Config, reg *manage.Registry, ops *m
 		return nil, nil, err
 	}
 	h := &host{db: db, reg: reg, ops: ops,
-		timeout: cfg.MCP.QueryTimeout, maxRows: cfg.MCP.QueryMaxRows, logger: logger}
+		timeout: cfg.MCP.QueryTimeout, maxRows: cfg.MCP.QueryMaxRows,
+		publicURL: cfg.PublicURL, logger: logger}
 	srv := mcp.NewServer(&mcp.Implementation{Name: "analytics", Version: "1.0.0"}, nil)
 	h.register(srv)
 	h.registerResources(srv)

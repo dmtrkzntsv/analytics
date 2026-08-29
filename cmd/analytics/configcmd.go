@@ -22,7 +22,7 @@ func cmdConfig(args []string, stdout io.Writer) int {
 		fmt.Fprintln(stdout, "usage: analytics config <import FILE|export>")
 		return 2
 	}
-	ops, closeStore, code := openOps(stdout, *envFile)
+	ops, _, closeStore, code := openOps(stdout, *envFile)
 	if code != 0 {
 		return code
 	}

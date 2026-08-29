@@ -54,35 +54,35 @@ func envFileLookup(path string) (func(string) (string, bool), error) {
 // openOps opens the store named by DATABASE_URL (optionally via
 // -env-file), migrates, and returns the management frontend. The CLI
 // talks to the database directly — break-glass by design (spec §7.1).
-func openOps(stdout io.Writer, envFile string) (*manage.Ops, func(), int) {
+func openOps(stdout io.Writer, envFile string) (*manage.Ops, *config.Config, func(), int) {
 	lookup, err := envFileLookup(envFile)
 	if err != nil {
 		fmt.Fprintln(stdout, err)
-		return nil, nil, 1
+		return nil, nil, nil, 1
 	}
 	cfg, err := config.FromEnv(lookup)
 	if err != nil {
 		fmt.Fprintln(stdout, err)
-		return nil, nil, 1
+		return nil, nil, nil, 1
 	}
 	st, err := store.Open(cfg.Database)
 	if err != nil {
 		fmt.Fprintln(stdout, err)
-		return nil, nil, 1
+		return nil, nil, nil, 1
 	}
 	ctx := context.Background()
 	if err := st.Migrate(ctx); err != nil {
 		st.Close()
 		fmt.Fprintln(stdout, err)
-		return nil, nil, 1
+		return nil, nil, nil, 1
 	}
 	reg := manage.New(st, cfg.Retention, app.NewLogger(cfg.Log))
 	if err := reg.Reload(ctx); err != nil {
 		st.Close()
 		fmt.Fprintln(stdout, err)
-		return nil, nil, 1
+		return nil, nil, nil, 1
 	}
-	return manage.NewOps(reg, st), func() { st.Close() }, 0
+	return manage.NewOps(reg, st), cfg, func() { st.Close() }, 0
 }
 
 func cmdProject(args []string, stdout io.Writer) int {
@@ -97,7 +97,7 @@ func cmdProject(args []string, stdout io.Writer) int {
 		fmt.Fprintln(stdout, "usage: analytics project <create|update|list|archive|restore|delete> [flags]")
 		return 2
 	}
-	ops, closeStore, code := openOps(stdout, *envFile)
+	ops, _, closeStore, code := openOps(stdout, *envFile)
 	if code != 0 {
 		return code
 	}

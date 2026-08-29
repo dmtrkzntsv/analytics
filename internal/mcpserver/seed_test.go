@@ -103,7 +103,8 @@ func newTestHost(t *testing.T) (*host, *mcp.ClientSession) {
 		t.Fatal(err)
 	}
 	h := &host{db: db, reg: reg, ops: manage.NewOps(reg, st),
-		timeout: 5 * time.Second, maxRows: 1000, logger: logger}
+		publicURL: "https://collector.test",
+		timeout:   5 * time.Second, maxRows: 1000, logger: logger}
 
 	srv := mcp.NewServer(&mcp.Implementation{Name: "analytics", Version: "test"}, nil)
 	h.register(srv)
