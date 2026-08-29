@@ -21,7 +21,11 @@ jobs:
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
     steps:
+      # Full history: changelogithub derives the previous tag from the log to
+      # decide which commits the notes cover. A shallow clone sees no earlier
+      # tag and would restate the whole history in every release.
       - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
       - id: tag
         # vYY.MMDD.{build}: UTC date with the month unpadded (v26.825.N,
         # v26.105.N); the run number makes the tag unique by construction.
@@ -30,9 +34,20 @@ jobs:
         with: { go-version-file: go.mod }
       - run: make check
       - run: make dist
-      - run: gh release create "${{ steps.tag.outputs.tag }}" dist/*.tar.gz dist/SHA256SUMS --target "$GITHUB_SHA" --generate-notes
+      # The tag has to exist on the remote before the release points at it.
+      - name: tag
+        run: |
+          git tag "${{ steps.tag.outputs.tag }}" "$GITHUB_SHA"
+          git push origin "${{ steps.tag.outputs.tag }}"
+      # changelogithub creates the release, groups the notes by conventional
+      # commit type and uploads the artifacts in one call.
+      - name: release
+        run: >
+          npx -y changelogithub@15
+          --to "${{ steps.tag.outputs.tag }}"
+          --assets "dist/*.tar.gz" --assets dist/SHA256SUMS
         env:
-          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
 
   # Published separately from the tarballs: the ingestion image is a static Go
   # binary on alpine, while the Evidence image carries a Node toolchain and
