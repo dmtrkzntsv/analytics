@@ -226,6 +226,9 @@ File logging (`log.file`) is optional and off by default; if enabled, install
 
 ### Enabling MCP on an installed host
 
+Auth-mode setup (token / Cloudflare Access / generic OAuth IdP) is covered
+step by step in [mcp-auth.md](mcp-auth.md).
+
 The installer's unit runs `serve -api` only; MCP is opt-in. Two ways to turn
 it on, both requiring an edit to `analytics.env` first:
 

@@ -216,7 +216,9 @@ load-bearing facts are asserted against the SDK and ingest code by tests.
 The endpoint is read-only for analytics data by construction — no curated
 tool and no path through `query` can write — and it is always
 authenticated; there is no unauthenticated mode. Pick one of three auth
-modes with `MCP_AUTH_MODE`:
+modes with `MCP_AUTH_MODE` — [docs/mcp-auth.md](docs/mcp-auth.md) is the
+step-by-step setup guide for each, including the Cloudflare Access
+arrangement and what a generic IdP must provide:
 
 **`token`** — one operator, one static bearer token, the simplest setup for
 a single person connecting their own client:
