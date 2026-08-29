@@ -181,7 +181,12 @@ func Serve(ctx context.Context, cfg *config.Config, logger *slog.Logger, api, mc
 	if api {
 		var sumCtx context.Context
 		sumCtx, stopSummary = context.WithCancel(context.Background())
-		go func() { logIngestSummary(sumCtx, ingestHandler, logger); close(summaryDone) }()
+		// ingestSummaryInterval is read here, synchronously, rather than
+		// inside the goroutine: it is a package var a test shrinks to avoid
+		// waiting a real minute, and reading it lazily from the background
+		// goroutine would race against a later test's write to it.
+		interval := ingestSummaryInterval
+		go func() { logIngestSummary(sumCtx, ingestHandler, logger, interval); close(summaryDone) }()
 	} else {
 		close(summaryDone)
 	}
@@ -253,11 +258,16 @@ func warnLegacyProjectsFile(cfg *config.Config, logger *slog.Logger) {
 	}
 }
 
+// ingestSummaryInterval is how often logIngestSummary drains the counters.
+// Package var (mirroring internal/geo's refreshInterval) so a test can
+// shrink it instead of waiting a real minute for the ticker to fire.
+var ingestSummaryInterval = time.Minute
+
 // logIngestSummary emits one line per active key label each minute instead
 // of logging per request. Labels, never keys — and this is what tells an
 // operator an old key has gone idle and is safe to retire.
-func logIngestSummary(ctx context.Context, srv *server.Server, logger *slog.Logger) {
-	t := time.NewTicker(time.Minute)
+func logIngestSummary(ctx context.Context, srv *server.Server, logger *slog.Logger, interval time.Duration) {
+	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
 		select {
