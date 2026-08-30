@@ -76,8 +76,8 @@ func TestDocsJSSDKMatchesSDK(t *testing.T) {
 			t.Errorf("%q missing from docs://js-sdk text", symbol)
 		}
 	}
-	// The legacy snippet stays served; the doc must keep saying so.
+	// The legacy snippet is gone; the doc must tell a stale site what to do.
 	if !strings.Contains(docsJSSDK, "script.js") {
-		t.Error("docs://js-sdk must mention the legacy /js/script.js")
+		t.Error("docs://js-sdk must tell sites still on /js/script.js how to migrate")
 	}
 }

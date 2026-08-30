@@ -5,7 +5,7 @@
  * Two usage modes:
  *  - snippet: <script defer src=".../js/twillingate.js" data-key="ak_…">
  *    auto-inits from data attributes with automatic pageviews, a superset
- *    of the legacy /js/script.js behaviour;
+ *    with automatic pageviews;
  *  - SDK-only: load the file without data-key (or bundle this module) and
  *    call twillingate.init({...}) yourself — web, product and app events
  *    entirely from code.
@@ -69,7 +69,7 @@ interface Batch {
 }
 
 // Persisted under the twillingate_* names; the analytics_* fallbacks keep
-// identified-mode visitors continuous for sites migrating off script.js.
+// identified-mode visitors continuous across the legacy snippet's removal.
 const VISITOR = "twillingate_visitor";
 const USER = "twillingate_user";
 const USER_NAME = "twillingate_user_name";
@@ -115,8 +115,8 @@ function ignored(): boolean {
   return false;
 }
 
-// One-time migration from the legacy snippet's storage: copy, never delete —
-// a page may still run script.js next to this SDK during a cut-over.
+// One-time migration from the legacy snippet's storage. The snippet itself
+// is gone, but returning visitors still arrive holding its keys.
 function migrated(name: keyof typeof LEGACY): string | null {
   const v = ls(name);
   if (v !== null) return v;

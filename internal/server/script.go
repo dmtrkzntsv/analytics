@@ -8,13 +8,10 @@ import (
 	"github.com/dmtrkzntsv/twillingate/internal/version"
 )
 
-// script.js is the frozen legacy snippet: deployed websites load it, so it
-// is served byte-for-byte forever. twillingate.js is the current SDK,
-// compiled from sdk/ (`npm run build` there rewrites the committed bundle).
+// twillingate.js is the only served client, compiled from sdk/ (`npm run
+// build` there rewrites the committed bundle). The legacy /js/script.js
+// snippet was removed once every project had migrated.
 //
-//go:embed script.js
-var trackingScript []byte
-
 //go:embed twillingate.js
 var sdkScript []byte
 
@@ -34,6 +31,5 @@ func (s *Server) registerScript(mux *http.ServeMux) {
 	}
 	versioned := bytes.ReplaceAll(sdkScript,
 		[]byte(sdkVersionPlaceholder), []byte(version.Version))
-	mux.HandleFunc("GET /js/script.js", serve(trackingScript))
 	mux.HandleFunc("GET /js/twillingate.js", serve(versioned))
 }

@@ -21,7 +21,7 @@ Copy the file into whatever the site serves as static assets
 snippet, which is what defines the tracker global:
 
 ```html
-<script defer src="https://a.example.com/js/script.js" data-key="ak_9f3c…"></script>
+<script defer src="https://a.example.com/js/twillingate.js" data-key="ak_9f3c…"></script>
 <script defer src="/scripts/plausible-shim.js"></script>
 ```
 

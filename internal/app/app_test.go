@@ -148,14 +148,14 @@ func TestServeEndToEnd(t *testing.T) {
 		t.Fatalf("bad key: %d", r.StatusCode)
 	}
 
-	// The tracking snippet must be served by the same process.
-	resp, err := http.Get(base + "/js/script.js")
+	// The SDK must be served by the same process.
+	resp, err := http.Get(base + "/js/twillingate.js")
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
 	if resp.StatusCode != 200 {
-		t.Fatalf("script.js: %d", resp.StatusCode)
+		t.Fatalf("twillingate.js: %d", resp.StatusCode)
 	}
 
 	// Graceful shutdown must flush the buffer.

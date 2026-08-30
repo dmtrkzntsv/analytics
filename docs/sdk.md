@@ -6,9 +6,6 @@ modes: a drop-in snippet for websites, and a full SDK for driving web,
 product and app analytics from code. The wire format underneath is always
 [`POST /api/events`](ingest-api.md).
 
-The legacy snippet stays at `/js/script.js`, byte-for-byte — deployed
-websites never break — but new integrations should use twillingate.js.
-
 ## Snippet mode
 
 ```html
@@ -113,9 +110,10 @@ bad payload) drops the batch instead — resending it forever helps nobody.
 - Opt a device out: `localStorage.twillingate_ignore = "true"` (the legacy
   `analytics_ignore` is honoured too).
 
-## Migrating a site from script.js
+## Migrating a site from the legacy script.js
 
-Swap the `src` to `/js/twillingate.js` and rename any
+`/js/script.js` has been removed and now 404s. Swap the `src` to
+`/js/twillingate.js` and rename any
 `analytics.track/identify/reset` calls to `twillingate.*`. One signature
 changed: the legacy `analytics.identify(user, group)` is now
 `twillingate.identify(user, userName)` + `twillingate.group(group)`.

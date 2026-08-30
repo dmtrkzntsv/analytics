@@ -16,5 +16,5 @@ every source change must ship with a fresh `npm run build`.
 
 The user-facing API reference lives in [docs/sdk.md](../docs/sdk.md); the
 wire format the SDK speaks is [docs/ingest-api.md](../docs/ingest-api.md).
-The legacy snippet at `internal/server/script.js` is frozen — deployed
-websites load it — and is deliberately not built from this source.
+This bundle is the only client the collector serves; the legacy
+`/js/script.js` snippet was removed once every project had migrated.

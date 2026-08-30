@@ -165,8 +165,10 @@ initialise yourself:
 
 ## Legacy snippet
 
-/js/script.js (window.analytics: track/identify/reset only) still serves
-for already-deployed websites. New integrations use twillingate.js.
+/js/script.js has been removed and returns 404. Sites still carrying that
+tag must swap the src to /js/twillingate.js and rename window.analytics
+calls to twillingate.*; identified-mode visitors carry over via the
+analytics_* storage migration.
 
 Server-side and native clients can skip the SDK entirely and POST to
 /api/events — read docs://ingest-api.`

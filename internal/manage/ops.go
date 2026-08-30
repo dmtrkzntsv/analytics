@@ -203,7 +203,7 @@ const SnippetPlaceholderBase = "https://twillingate.example.com"
 
 // Snippet renders the paste-ready embed tag returned by create_project,
 // issue_ingest_key and `twillingate key issue`. base is the COLLECTOR's
-// public URL (script.js and /api/events live there) — never the
+// public URL (twillingate.js and /api/events live there) — never the
 // customer's site origin.
 func Snippet(base, key, identity string) string {
 	if base == "" {
