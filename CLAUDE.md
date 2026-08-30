@@ -18,7 +18,7 @@ release page needs one of the three published types.
 
 The scope is the package or area the change lands in, matching the tree:
 `store`, `server`, `jobs`, `config`, `mcpserver`, `manage`, `pipeline`, `geo`,
-`dashboards`, `cmd`, `deploy`, `ci`. Omit it when a change is genuinely
+`dashboards`, `sdk`, `cmd`, `deploy`, `ci`. Omit it when a change is genuinely
 repo-wide.
 
 Breaking changes take a `!` before the colon (`feat(store)!: ...`), or a
