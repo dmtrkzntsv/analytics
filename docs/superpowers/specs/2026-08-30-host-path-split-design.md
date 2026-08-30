@@ -430,38 +430,58 @@ timestamp clamping and the queue write are unchanged.
 
 ## 7. Documentation
 
-### 7.1 One embedded document
+### 7.1 Two documents, embedded
 
 The MCP doc surface is four pieces today, two of which are hand-written Go
 string constants in `docs_content.go` (`docsEvents`, `docsJSSDK`) bound to
-source files by `docs_sync_test.go`. `docsJSSDK` is derived from
-`script.js` — the snippet §3.2 deletes — so it documents an API that will
-not exist.
+source files by `docs_sync_test.go`. `docsJSSDK` was derived from
+`script.js` — the snippet §3.2 deletes — so it documents an API that no
+longer exists.
 
-`docs/twillingate.md` becomes the single normative document, embedded
-through the `docs` package (the `//go:embed` pattern `docs.IngestAPI`
-already uses) and exposed as `docs://twillingate`. Note the package is no
-longer docs-only: `4cb5f71` added `docs.PlausibleShim`, so `embed.go`
-carries both served documentation and a served asset.
+The seven prose docs are consolidated into two, split on a single line:
+**`twillingate.md` is getting data in and keeping the service alive;
+`reporting.md` is getting data out.** Either one alone is enough for a
+person or an agent to do the job it covers.
 
-- It absorbs `docs/sdk.md` and `docs/ingest-api.md`, which are replaced by
-  short pointers. `docs/plausible/README.md` stays where it is: it
-  documents the bytes served at `/js/plausible-shim.js` and is bound to
-  them by `TestPlausibleShimServed`.
-- `docsEvents` and `docsJSSDK` are deleted.
-- `docs_sync_test.go` is repointed to bind `docs/twillingate.md` to
-  `reservedKeys`: every reserved key documented, no documented key absent
-  from the map. This is a stronger test than the one it replaces and
-  catches the five new keys going undocumented.
+| new file | absorbs | covers |
+| --- | --- | --- |
+| `docs/twillingate.md` | `deployment.md`, `litestream.md`, `configuration.md`, `sdk.md`, `ingest-api.md` | install, upgrade, back up and restore, configure projects and keys, instrument a site or app, the wire format |
+| `docs/reporting.md` | `mcp-auth.md`, `mcp-clients.md`, `deployment.md` §3 (Dashboards) | Evidence dashboards, the MCP endpoint's auth modes, connecting a client, how to query |
 
-Kept separate:
+Both embed through the `docs` package and are exposed as
+`docs://twillingate` and `docs://reporting`. The absorbed files are
+replaced by short pointers rather than deleted, so existing links resolve.
 
-- **`schema://views`** — a machine reference that tracks migrations; an
-  agent writing SQL should not pay for the SDK prose.
-- **`integration_guide`** — injects live registry state (active key,
-  identity mode, `PUBLIC_URL`) that no static document can carry.
+`docsEvents` and `docsJSSDK` are deleted. `docs_sync_test.go` is repointed
+to bind `docs/twillingate.md` to `reservedKeys`: every reserved key
+documented, no documented key absent from the map. That is a stronger test
+than the one it replaces and catches the new keys going undocumented.
 
-Four resources become two, plus the unchanged tool.
+**`mcp-auth.md` goes with `reporting.md`, not `twillingate.md`.** It is
+server configuration, which argues for the collector doc, but anyone
+setting up the MCP endpoint needs auth and client setup in the same read.
+Splitting them would mean two documents for one task.
+
+**`docs/plausible/README.md` stays where it is.** It documents the bytes
+served at `/js/plausible-shim.js` and `TestPlausibleShimServed` binds the
+two; folding it in would break that binding.
+
+Kept separate from both:
+
+- **`schema://views`** — a machine reference that must track migrations
+  (this change adds `v_web_hosts`). It is the hot path for any agent
+  writing SQL, and making that agent load the whole reporting document to
+  get a column list is a real regression. `reporting.md` describes how to
+  query and points at `schema://views` for the authoritative columns.
+- **The `integration_guide` tool** — it injects live registry state (active
+  key, identity mode, `PUBLIC_URL`) that no static document can carry.
+
+Four resources become three, plus the unchanged tool.
+
+**Scope note.** This consolidation is the largest single unit of work in
+the spec and is independent of §3–§6. It should be its own implementation
+plan, executed after the code changes land so the new documents describe
+the finished contract rather than being written twice.
 
 ### 7.2 Keeping it current
 
@@ -470,24 +490,38 @@ Two mechanisms, because neither alone is enough.
 **Enforced.** `docs_sync_test.go` binds `docs/twillingate.md` to
 `reservedKeys` (§7.1). Adding a reserved attribute without documenting it
 fails `make check`. This catches the wire contract — the part most likely
-to drift and most damaging when it does.
+to drift and most damaging when it does. Nothing comparable guards
+`reporting.md`, which is why the instructed half below names it too.
 
 **Instructed.** `CLAUDE.md` gains a `## Documentation` section, since no
 test can catch prose going stale:
 
-> `docs/twillingate.md` is the single normative document and the only one
-> the MCP endpoint serves to agents. It is not a summary of the code — it
-> is the contract. Update it **in the same commit** as any change to:
+> `docs/twillingate.md` and `docs/reporting.md` are the two normative
+> documents and the only prose the MCP endpoint serves to agents. They are
+> not summaries of the code — they are the contract. Split: twillingate.md
+> is getting data in and keeping the service alive, reporting.md is getting
+> data out.
+>
+> Update `twillingate.md` **in the same commit** as any change to:
 >
 > - reserved attribute keys or event names (`internal/server/ingest.go`)
 > - the ingest wire format or its responses (`internal/server/handlers.go`)
 > - the JS SDK's public API, `data-` attributes or defaults
 >   (`sdk/src/twillingate.ts`)
-> - queryable views or their columns (`internal/store/sqlite/migrations/`)
+> - config keys, env vars or project fields (`internal/config/`)
+> - install, upgrade or restore procedure (`deploy/`, `Makefile`)
 >
-> `docs/sdk.md` and `docs/ingest-api.md` are pointers, not sources — never
-> add content there. `docs_sync_test.go` enforces the reserved-key half of
-> this; the rest is on you.
+> Update `reporting.md` in the same commit as any change to MCP auth modes,
+> client setup, or the Evidence dashboards.
+>
+> Update `schemaViews` in `internal/mcpserver/resources.go` in the same
+> commit as any migration that adds or changes a queryable view.
+>
+> Everything under `docs/` that these two absorbed is a pointer, not a
+> source — never add content there. `docs/plausible/README.md` is the
+> exception: it documents bytes the collector serves and a test binds it to
+> them. `docs_sync_test.go` enforces the reserved-key half of this; the
+> rest is on you.
 
 A `docs`-only change publishes nothing (`paths-ignore` on `docs/**`), so
 same-commit updating costs no extra release and keeps the document honest
