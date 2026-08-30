@@ -67,17 +67,32 @@ func TestIntegrationGuideAnonymousAndPlatforms(t *testing.T) {
 
 func TestDocsResourcesReadable(t *testing.T) {
 	_, cs := newTestHost(t)
-	for uri, want := range map[string]string{
-		"docs://events":     "$screen_view",
-		"docs://js-sdk":     "twillingate.track",
-		"docs://ingest-api": "POST /api/events",
+	res, err := cs.ReadResource(context.Background(),
+		&mcp.ReadResourceParams{URI: "docs://twillingate"})
+	if err != nil {
+		t.Fatalf("docs://twillingate: %v", err)
+	}
+	body := res.Contents[0].Text
+	// One document now covers what three resources used to: the event
+	// model, the SDK and the wire format.
+	for _, want := range []string{
+		"$screen_view", "twillingate.track", "POST /api/events",
+		"$host", "$path", "data-mask-url",
 	} {
-		res, err := cs.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: uri})
-		if err != nil {
-			t.Fatalf("%s: %v", uri, err)
+		if !strings.Contains(body, want) {
+			t.Errorf("docs://twillingate missing %q", want)
 		}
-		if !strings.Contains(res.Contents[0].Text, want) {
-			t.Errorf("%s missing %q", uri, want)
+	}
+}
+
+// The three resources it replaced must be gone, so a client cannot read a
+// stale contract from a URI that still resolves.
+func TestSupersededDocsResourcesRemoved(t *testing.T) {
+	_, cs := newTestHost(t)
+	for _, uri := range []string{"docs://events", "docs://js-sdk", "docs://ingest-api"} {
+		if _, err := cs.ReadResource(context.Background(),
+			&mcp.ReadResourceParams{URI: uri}); err == nil {
+			t.Errorf("%s still resolves", uri)
 		}
 	}
 }

@@ -63,15 +63,9 @@ func textResource(s *mcp.Server, uri, name, desc, text string) {
 }
 
 func (h *host) registerResources(s *mcp.Server) {
-	textResource(s, "docs://events", "events",
-		"The event model: $pageview (web), $screen_view (app) and custom product events — what each family feeds, reserved attributes, identity, and the declared attributes list. Read before instrumenting anything.",
-		docsEvents)
-	textResource(s, "docs://js-sdk", "js-sdk",
-		"The JS SDK: snippet and SDK-only modes, twillingate page/screen/track/identify/reset, SPA auto-tracking, localhost silence, opt-out.",
-		docsJSSDK)
-	textResource(s, "docs://ingest-api", "ingest-api",
-		"Normative HTTP wire format for POST /api/events: envelope, batching, retries, timestamps, idempotency, offline replay. For server-side and native clients.",
-		docs.IngestAPI)
+	textResource(s, "docs://twillingate", "twillingate",
+		"Everything needed to run twillingate: install, configure projects and keys, instrument a site or app, the normative POST /api/events wire format and event model, connecting an MCP client, querying, dashboards, backup and recovery. Read before instrumenting or integrating anything.",
+		docs.Twillingate)
 
 	s.AddResource(&mcp.Resource{
 		URI: "schema://views", Name: "views",
