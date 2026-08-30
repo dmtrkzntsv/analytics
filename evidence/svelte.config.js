@@ -7,7 +7,7 @@
 // therefore never reaches those templated routes and fails the build with
 // "marked as prerenderable, but were not prerendered". Listing the routes
 // explicitly is the supported fix, so we read the project aliases straight
-// out of the analytics database at build time.
+// out of the twillingate database at build time.
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
