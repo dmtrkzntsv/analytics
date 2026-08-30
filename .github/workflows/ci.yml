@@ -11,3 +11,23 @@ jobs:
         with: { go-version-file: go.mod }
       - run: make check
       - run: make build
+
+  # The SDK bundle is committed (internal/server/twillingate.js) so the Go
+  # build never needs Node. This job keeps the artifact honest: typecheck,
+  # tests, then rebuild and fail on any drift from the committed bytes.
+  sdk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: sdk/package-lock.json }
+      - run: npm ci
+        working-directory: sdk
+      - run: npm run typecheck
+        working-directory: sdk
+      - run: npm test
+        working-directory: sdk
+      - run: npm run build
+        working-directory: sdk
+      - name: committed bundle matches the source
+        run: git diff --exit-code internal/server/twillingate.js
