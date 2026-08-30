@@ -20,7 +20,8 @@ that is a second compose file, and skipping it costs you nothing else.
 ## Run it
 
 Tracking is one file: ingestion, the tracker script and — once `MCP_AUTH_DSN`
-is set, see [docs/mcp-auth.md](docs/mcp-auth.md) — the MCP endpoint, all on
+is set, see [docs/mcp-auth.md](docs/mcp-auth.md) and
+[docs/mcp-clients.md](docs/mcp-clients.md) — the MCP endpoint, all on
 `:8080`:
 
 ```bash
@@ -84,6 +85,7 @@ Native apps and backends skip the SDK and POST batches straight to
 | [docs/sdk.md](docs/sdk.md) | twillingate.js: snippet mode, SDK-only mode, runtime API, offline queue |
 | [docs/ingest-api.md](docs/ingest-api.md) | The normative wire format for `/api/events` |
 | [docs/mcp-auth.md](docs/mcp-auth.md) | MCP auth modes: static token, Cloudflare Access, generic OAuth IdP |
+| [docs/mcp-clients.md](docs/mcp-clients.md) | Pointing Claude Code, Claude Desktop and claude.ai at the MCP endpoint |
 | [docs/litestream.md](docs/litestream.md) | Backup and replication: bucket setup, writer, reader, recovery |
 
 ## Development

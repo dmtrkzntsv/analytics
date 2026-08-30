@@ -237,7 +237,8 @@ File logging (`log.file`) is optional and off by default; if enabled, install
 ### Enabling MCP on an installed host
 
 Auth-mode setup (token / Cloudflare Access / generic OAuth IdP) is covered
-step by step in [mcp-auth.md](mcp-auth.md).
+step by step in [mcp-auth.md](mcp-auth.md), and pointing a client at the
+endpoint afterwards in [mcp-clients.md](mcp-clients.md).
 
 The installer's unit runs bare `serve`, which starts MCP automatically the
 moment its auth is configured — until then it logs "MCP endpoint disabled"
