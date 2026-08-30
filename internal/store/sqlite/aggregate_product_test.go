@@ -163,3 +163,35 @@ func TestAggregateProductIdempotent(t *testing.T) {
 		t.Fatalf("second run corrupted: %d", c)
 	}
 }
+
+// TestAggregateProductClampsNonPositiveTopN guards the destructive failure
+// mode a topN<=0 would otherwise cause: rollupAttr's `rn <= topN` filter
+// keeps nothing, so every distinct value silently collapses into
+// "(other)" instead of erroring. Not reachable from production callers
+// today (jobs.Runner always sets topN from
+// config.Config.ProductAttributesTopN, which defaults to 50), but
+// AggregateProductDay clamps it anyway as a last line of defense.
+func TestAggregateProductClampsNonPositiveTopN(t *testing.T) {
+	for _, topN := range []int{0, -5} {
+		t.Run(fmt.Sprintf("topN=%d", topN), func(t *testing.T) {
+			db := newTestDB(t)
+			ctx := context.Background()
+			seedProductDay(t, db) // subscribed: plan in {pro, free} -- 2 distinct values
+			if err := db.AggregateProductDay(ctx, "app", day("2026-08-10"), []string{"plan"}, topN); err != nil {
+				t.Fatal(err)
+			}
+			var other int
+			db.db.QueryRow(`SELECT COUNT(*) FROM agg_product_attrs
+				WHERE attr_key='plan' AND attr_value='(other)'`).Scan(&other)
+			if other != 0 {
+				t.Fatal("non-positive topN collapsed every value into (other) instead of clamping to the default")
+			}
+			var kept int
+			db.db.QueryRow(`SELECT COUNT(*) FROM agg_product_attrs
+				WHERE attr_key='plan' AND attr_value IN ('pro','free')`).Scan(&kept)
+			if kept != 2 {
+				t.Fatalf("kept = %d, want 2 (both real values, clamped topN=%d must behave like the default)", kept, defaultAttrsTopN)
+			}
+		})
+	}
+}

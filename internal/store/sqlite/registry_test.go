@@ -336,6 +336,54 @@ WHERE product_aggregation IS NOT NULL
 	}
 }
 
+// TestMigrationBackfillSkipsMalformedProductAggregation is the corruption
+// case: migrations are forward-only with no scripted way back, so a
+// hand-edited or otherwise malformed product_aggregation value must not
+// abort the migration transaction (which would leave the server unable to
+// boot). Runs the real embedded 006 migration via d.Migrate, not a copy of
+// its SQL, so it also proves the DROP COLUMN step still completes.
+func TestMigrationBackfillSkipsMalformedProductAggregation(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value string
+	}{
+		{"not JSON at all", "not json"},
+		{"scalar where an array is expected", `{"enabled":true,"attributes":{"*":"plan"},"top_n":50}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, err := openAt(t.TempDir() + "/test.db")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer d.Close()
+			ctx := context.Background()
+
+			if err := applyMigrationsUpTo(ctx, d, 5); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := d.db.ExecContext(ctx,
+				`INSERT INTO projects (id, alias, name, identity, allowed_origins, product_aggregation)
+				 VALUES (?,?,?,?,?,?)`,
+				"id1", "blog", "Blog", "anonymous", "[]", tc.value); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := d.Migrate(ctx); err != nil {
+				t.Fatalf("migration aborted on malformed product_aggregation %q: %v", tc.value, err)
+			}
+
+			var attrs string
+			if err := d.db.QueryRowContext(ctx,
+				`SELECT attributes FROM projects WHERE alias='blog'`).Scan(&attrs); err != nil {
+				t.Fatal(err)
+			}
+			if attrs != "[]" {
+				t.Fatalf("attributes = %q, want \"[]\" (malformed input must backfill to empty, not abort)", attrs)
+			}
+		})
+	}
+}
+
 // applyMigrationsUpTo applies migrations 001 through maxVersion to the database.
 // It mimics the Migrate logic but stops at a specific version.
 func applyMigrationsUpTo(ctx context.Context, d *DB, maxVersion int) error {

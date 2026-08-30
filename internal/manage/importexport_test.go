@@ -97,6 +97,41 @@ func TestImportLegacyProjectsJSON(t *testing.T) {
 	}
 }
 
+// TestImportV1DocumentFoldsLegacyProductAggregation exercises the
+// DisallowUnknownFields compatibility guarantee the brief singled out: a
+// v1 export document (not the legacy bare-array projects.json) that still
+// carries the pre-2026-08 product_aggregation block — because it was
+// exported before this change, or hand-edited — must still decode (the
+// field is kept, just no longer written) and its event-keyed map must
+// fold into the new flat attributes list on import. The bare-array legacy
+// path is covered by TestImportLegacyProjectsJSON; this is the other of
+// the two places exportProject.declaredAttributes's fold branch is
+// reachable from, and until now neither test exercised it.
+func TestImportV1DocumentFoldsLegacyProductAggregation(t *testing.T) {
+	st := testStore(t)
+	reg := New(st, defaults, discard())
+	ctx := context.Background()
+	reg.Reload(ctx)
+	ops := NewOps(reg, st)
+	doc := `{"version":1,"projects":[{"alias":"blog","name":"My blog","identity":"anonymous",
+	  "allowed_origins":[],"ingest_keys":[],
+	  "product_aggregation":{"enabled":true,"attributes":{"*":["plan"],"subscribed":["tier","plan"]},"top_n":50}}]}`
+	res, err := ops.Import(ctx, "cli", strings.NewReader(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Created != 1 {
+		t.Fatalf("result = %+v", res)
+	}
+	p := reg.Snapshot(ctx).Project("blog")
+	if p == nil {
+		t.Fatal("blog not imported")
+	}
+	if len(p.Attributes) != 2 || p.Attributes[0] != "plan" || p.Attributes[1] != "tier" {
+		t.Fatalf("Attributes = %v, want [plan tier] (sorted DISTINCT union of the legacy map)", p.Attributes)
+	}
+}
+
 // findKey looks up a RegistryKey by key value directly from the store,
 // bypassing the snapshot (which drops disabled keys — see the "list"
 // comment in cmd/twillingate/key.go).

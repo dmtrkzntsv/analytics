@@ -17,7 +17,18 @@ func attrPath(key string) string {
 	return `$."` + strings.ReplaceAll(key, `"`, `\"`) + `"`
 }
 
+// defaultAttrsTopN is the fallback for a non-positive topN. Not reachable
+// today (jobs.Runner always sets it from config.Config.ProductAttributesTopN,
+// which parse() defaults to 50), but guarded anyway: rollupAttr's
+// `rn <= topN` filter treats topN<=0 as "keep nothing", which would
+// silently collapse every distinct value into "(other)" rather than erroring
+// -- a permanent, undetected loss of attribute breakdowns.
+const defaultAttrsTopN = 50
+
 func (d *DB) AggregateProductDay(ctx context.Context, project string, day civil.Date, attrs []string, topN int) error {
+	if topN <= 0 {
+		topN = defaultAttrsTopN
+	}
 	from, to := dayRange(day)
 	return d.tx(ctx, func(tx *sql.Tx) error {
 		var n int
