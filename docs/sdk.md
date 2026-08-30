@@ -53,24 +53,37 @@ twillingate.init({
 ## Runtime API
 
 ```js
-twillingate.page();                            // manual $pageview (deduped per path)
+twillingate.page();                            // $pageview for the current page (deduped per path)
+twillingate.page("/settings");                 // $pageview for an explicit path
+twillingate.page((p) => ({ ab: "b" }));        // register a pageview listener
 twillingate.screen("/settings");               // app $screen_view
 twillingate.track("signup", { plan: "pro" });  // opt-in product event
-twillingate.identify("user-123", "org-9");     // set user and group
-twillingate.group("org-9");                    // set group alone
+twillingate.setAttrs({ tier: "beta" });        // default attributes on every event
+twillingate.identify("user-123", "Ada");       // $user_id + optional $user_name
+twillingate.group("org-9", "Acme Corp");       // $group_id + optional $group_name
 twillingate.reset();                           // on logout — see below
 twillingate.flush();                           // force-send the queue
 ```
 
 - `track(name, attrs)` — product event; don't `$`-prefix your names.
-- `identify(user, group?)` — persisted, so every later event carries the
-  identity. Events already sent stay unattributed: there is no retroactive
-  stitching. The user id is only written to localStorage for `identified`
-  projects; the group always persists (a group is an organization, not a
-  person).
+- `setAttrs(attrs)` — default attributes merged under every event's own
+  (event attributes win). Successive calls merge; `setAttrs(null)` clears.
+- `page(arg?, attrs?)` — no argument records the current page; a string
+  records that path (resolved against the page for `$url`); an object is
+  extra attributes for the current page. Passing a **function** registers
+  a pageview listener instead: it runs for every pageview — automatic SPA
+  ones included — receives `{url, path, referrer, attributes}`, and can
+  return an object to merge extra attributes or `false` to cancel that
+  pageview.
+- `identify(user, name?)` — sets `$user_id` and the optional `$user_name`
+  display name, persisted for `identified` projects so every later event
+  carries the identity. Events already sent stay unattributed: there is no
+  retroactive stitching. Anonymous projects ignore the name server-side.
+- `group(id, name?)` — sets `$group_id`/`$group_name`; always persisted (a
+  group is an organization, not a person).
 - `reset()` — required on logout. Without it the next person on a shared
-  browser inherits the previous user's identity. Clears user, group and
-  the visitor id.
+  browser inherits the previous user's identity. Clears user, group,
+  names and the visitor id.
 - `screen(name, attrs?)` — app analytics; pair with `platform`,
   `appVersion` and `installId` in `init` so actives, versions and screens
   aggregate properly.
@@ -103,8 +116,10 @@ bad payload) drops the batch instead — resending it forever helps nobody.
 ## Migrating a site from script.js
 
 Swap the `src` to `/js/twillingate.js` and rename any
-`analytics.track/identify/reset` calls to `twillingate.*` — everything
-else (attributes, key, identity mode) is unchanged, and identified-mode
-visitors carry over via the storage migration. Sites using Plausible-style
+`analytics.track/identify/reset` calls to `twillingate.*`. One signature
+changed: the legacy `analytics.identify(user, group)` is now
+`twillingate.identify(user, userName)` + `twillingate.group(group)`.
+Everything else (attributes, key, identity mode) is unchanged, and
+identified-mode visitors carry over via the storage migration. Sites using Plausible-style
 tagged-event classes: [docs/plausible/](plausible/) has a shim that works
 with both globals.

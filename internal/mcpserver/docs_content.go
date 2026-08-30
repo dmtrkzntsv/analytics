@@ -126,18 +126,27 @@ initialise yourself:
 
 ## Runtime API (window.twillingate)
 
-    twillingate.page();                            // manual $pageview (deduped)
+    twillingate.page();                            // $pageview for the current page (deduped)
+    twillingate.page("/settings");                 // $pageview for an explicit path
+    twillingate.page(fn);                          // register a pageview listener (see below)
     twillingate.screen("/settings");               // app $screen_view
     twillingate.track("signup", { plan: "pro" });  // custom product event
-    twillingate.identify("user-123", "org-9");     // set user and group
-    twillingate.group("org-9");                    // set group alone
+    twillingate.setAttrs({ tier: "beta" });        // default attributes on every event
+    twillingate.identify("user-123", "Ada");       // $user_id + optional $user_name
+    twillingate.group("org-9", "Acme");            // $group_id + optional $group_name
     twillingate.reset();                           // on logout
     twillingate.flush();                           // force-send the queue
 
 - track(name, attrs): sends a product event. Do not $-prefix your names.
-- identify(userId, groupId): attaches subsequent events to the user/group.
+- setAttrs(attrs): defaults merged under every event's own attributes
+  (event attributes win); successive calls merge, setAttrs(null) clears.
+- page(fn): the listener runs for every pageview, automatic ones included,
+  receiving {url, path, referrer, attributes}; return an object to merge
+  extra attributes, false to cancel the pageview.
+- identify(userId, userName?): attaches subsequent events to the user.
   There is no retroactive stitching: events sent before identify() keep no
-  user id.
+  user id. The name is only stored for identified projects.
+- group(groupId, groupName?): attaches subsequent events to the group.
 - reset(): call on logout, or the next person on a shared browser inherits
   the previous user's identity.
 

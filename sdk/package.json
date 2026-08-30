@@ -1,6 +1,6 @@
 {
   "name": "twillingate-sdk",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "description": "Source of the embedded js/twillingate.js SDK. `npm run build` writes ../internal/server/twillingate.js, which is committed and served by the collector.",
   "type": "module",

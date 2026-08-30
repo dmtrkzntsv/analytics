@@ -72,7 +72,7 @@ func (h *host) integrationGuide(ctx context.Context, _ *mcp.CallToolRequest, in 
 		b.WriteString(". The snippet is silent on localhost, so test on a real or staged domain.\n\n")
 		fmt.Fprintf(&b, "Product events from the page:\n\n    twillingate.track(\"signup\", { plan: \"pro\" });\n\n")
 		if p.Identity == config.IdentityIdentified {
-			b.WriteString("This project is IDENTIFIED: the snippet persists a visitor id in\nlocalStorage (consent-relevant, ePrivacy — same category as a cookie).\nGate the tag on consent, call twillingate.identify(userId, groupId) after\nlogin and twillingate.reset() on logout.\n\n")
+			b.WriteString("This project is IDENTIFIED: the snippet persists a visitor id in\nlocalStorage (consent-relevant, ePrivacy — same category as a cookie).\nGate the tag on consent, call twillingate.identify(userId, userName)\n(and twillingate.group(groupId)) after login and twillingate.reset() on\nlogout.\n\n")
 		} else {
 			b.WriteString("This project is ANONYMOUS: no cookies, no localStorage, no consent\nbanner needed for pageviews alone; $user_name is ignored and retention\ncurves are unavailable by design.\n\n")
 		}

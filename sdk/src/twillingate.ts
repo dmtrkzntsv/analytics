@@ -15,7 +15,7 @@
  * no matter what the client claims, so a misconfigured client fails safe.
  */
 
-export const VERSION = "1.0.0";
+export const VERSION = "2.0.0";
 
 export interface InitOptions {
   /** Ingest key (ak_…). Required. */
@@ -40,6 +40,20 @@ export interface InitOptions {
   flushInterval?: number;
 }
 
+/** What a page listener sees for each pageview, automatic or manual. */
+export interface PageviewInfo {
+  url: string;
+  path: string;
+  referrer: string;
+  attributes: Record<string, unknown>;
+}
+
+/**
+ * Registered via page(fn). Return an object to merge extra attributes into
+ * the pageview, false to cancel it, anything else to just observe.
+ */
+export type PageListener = (page: PageviewInfo) => Record<string, unknown> | false | void;
+
 interface Event {
   id: string;
   ts: string;
@@ -57,7 +71,9 @@ interface Batch {
 // identified-mode visitors continuous for sites migrating off script.js.
 const VISITOR = "twillingate_visitor";
 const USER = "twillingate_user";
+const USER_NAME = "twillingate_user_name";
 const GROUP = "twillingate_group";
+const GROUP_NAME = "twillingate_group_name";
 const QUEUE = "twillingate_queue";
 const LEGACY = { [VISITOR]: "analytics_visitor", [USER]: "analytics_user", [GROUP]: "analytics_group" };
 
@@ -113,7 +129,11 @@ export class Twillingate {
   private url = "";
   private identified = false;
   private userId: string | null = null;
+  private userName: string | null = null;
   private groupId: string | null = null;
+  private groupName: string | null = null;
+  private defaultAttrs: Record<string, unknown> = {};
+  private pageListeners: PageListener[] = [];
   private platform: string | null = null;
   private appVersion: string | null = null;
   private installId: string | null = null;
@@ -138,7 +158,9 @@ export class Twillingate {
     }
     this.identified = opts.identity === "identified";
     this.userId = opts.user ? String(opts.user) : this.identified ? migrated(USER) : null;
+    this.userName = this.identified ? ls(USER_NAME) : null;
     this.groupId = opts.group ? String(opts.group) : migrated(GROUP);
+    this.groupName = ls(GROUP_NAME);
     this.platform = opts.platform || null;
     this.appVersion = opts.appVersion || null;
     this.installId = opts.installId || null;
@@ -161,13 +183,45 @@ export class Twillingate {
     }
   }
 
-  /** Manual $pageview (deduped against the previous path). */
-  page(attrs?: Record<string, unknown>): void {
+  /**
+   * $pageview, deduped against the previous path. Overloads:
+   *
+   *   page()                  — record the current page
+   *   page("/settings")       — record an explicit path
+   *   page({section: "docs"}) — current page with extra attributes
+   *   page(fn)                — register a PageListener called for every
+   *                             pageview (automatic ones included); it can
+   *                             enrich attributes or cancel the event
+   */
+  page(arg?: string | Record<string, unknown> | PageListener | null, attrs?: Record<string, unknown>): void {
+    if (typeof arg === "function") {
+      this.pageListeners.push(arg);
+      return;
+    }
     if (!this.ok()) return;
-    const current = location.pathname + location.search;
-    if (current === this.lastPage) return;
-    this.lastPage = current;
-    this.emit("$pageview", { $url: location.href, $referrer: document.referrer, ...attrs });
+    let path: string;
+    let url: string;
+    if (typeof arg === "string" && arg !== "") {
+      path = arg;
+      try {
+        url = new URL(arg, location.href).href;
+      } catch {
+        url = arg;
+      }
+    } else {
+      if (arg && typeof arg === "object") attrs = { ...arg, ...attrs };
+      path = location.pathname + location.search;
+      url = location.href;
+    }
+    if (path === this.lastPage) return;
+    this.lastPage = path;
+    let attributes: Record<string, unknown> = { $url: url, $referrer: document.referrer, ...attrs };
+    for (const listener of this.pageListeners) {
+      const r = listener({ url, path, referrer: document.referrer, attributes });
+      if (r === false) return;
+      if (r && typeof r === "object") attributes = { ...attributes, ...r };
+    }
+    this.emit("$pageview", attributes);
   }
 
   /** App analytics $screen_view. */
@@ -183,20 +237,39 @@ export class Twillingate {
   }
 
   /**
-   * Persisted, so every later event — this page and future loads — carries
-   * the identity. Events already sent stay unattributed: no retroactive
-   * stitching.
+   * Default attributes merged under every event's own (event attributes
+   * win). Successive calls merge; setAttrs(null) clears them all.
    */
-  identify(user: string, group?: string): void {
-    this.userId = user ? String(user) : null;
-    if (group) this.groupId = String(group);
-    if (this.identified) lsSet(USER, this.userId);
-    lsSet(GROUP, this.groupId);
+  setAttrs(attrs: Record<string, unknown> | null): void {
+    if (attrs === null) {
+      this.defaultAttrs = {};
+      return;
+    }
+    this.defaultAttrs = { ...this.defaultAttrs, ...attrs };
   }
 
-  group(id: string): void {
+  /**
+   * Set the user ($user_id) and optional display name ($user_name).
+   * Persisted for identified projects, so every later event — this page
+   * and future loads — carries the identity. Events already sent stay
+   * unattributed: no retroactive stitching. The name is only stored
+   * server-side for identified projects; anonymous ones ignore it.
+   */
+  identify(user: string, name?: string): void {
+    this.userId = user ? String(user) : null;
+    this.userName = name ? String(name) : null;
+    if (this.identified) {
+      lsSet(USER, this.userId);
+      lsSet(USER_NAME, this.userName);
+    }
+  }
+
+  /** Set the group ($group_id) and optional display name ($group_name). */
+  group(id: string, name?: string): void {
     this.groupId = id ? String(id) : null;
+    this.groupName = name ? String(name) : null;
     lsSet(GROUP, this.groupId);
+    lsSet(GROUP_NAME, this.groupName);
   }
 
   /**
@@ -205,9 +278,13 @@ export class Twillingate {
    */
   reset(): void {
     this.userId = null;
+    this.userName = null;
     this.groupId = null;
+    this.groupName = null;
     lsSet(USER, null);
+    lsSet(USER_NAME, null);
     lsSet(GROUP, null);
+    lsSet(GROUP_NAME, null);
     lsSet(VISITOR, null);
   }
 
@@ -232,6 +309,7 @@ export class Twillingate {
   }
 
   private emit(name: string, attributes: Record<string, unknown>): void {
+    attributes = { ...this.defaultAttrs, ...attributes };
     this.queue.push({ id: uuid(), ts: new Date().toISOString(), name, attributes });
     if (this.queue.length >= FLUSH_AT) {
       this.flush();
@@ -263,7 +341,9 @@ export class Twillingate {
   private batchAttributes(): Record<string, unknown> {
     const a: Record<string, unknown> = {};
     if (this.userId) a.$user_id = this.userId;
+    if (this.userName) a.$user_name = this.userName;
     if (this.groupId) a.$group_id = this.groupId;
+    if (this.groupName) a.$group_name = this.groupName;
     const v = this.visitorId();
     if (v) a.$install_id = v;
     if (this.platform) a.$platform = this.platform;

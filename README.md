@@ -80,7 +80,8 @@ web, product and app analytics from code:
 ```js
 twillingate.track("signup", { plan: "pro" });   // product event
 twillingate.screen("/settings");                // app screen view
-twillingate.identify("user-123", "org-9");      // identified projects
+twillingate.identify("user-123", "Ada");        // identified projects
+twillingate.group("org-9", "Acme Corp");
 twillingate.reset();                            // on logout
 ```
 

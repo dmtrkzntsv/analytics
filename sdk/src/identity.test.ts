@@ -56,10 +56,12 @@ describe("anonymous mode", () => {
 
   it("identify() carries the user for the session but does not persist it", async () => {
     const t = tg();
-    t.identify("u_42", "org_9");
+    t.identify("u_42", "Ada");
+    t.group("org_9");
     const attrs = await lastAttributes(t);
-    expect(attrs).toMatchObject({ $user_id: "u_42", $group_id: "org_9" });
+    expect(attrs).toMatchObject({ $user_id: "u_42", $user_name: "Ada", $group_id: "org_9" });
     expect(localStorage.getItem("twillingate_user")).toBeNull();
+    expect(localStorage.getItem("twillingate_user_name")).toBeNull();
     // group is org-level, not personal: persisted in both modes
     expect(localStorage.getItem("twillingate_group")).toBe("org_9");
   });
@@ -89,7 +91,8 @@ describe("identified mode", () => {
 
   it("identify() persists the user; reset() clears user, group and visitor", async () => {
     const t = tg({ identity: "identified" });
-    t.identify("u_1", "org_1");
+    t.identify("u_1");
+    t.group("org_1");
     expect(localStorage.getItem("twillingate_user")).toBe("u_1");
     expect(localStorage.getItem("twillingate_group")).toBe("org_1");
 
