@@ -63,6 +63,16 @@ where project = '${params.project}'
 group by source order by visitors desc limit 20
 ```
 
+```sql hosts
+select host, sum(visitors) as visitors, sum(pageviews) as pageviews
+from twillingate.v_web_hosts
+where project = '${params.project}'
+  and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
+               and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')
+  and host != ''
+group by host order by pageviews desc limit 20
+```
+
 ## Pages & referrers
 
 <Grid cols=2>
@@ -72,6 +82,14 @@ group by source order by visitors desc limit 20
         <Column id=pageviews title="Views" fmt=num0 />
     </DataTable>
     <BarChart data={referrers} x=source y=visitors swapXY=true title="Referrers" yFmt=num0 />
+</Grid>
+
+<Grid cols=1>
+    <DataTable data={hosts} rows=10 title="Hosts">
+        <Column id=host title="Host" />
+        <Column id=visitors title="Visitors" fmt=num0 contentType=colorscale />
+        <Column id=pageviews title="Views" fmt=num0 />
+    </DataTable>
 </Grid>
 
 ```sql countries
