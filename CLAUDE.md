@@ -51,3 +51,32 @@ Two consequences worth remembering:
 `make check` (vet + coverage + restore test) is what CI runs — run it before
 pushing. `make build` compiles the binary; `make test` runs the race-enabled
 suite on its own.
+
+## Documentation
+
+`docs/twillingate.md` is the single normative document and the only prose
+the MCP endpoint serves to agents. It is not a summary of the code — it is
+the contract. Update it **in the same commit** as any change to:
+
+- reserved attribute keys or event names (`internal/server/ingest.go`)
+- the ingest wire format or its responses (`internal/server/handlers.go`)
+- the JS SDK's public API, `data-` attributes or defaults
+  (`sdk/src/twillingate.ts`)
+- config keys, env vars or project fields (`internal/config/`)
+- install, upgrade or restore procedure (`deploy/`, `Makefile`)
+- MCP auth modes, client setup, or the set of tools offered
+  (`internal/mcpserver/`)
+- the Evidence dashboards (`internal/dashboards/`, `evidence/`)
+
+Update `schemaViews` in `internal/mcpserver/resources.go` in the same commit
+as any migration that adds or changes a queryable view.
+
+Everything else under `docs/` that it absorbed is a pointer, not a source —
+never add content there. `docs/plausible/README.md` is the exception: it
+documents bytes the collector serves at `/js/plausible-shim.js` and a test
+binds it to them.
+
+`docs_sync_test.go` enforces part of this — reserved keys in both
+directions, the SDK's public symbols, and every queryable web view. The rest
+is on you. A `docs`-only push publishes nothing (`paths-ignore`), so a
+same-commit update costs no extra release.
