@@ -5,8 +5,24 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/dmtrkzntsv/twillingate/internal/civil"
 	"github.com/dmtrkzntsv/twillingate/internal/store"
+	"github.com/google/uuid"
 )
+
+// seedProductEvent writes one product event. platform and appVersion are
+// the typed system columns; attrs is the custom JSON blob.
+func seedProductEvent(t *testing.T, db *DB, project, event, at string,
+	attrs map[string]string, platform, appVersion string) {
+	t.Helper()
+	if err := db.WriteProductEvents(context.Background(), []store.ProductEvent{{
+		ID: uuid.NewString(), Project: project, EventName: event,
+		ActorID: "u1", TS: ts(at), Attributes: attrs,
+		Platform: platform, AppVersion: appVersion,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // seedProductDay: project "app", day 2026-08-10:
 //
@@ -193,5 +209,75 @@ func TestAggregateProductClampsNonPositiveTopN(t *testing.T) {
 				t.Fatalf("kept = %d, want 2 (both real values, clamped topN=%d must behave like the default)", kept, defaultAttrsTopN)
 			}
 		})
+	}
+}
+
+func TestRollupWritesSystemDimensions(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	seedProductEvent(t, db, "blog", "signup", "2026-08-01T10:00:00Z",
+		map[string]string{}, "ios", "1.2.0") // platform, app_version columns
+	if err := db.AggregateProductDay(ctx, "blog",
+		civil.DateOf(ts("2026-08-01T00:00:00Z")), nil, 50); err != nil {
+		t.Fatal(err)
+	}
+	var v string
+	if err := db.db.QueryRow(`SELECT attr_value FROM agg_product_attrs
+		WHERE project='blog' AND attr_key='$platform'`).Scan(&v); err != nil {
+		t.Fatal(err)
+	}
+	if v != "ios" {
+		t.Fatalf("$platform = %q, want ios", v)
+	}
+}
+
+// TestRollupSystemDimensionsDoNotCollideWithCustomKeys guards the $ prefix
+// invariant from the design doc: an event carrying both the typed
+// platform column and a custom "platform" attribute must produce two
+// distinct attr_key rows ($platform and platform), never merged.
+func TestRollupSystemDimensionsDoNotCollideWithCustomKeys(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	seedProductEvent(t, db, "blog", "signup", "2026-08-01T10:00:00Z",
+		map[string]string{"platform": "custom-value"}, "ios", "1.2.0")
+	if err := db.AggregateProductDay(ctx, "blog",
+		civil.DateOf(ts("2026-08-01T00:00:00Z")), []string{"platform"}, 50); err != nil {
+		t.Fatal(err)
+	}
+	var sysVal, customVal string
+	if err := db.db.QueryRow(`SELECT attr_value FROM agg_product_attrs
+		WHERE project='blog' AND attr_key='$platform'`).Scan(&sysVal); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.db.QueryRow(`SELECT attr_value FROM agg_product_attrs
+		WHERE project='blog' AND attr_key='platform'`).Scan(&customVal); err != nil {
+		t.Fatal(err)
+	}
+	if sysVal != "ios" || customVal != "custom-value" {
+		t.Fatalf("$platform=%q platform=%q, want ios / custom-value", sysVal, customVal)
+	}
+}
+
+// TestRollupSystemDimensionsSurviveRawDeletion checks the retention story
+// this task closes: $platform/$app_version rows must exist after the raw
+// day is deleted, for a project declaring no custom attributes at all.
+func TestRollupSystemDimensionsSurviveRawDeletion(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	seedProductEvent(t, db, "blog", "signup", "2026-08-01T10:00:00Z",
+		map[string]string{}, "android", "3.0.0")
+	if err := db.AggregateProductDay(ctx, "blog",
+		civil.DateOf(ts("2026-08-01T00:00:00Z")), nil, 50); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	db.db.QueryRow(`SELECT COUNT(*) FROM product_events`).Scan(&n)
+	if n != 0 {
+		t.Fatalf("raw remaining %d", n)
+	}
+	db.db.QueryRow(`SELECT COUNT(*) FROM agg_product_attrs
+		WHERE attr_key IN ('$platform','$app_version')`).Scan(&n)
+	if n != 2 {
+		t.Fatalf("system dimension rows = %d, want 2", n)
 	}
 }
