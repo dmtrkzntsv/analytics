@@ -113,6 +113,8 @@ func cmdProject(args []string, stdout io.Writer) int {
 		identity := sf.String("identity", "anonymous", "anonymous|identified")
 		var origins multiFlag
 		sf.Var(&origins, "origin", "allowed origin (repeatable)")
+		var attrs multiFlag
+		sf.Var(&attrs, "attr", "attribute key to break down (repeatable)")
 		if err := sf.Parse(subArgs); err != nil {
 			return 2
 		}
@@ -124,6 +126,7 @@ func cmdProject(args []string, stdout io.Writer) int {
 			spec.Name = *name
 			spec.Identity = *identity
 			spec.AllowedOrigins = origins
+			spec.Attributes = attrs
 		} else {
 			// For update, start from current values and overlay only explicitly-set flags
 			snap := ops.Reg.Snapshot(ctx)
@@ -149,6 +152,9 @@ func cmdProject(args []string, stdout io.Writer) int {
 				case "origin":
 					// If -origin was passed at all, replace the whole list
 					spec.AllowedOrigins = origins
+				case "attr":
+					// If -attr was passed at all, replace the whole list
+					spec.Attributes = attrs
 				}
 			})
 		}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -117,6 +118,95 @@ func TestProjectUpdateMergeSemantics(t *testing.T) {
 	}
 	if strings.Contains(listing, "identified") {
 		t.Fatalf("old identity still present: %s", listing)
+	}
+}
+
+// TestProjectAttrFlag proves the repeatable -attr flag on `project create`
+// reaches storage: the declared attributes must round-trip through
+// `config export`, not merely appear as substrings somewhere in the output.
+func TestProjectAttrFlag(t *testing.T) {
+	withDB(t)
+	var out bytes.Buffer
+	if code := run([]string{"project", "create", "-alias", "blog",
+		"-attr", "plan", "-attr", "tier"}, &out); code != 0 {
+		t.Fatalf("create = %d: %s", code, out.String())
+	}
+	out.Reset()
+	if code := run([]string{"config", "export"}, &out); code != 0 {
+		t.Fatalf("export: exit %d: %s", code, out.String())
+	}
+	exported := out.String()
+	if !strings.Contains(exported, `"plan"`) ||
+		!strings.Contains(exported, `"tier"`) {
+		t.Fatalf("export missing declared attributes: %s", exported)
+	}
+	var doc struct {
+		Projects []struct {
+			Alias      string   `json:"alias"`
+			Attributes []string `json:"attributes"`
+		} `json:"projects"`
+	}
+	if err := json.Unmarshal([]byte(exported), &doc); err != nil {
+		t.Fatalf("decode export: %v\n%s", err, exported)
+	}
+	var blog *struct {
+		Alias      string   `json:"alias"`
+		Attributes []string `json:"attributes"`
+	}
+	for i := range doc.Projects {
+		if doc.Projects[i].Alias == "blog" {
+			blog = &doc.Projects[i]
+		}
+	}
+	if blog == nil {
+		t.Fatalf("blog missing from export: %s", exported)
+	}
+	if len(blog.Attributes) != 2 || blog.Attributes[0] != "plan" || blog.Attributes[1] != "tier" {
+		t.Fatalf("blog.Attributes = %v, want [plan tier]", blog.Attributes)
+	}
+}
+
+// TestProjectAttrUpdateMergeSemantics is the CLI-level guard for the merge
+// rule -attr must follow, matching -origin exactly (docs/configuration.md:63):
+// omitting -attr on `project update` leaves the current list untouched, and
+// supplying it at all replaces the whole list wholesale.
+func TestProjectAttrUpdateMergeSemantics(t *testing.T) {
+	withDB(t)
+	var out bytes.Buffer
+	if code := run([]string{"project", "create", "-alias", "blog",
+		"-attr", "plan", "-attr", "tier"}, &out); code != 0 {
+		t.Fatalf("create: exit %d: %s", code, out.String())
+	}
+
+	// update without -attr must leave the declared attributes untouched
+	out.Reset()
+	if code := run([]string{"project", "update", "-alias", "blog", "-name", "Blog Renamed"}, &out); code != 0 {
+		t.Fatalf("update: exit %d: %s", code, out.String())
+	}
+	out.Reset()
+	if code := run([]string{"config", "export"}, &out); code != 0 {
+		t.Fatalf("export: exit %d: %s", code, out.String())
+	}
+	exported := out.String()
+	if !strings.Contains(exported, `"plan"`) || !strings.Contains(exported, `"tier"`) {
+		t.Fatalf("update without -attr wiped declared attributes: %s", exported)
+	}
+
+	// update with -attr must replace the whole list, not merge into it
+	out.Reset()
+	if code := run([]string{"project", "update", "-alias", "blog", "-attr", "solo"}, &out); code != 0 {
+		t.Fatalf("update -attr: exit %d: %s", code, out.String())
+	}
+	out.Reset()
+	if code := run([]string{"config", "export"}, &out); code != 0 {
+		t.Fatalf("export: exit %d: %s", code, out.String())
+	}
+	exported = out.String()
+	if strings.Contains(exported, `"plan"`) || strings.Contains(exported, `"tier"`) {
+		t.Fatalf("update -attr merged instead of replacing: %s", exported)
+	}
+	if !strings.Contains(exported, `"solo"`) {
+		t.Fatalf("update -attr did not apply: %s", exported)
 	}
 }
 

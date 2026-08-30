@@ -207,6 +207,64 @@ func TestUpdateProjectEmptyOriginsPreservesExisting(t *testing.T) {
 	}
 }
 
+// TestCreateProjectSetsAttributes proves create_project's Attributes field
+// reaches manage.ProjectSpec and is stored, not just accepted and dropped.
+func TestCreateProjectSetsAttributes(t *testing.T) {
+	h, cs := newTestHost(t)
+	ctx := context.Background()
+	res := callTool(t, cs, "create_project", map[string]any{
+		"alias": "shop", "attributes": []string{"plan", "tier"}})
+	if res.IsError {
+		t.Fatalf("create: %s", textOf(res))
+	}
+	p := h.reg.Snapshot(ctx).Project("shop")
+	if p == nil {
+		t.Fatalf("shop missing from registry")
+	}
+	if len(p.Attributes) != 2 || p.Attributes[0] != "plan" || p.Attributes[1] != "tier" {
+		t.Fatalf("Attributes = %v, want [plan tier]", p.Attributes)
+	}
+}
+
+// TestUpdateProjectAttributesMergeSemantics is the merge rule for
+// Attributes, matching AllowedOrigins: omitting the field on update_project
+// leaves the current declared attributes untouched, and supplying a
+// non-nil list replaces the whole thing (never merges element-wise).
+func TestUpdateProjectAttributesMergeSemantics(t *testing.T) {
+	h, cs := newTestHost(t)
+	ctx := context.Background()
+	if res := callTool(t, cs, "update_project", map[string]any{
+		"alias": "blog", "attributes": []string{"plan", "tier"}}); res.IsError {
+		t.Fatalf("seed attributes: %s", textOf(res))
+	}
+
+	// name-only update must not wipe attributes
+	if res := callTool(t, cs, "update_project", map[string]any{
+		"alias": "blog", "name": "Blog Renamed"}); res.IsError {
+		t.Fatalf("update: %s", textOf(res))
+	}
+	p := h.reg.Snapshot(ctx).Project("blog")
+	if p == nil {
+		t.Fatalf("blog vanished from registry")
+	}
+	if len(p.Attributes) != 2 || p.Attributes[0] != "plan" || p.Attributes[1] != "tier" {
+		t.Fatalf("attributes not preserved by name-only update, got %v", p.Attributes)
+	}
+
+	// supplying attributes replaces the whole list
+	if res := callTool(t, cs, "update_project", map[string]any{
+		"alias": "blog", "attributes": []string{"solo"}}); res.IsError {
+		t.Fatalf("update attributes: %s", textOf(res))
+	}
+	p = h.reg.Snapshot(ctx).Project("blog")
+	if p == nil {
+		t.Fatalf("blog vanished from registry")
+	}
+	if len(p.Attributes) != 1 || p.Attributes[0] != "solo" {
+		t.Fatalf("attributes not replaced wholesale, got %v", p.Attributes)
+	}
+}
+
 // TestUpdateProjectUnknownAlias checks the tool names the bad alias
 // rather than surfacing a nil-pointer or an opaque error.
 func TestUpdateProjectUnknownAlias(t *testing.T) {
