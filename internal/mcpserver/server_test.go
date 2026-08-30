@@ -21,9 +21,8 @@ func newHandlerFixture(t *testing.T, over map[string]string) http.Handler {
 	t.Helper()
 	path := seedDB(t) // from readdb_test.go: migrated DB with project 'blog'
 	base := map[string]string{
-		"DATABASE_DSN":  "sqlite://" + path,
-		"MCP_AUTH_MODE": "token",
-		"MCP_TOKEN":     "ar_testtoken",
+		"DATABASE_DSN": "sqlite://" + path,
+		"MCP_AUTH_DSN": "token://ar_testtoken",
 	}
 	for k, v := range over {
 		if v == "" {
@@ -58,9 +57,10 @@ func newHandlerFixture(t *testing.T, over map[string]string) http.Handler {
 }
 
 func TestMCPRequires401WithChallenge(t *testing.T) {
+	f := newJWKSFixture(t)
 	h := newHandlerFixture(t, map[string]string{
-		"MCP_AUTH_ISSUER":  "https://idp.example.com",
-		"MCP_RESOURCE_URL": "https://analytics.example.com/mcp"})
+		"MCP_AUTH_DSN": "oauth+insecure://" + strings.TrimPrefix(f.issuer, "http://") +
+			"?resource=https://twillingate.example.com/mcp"})
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("POST", "/mcp", strings.NewReader("{}")))
 	if rec.Code != http.StatusUnauthorized {
@@ -73,7 +73,7 @@ func TestMCPRequires401WithChallenge(t *testing.T) {
 	// The resource URL carries a /mcp path; the challenge must be the
 	// host-rooted well-known URL (RFC 9728), not ResourceURL+"/.well-known/..."
 	// which would 404 by appending onto the /mcp path segment.
-	const want = "https://analytics.example.com/.well-known/oauth-protected-resource"
+	const want = "https://twillingate.example.com/.well-known/oauth-protected-resource"
 	if !strings.Contains(www, want) {
 		t.Errorf("WWW-Authenticate = %q; want resource_metadata=%q (host-rooted, no /mcp segment)", www, want)
 	}
@@ -108,16 +108,17 @@ func TestMCPWrongTokenRejected(t *testing.T) {
 }
 
 func TestPRMServedWhenIssuerConfigured(t *testing.T) {
+	f := newJWKSFixture(t)
 	h := newHandlerFixture(t, map[string]string{
-		"MCP_AUTH_ISSUER":  "https://idp.example.com",
-		"MCP_RESOURCE_URL": "https://analytics.example.com/mcp"})
+		"MCP_AUTH_DSN": "oauth+insecure://" + strings.TrimPrefix(f.issuer, "http://") +
+			"?resource=https://twillingate.example.com/mcp"})
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/.well-known/oauth-protected-resource", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("code = %d", rec.Code)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "idp.example.com") || !strings.Contains(body, "analytics.example.com") {
+	if !strings.Contains(body, f.issuer) || !strings.Contains(body, "twillingate.example.com") {
 		t.Errorf("metadata = %s", body)
 	}
 }
@@ -136,7 +137,7 @@ func TestTokenNeverLoggedAtInfo(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	path := seedDB(t)
 	base := map[string]string{"DATABASE_DSN": "sqlite://" + path,
-		"MCP_AUTH_MODE": "token", "MCP_TOKEN": "ar_secrettoken"}
+		"MCP_AUTH_DSN": "token://ar_secrettoken"}
 	cfg, _ := config.FromEnv(func(k string) (string, bool) { v, ok := base[k]; return v, ok })
 	st, _ := store.Open(cfg.Database)
 	defer st.Close()
@@ -177,10 +178,8 @@ func initReq() *http.Request {
 func TestMCPOAuthModePasses(t *testing.T) {
 	f := newJWKSFixture(t)
 	h := newHandlerFixture(t, map[string]string{
-		"MCP_AUTH_MODE":    "oauth",
-		"MCP_TOKEN":        "",
-		"MCP_AUTH_ISSUER":  f.issuer,
-		"MCP_RESOURCE_URL": "https://analytics.example.com/mcp",
+		"MCP_AUTH_DSN": "oauth+insecure://" + strings.TrimPrefix(f.issuer, "http://") +
+			"?resource=https://twillingate.example.com/mcp",
 	})
 
 	req := initReq()
@@ -211,7 +210,7 @@ func TestMCPOAuthModePasses(t *testing.T) {
 				t.Fatalf("code = %d", rec.Code)
 			}
 			www := rec.Header().Get("WWW-Authenticate")
-			want := "https://analytics.example.com/.well-known/oauth-protected-resource"
+			want := "https://twillingate.example.com/.well-known/oauth-protected-resource"
 			if !strings.Contains(www, "resource_metadata") || !strings.Contains(www, want) {
 				t.Errorf("WWW-Authenticate = %q; want absolute metadata URL %q", www, want)
 			}
@@ -235,10 +234,8 @@ func TestMCPOAuthModePasses(t *testing.T) {
 func TestMCPCloudflareModePasses(t *testing.T) {
 	f := newJWKSFixture(t)
 	h := newHandlerFixture(t, map[string]string{
-		"MCP_AUTH_MODE":      "cloudflare",
-		"MCP_TOKEN":          "",
-		"MCP_CF_TEAM_DOMAIN": f.issuer, // already has a scheme; must not be double-prefixed
-		"MCP_CF_AUD":         "aud-tag-1",
+		"MCP_AUTH_DSN": "cloudflare+insecure://" + strings.TrimPrefix(f.issuer, "http://") +
+			"?aud=aud-tag-1",
 	})
 
 	assertion := f.sign(t, jwt.MapClaims{
@@ -285,7 +282,7 @@ func TestHealthzUnauthenticated(t *testing.T) {
 func TestRegisterOnWithoutHealthzOmitsRoute(t *testing.T) {
 	path := seedDB(t)
 	base := map[string]string{"DATABASE_DSN": "sqlite://" + path,
-		"MCP_AUTH_MODE": "token", "MCP_TOKEN": "ar_testtoken"}
+		"MCP_AUTH_DSN": "token://ar_testtoken"}
 	cfg, err := config.FromEnv(func(k string) (string, bool) { v, ok := base[k]; return v, ok })
 	if err != nil {
 		t.Fatal(err)
@@ -330,15 +327,13 @@ func TestWrapAuthUnknownMode(t *testing.T) {
 // TestBuildFailsWhenOAuthIssuerUnreachable exercises Build's own error
 // branch (wrapAuth failing after OpenReadDB already succeeded, so Build
 // must close the DB it just opened rather than leak it) — ValidateMCP
-// only checks that MCP_AUTH_ISSUER is set, not that it is reachable, so
+// only parses MCP_AUTH_DSN, it does not probe the issuer, so
 // an unreachable issuer surfaces here, at Build time.
 func TestBuildFailsWhenOAuthIssuerUnreachable(t *testing.T) {
 	path := seedDB(t)
 	base := map[string]string{
-		"DATABASE_DSN":     "sqlite://" + path,
-		"MCP_AUTH_MODE":    "oauth",
-		"MCP_AUTH_ISSUER":  "http://127.0.0.1:0",
-		"MCP_RESOURCE_URL": "https://analytics.example.com/mcp",
+		"DATABASE_DSN": "sqlite://" + path,
+		"MCP_AUTH_DSN": "oauth+insecure://127.0.0.1:0?resource=https://twillingate.example.com/mcp",
 	}
 	cfg, err := config.FromEnv(func(k string) (string, bool) { v, ok := base[k]; return v, ok })
 	if err != nil {

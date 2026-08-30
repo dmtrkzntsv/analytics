@@ -264,8 +264,7 @@ func mcpTestConfig(t *testing.T, addr, dbPath, mcpAddr string) *config.Config {
 		"BUFFER_FLUSH_MAX_EVENTS": "2",
 		"BUFFER_FLUSH_INTERVAL":   "50ms",
 		"BUFFER_CAPACITY":         "100",
-		"MCP_AUTH_MODE":           "token",
-		"MCP_TOKEN":               "ar_apptest",
+		"MCP_AUTH_DSN":            "token://ar_apptest",
 	}
 	if mcpAddr != "" {
 		vars["MCP_ADDR"] = mcpAddr

@@ -256,8 +256,8 @@ func TestLoadDoesNotRequireProjectsFile(t *testing.T) {
 
 func mcpEnv(over map[string]string) func(string) (string, bool) {
 	base := map[string]string{
-		"DATABASE_DSN":  "sqlite:///tmp/x.db",
-		"MCP_AUTH_MODE": "token", "MCP_TOKEN": "ar_x",
+		"DATABASE_DSN": "sqlite:///tmp/x.db",
+		"MCP_AUTH_DSN": "token://ar_x",
 	}
 	for k, v := range over {
 		if v == "" {
@@ -275,23 +275,26 @@ func TestValidateMCP(t *testing.T) {
 		over map[string]string
 		ok   bool
 	}{
-		{"token mode ok", nil, true},
-		{"no mode", map[string]string{"MCP_AUTH_MODE": ""}, false},
-		{"unknown mode", map[string]string{"MCP_AUTH_MODE": "basic"}, false},
-		{"token mode missing token", map[string]string{"MCP_TOKEN": ""}, false},
-		{"oauth ok", map[string]string{"MCP_AUTH_MODE": "oauth", "MCP_TOKEN": "",
-			"MCP_AUTH_ISSUER":  "https://idp.example.com",
-			"MCP_RESOURCE_URL": "https://analytics.example.com/mcp"}, true},
-		{"oauth missing issuer", map[string]string{"MCP_AUTH_MODE": "oauth", "MCP_TOKEN": "",
-			"MCP_RESOURCE_URL": "https://analytics.example.com/mcp"}, false},
-		{"oauth missing resource", map[string]string{"MCP_AUTH_MODE": "oauth", "MCP_TOKEN": "",
-			"MCP_AUTH_ISSUER": "https://idp.example.com"}, false},
-		{"cloudflare ok", map[string]string{"MCP_AUTH_MODE": "cloudflare", "MCP_TOKEN": "",
-			"MCP_CF_TEAM_DOMAIN": "team.cloudflareaccess.com", "MCP_CF_AUD": "aud123"}, true},
-		{"cloudflare missing aud", map[string]string{"MCP_AUTH_MODE": "cloudflare", "MCP_TOKEN": "",
-			"MCP_CF_TEAM_DOMAIN": "team.cloudflareaccess.com"}, false},
-		{"token mode with issuer missing resource url", map[string]string{
-			"MCP_AUTH_ISSUER": "https://idp.example.com"}, false},
+		{"token ok", nil, true},
+		{"no dsn", map[string]string{"MCP_AUTH_DSN": ""}, false},
+		{"not a dsn", map[string]string{"MCP_AUTH_DSN": "token"}, false},
+		{"unknown scheme", map[string]string{"MCP_AUTH_DSN": "basic://x"}, false},
+		{"empty token", map[string]string{"MCP_AUTH_DSN": "token://"}, false},
+		{"oauth ok", map[string]string{
+			"MCP_AUTH_DSN": "oauth://idp.example.com?resource=https://twillingate.example.com/mcp"}, true},
+		{"oauth resource from PUBLIC_URL", map[string]string{
+			"MCP_AUTH_DSN": "oauth://idp.example.com",
+			"PUBLIC_URL":   "https://twillingate.example.com"}, true},
+		{"oauth no resource and no PUBLIC_URL", map[string]string{
+			"MCP_AUTH_DSN": "oauth://idp.example.com"}, false},
+		{"oauth empty issuer", map[string]string{
+			"MCP_AUTH_DSN": "oauth://?resource=https://twillingate.example.com/mcp"}, false},
+		{"cloudflare ok", map[string]string{
+			"MCP_AUTH_DSN": "cloudflare://team.cloudflareaccess.com?aud=aud123"}, true},
+		{"cloudflare missing aud", map[string]string{
+			"MCP_AUTH_DSN": "cloudflare://team.cloudflareaccess.com"}, false},
+		{"cloudflare missing team", map[string]string{
+			"MCP_AUTH_DSN": "cloudflare://?aud=aud123"}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -305,6 +308,87 @@ func TestValidateMCP(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMCPAuthDSNParsing(t *testing.T) {
+	t.Run("token", func(t *testing.T) {
+		cfg, err := FromEnv(mcpEnv(nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.MCP.AuthMode != "token" || cfg.MCP.Token != "ar_x" {
+			t.Errorf("mode = %q token = %q", cfg.MCP.AuthMode, cfg.MCP.Token)
+		}
+	})
+	t.Run("oauth issuer keeps path, resource explicit", func(t *testing.T) {
+		cfg, err := FromEnv(mcpEnv(map[string]string{
+			"MCP_AUTH_DSN": "oauth://idp.example.com/tenant1?resource=https://t.example.com/mcp&audience=aud9"}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := cfg.MCP
+		if m.AuthMode != "oauth" || m.Issuer != "https://idp.example.com/tenant1" {
+			t.Errorf("mode = %q issuer = %q", m.AuthMode, m.Issuer)
+		}
+		if m.ResourceURL != "https://t.example.com/mcp" || m.Audience != "aud9" {
+			t.Errorf("resource = %q audience = %q", m.ResourceURL, m.Audience)
+		}
+	})
+	t.Run("oauth defaults resource to PUBLIC_URL/mcp and audience to resource", func(t *testing.T) {
+		cfg, err := FromEnv(mcpEnv(map[string]string{
+			"MCP_AUTH_DSN": "oauth://idp.example.com",
+			"PUBLIC_URL":   "https://twillingate.example.com"}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := cfg.MCP
+		if m.ResourceURL != "https://twillingate.example.com/mcp" {
+			t.Errorf("resource = %q", m.ResourceURL)
+		}
+		if m.Audience != m.ResourceURL {
+			t.Errorf("audience = %q, want the resource URL", m.Audience)
+		}
+	})
+	t.Run("oauth+insecure issuer is http for local IdPs", func(t *testing.T) {
+		cfg, err := FromEnv(mcpEnv(map[string]string{
+			"MCP_AUTH_DSN": "oauth+insecure://127.0.0.1:9999?resource=https://t.example.com/mcp"}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.MCP.AuthMode != "oauth" || cfg.MCP.Issuer != "http://127.0.0.1:9999" {
+			t.Errorf("mode = %q issuer = %q", cfg.MCP.AuthMode, cfg.MCP.Issuer)
+		}
+	})
+	t.Run("cloudflare", func(t *testing.T) {
+		cfg, err := FromEnv(mcpEnv(map[string]string{
+			"MCP_AUTH_DSN": "cloudflare://team.cloudflareaccess.com?aud=aud123"}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := cfg.MCP
+		if m.AuthMode != "cloudflare" || m.CFTeamDomain != "team.cloudflareaccess.com" || m.CFAud != "aud123" {
+			t.Errorf("mode = %q team = %q aud = %q", m.AuthMode, m.CFTeamDomain, m.CFAud)
+		}
+	})
+	t.Run("cloudflare+insecure team domain carries http scheme", func(t *testing.T) {
+		cfg, err := FromEnv(mcpEnv(map[string]string{
+			"MCP_AUTH_DSN": "cloudflare+insecure://127.0.0.1:9999?aud=aud123"}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.MCP.CFTeamDomain != "http://127.0.0.1:9999" {
+			t.Errorf("team = %q", cfg.MCP.CFTeamDomain)
+		}
+	})
+	t.Run("malformed DSN does not fail FromEnv, only ValidateMCP", func(t *testing.T) {
+		cfg, err := FromEnv(mcpEnv(map[string]string{"MCP_AUTH_DSN": "basic://x"}))
+		if err != nil {
+			t.Fatalf("FromEnv must stay lenient for bare `serve`: %v", err)
+		}
+		if err := cfg.ValidateMCP(); err == nil {
+			t.Error("ValidateMCP accepted an unknown scheme")
+		}
+	})
 }
 
 func TestMCPDefaults(t *testing.T) {
@@ -324,13 +408,12 @@ func TestMCPDefaults(t *testing.T) {
 }
 
 func TestMCPAudienceDefaultsToResource(t *testing.T) {
-	cfg, err := FromEnv(mcpEnv(map[string]string{"MCP_AUTH_MODE": "oauth", "MCP_TOKEN": "",
-		"MCP_AUTH_ISSUER":  "https://idp.example.com",
-		"MCP_RESOURCE_URL": "https://analytics.example.com/mcp"}))
+	cfg, err := FromEnv(mcpEnv(map[string]string{
+		"MCP_AUTH_DSN": "oauth://idp.example.com?resource=https://twillingate.example.com/mcp"}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.MCP.Audience != "https://analytics.example.com/mcp" {
+	if cfg.MCP.Audience != "https://twillingate.example.com/mcp" {
 		t.Errorf("Audience = %q", cfg.MCP.Audience)
 	}
 }

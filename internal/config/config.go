@@ -99,18 +99,36 @@ type DashboardsConfig struct {
 	WorkDir    string
 }
 
+// MCPConfig carries the -mcp surface settings. Authentication comes from
+// the single MCP_AUTH_DSN; parsing fans it out into the mode-specific
+// fields the verifiers consume:
+//
+//	token://<token>
+//	cloudflare://<team>.cloudflareaccess.com?aud=<application AUD tag>
+//	oauth://<issuer-host>[/path][?resource=<url>][&audience=<aud>]
+//
+// The oauth issuer is https://<host>[/path]; resource defaults to
+// PUBLIC_URL + "/mcp", audience to the resource URL. The +insecure scheme
+// variants (oauth+insecure, cloudflare+insecure) produce an http issuer
+// for local IdPs and tests.
 type MCPConfig struct {
-	Addr         string        // MCP_ADDR, defaults to Listen
-	DBPath       string        // MCP_DB_PATH, defaults to DATABASE_DSN path
-	AuthMode     string        // "oauth" | "cloudflare" | "token"; no default
-	ResourceURL  string        // MCP_RESOURCE_URL
-	Issuer       string        // MCP_AUTH_ISSUER
-	Audience     string        // MCP_AUTH_AUDIENCE, defaults to ResourceURL
-	CFTeamDomain string        // MCP_CF_TEAM_DOMAIN
-	CFAud        string        // MCP_CF_AUD
-	Token        string        // MCP_TOKEN
+	Addr         string // MCP_ADDR, defaults to Listen
+	DBPath       string // MCP_DB_PATH, defaults to DATABASE_DSN path
+	AuthDSN      string // MCP_AUTH_DSN, verbatim
+	AuthMode     string // "oauth" | "cloudflare" | "token", from the DSN scheme
+	ResourceURL  string
+	Issuer       string
+	Audience     string
+	CFTeamDomain string
+	CFAud        string
+	Token        string
 	QueryTimeout time.Duration // MCP_QUERY_TIMEOUT, default 10s
 	QueryMaxRows int           // MCP_QUERY_MAX_ROWS, default 1000
+
+	// authErr holds the DSN parse failure until ValidateMCP reports it:
+	// bare `serve` must stay lenient (warn and skip MCP), so FromEnv
+	// cannot fail on a broken auth DSN.
+	authErr error
 }
 
 type Config struct {
@@ -236,16 +254,13 @@ func parse(lookup func(string) (string, bool), dashboards bool) (*Config, error)
 	c.MCP = MCPConfig{
 		Addr:         e.str("MCP_ADDR", c.Listen),
 		DBPath:       e.str("MCP_DB_PATH", strings.TrimPrefix(c.Database, "sqlite://")),
-		AuthMode:     e.str("MCP_AUTH_MODE", ""),
-		ResourceURL:  e.str("MCP_RESOURCE_URL", ""),
-		Issuer:       e.str("MCP_AUTH_ISSUER", ""),
-		CFTeamDomain: e.str("MCP_CF_TEAM_DOMAIN", ""),
-		CFAud:        e.str("MCP_CF_AUD", ""),
-		Token:        e.str("MCP_TOKEN", ""),
+		AuthDSN:      e.str("MCP_AUTH_DSN", ""),
 		QueryTimeout: e.dur("MCP_QUERY_TIMEOUT", 10*time.Second),
 		QueryMaxRows: e.num("MCP_QUERY_MAX_ROWS", 1000),
 	}
-	c.MCP.Audience = e.str("MCP_AUTH_AUDIENCE", c.MCP.ResourceURL)
+	if c.MCP.AuthDSN != "" {
+		c.MCP.authErr = c.parseMCPAuthDSN()
+	}
 	if e.err != nil {
 		return nil, e.err
 	}
@@ -303,41 +318,80 @@ func (c *Config) MaxEventAge() time.Duration {
 	return time.Duration(c.Retention.App.RawDays) * 24 * time.Hour
 }
 
+// parseMCPAuthDSN fans MCP_AUTH_DSN out into the mode-specific MCPConfig
+// fields. Called from parse once the rest of the config (PUBLIC_URL for
+// the oauth resource default) is known.
+func (c *Config) parseMCPAuthDSN() error {
+	m := &c.MCP
+	scheme, rest, ok := strings.Cut(m.AuthDSN, "://")
+	if !ok {
+		return fmt.Errorf("config: invalid MCP_AUTH_DSN %q (token://<token>, cloudflare://<team>?aud=<tag> or oauth://<issuer-host>)", m.AuthDSN)
+	}
+	switch scheme {
+	case "token":
+		// Not URL-parsed: the token is opaque and must survive verbatim.
+		m.AuthMode = "token"
+		m.Token = rest
+		if m.Token == "" {
+			return fmt.Errorf("config: MCP_AUTH_DSN token:// requires a token (mint with `twillingate keygen -mcp`)")
+		}
+	case "cloudflare", "cloudflare+insecure":
+		u, err := url.Parse(m.AuthDSN)
+		if err != nil {
+			return fmt.Errorf("config: invalid MCP_AUTH_DSN: %v", err)
+		}
+		m.AuthMode = "cloudflare"
+		m.CFTeamDomain = u.Host
+		if scheme == "cloudflare+insecure" {
+			// A scheme-carrying team domain is used as-is by the
+			// verifier; this keeps local IdPs and tests on http.
+			m.CFTeamDomain = "http://" + u.Host
+		}
+		m.CFAud = u.Query().Get("aud")
+		if u.Host == "" {
+			return fmt.Errorf("config: MCP_AUTH_DSN cloudflare:// requires a team domain (cloudflare://<team>.cloudflareaccess.com?aud=<tag>)")
+		}
+		if m.CFAud == "" {
+			return fmt.Errorf("config: MCP_AUTH_DSN cloudflare:// requires ?aud=<application AUD tag>")
+		}
+	case "oauth", "oauth+insecure":
+		u, err := url.Parse(m.AuthDSN)
+		if err != nil {
+			return fmt.Errorf("config: invalid MCP_AUTH_DSN: %v", err)
+		}
+		if u.Host == "" {
+			return fmt.Errorf("config: MCP_AUTH_DSN oauth:// requires an issuer host (oauth://idp.example.com)")
+		}
+		m.AuthMode = "oauth"
+		issuerScheme := "https"
+		if scheme == "oauth+insecure" {
+			issuerScheme = "http"
+		}
+		m.Issuer = issuerScheme + "://" + u.Host + strings.TrimSuffix(u.Path, "/")
+		q := u.Query()
+		m.ResourceURL = q.Get("resource")
+		if m.ResourceURL == "" && c.PublicURL != "" {
+			m.ResourceURL = c.PublicURL + "/mcp"
+		}
+		if m.ResourceURL == "" {
+			return fmt.Errorf("config: MCP_AUTH_DSN oauth:// requires ?resource=<url> or PUBLIC_URL to derive it from")
+		}
+		m.Audience = q.Get("audience")
+		if m.Audience == "" {
+			m.Audience = m.ResourceURL
+		}
+	default:
+		return fmt.Errorf("config: unknown MCP_AUTH_DSN scheme %q (token, cloudflare or oauth)", scheme)
+	}
+	return nil
+}
+
 // ValidateMCP fail-fasts the -mcp surface (endpoint spec §4): there is no
 // unauthenticated mode and no way to reach one by omission.
 func (c *Config) ValidateMCP() error {
 	m := c.MCP
-	switch m.AuthMode {
-	case "token":
-		if m.Token == "" {
-			return fmt.Errorf("config: MCP_AUTH_MODE=token requires MCP_TOKEN (mint with `twillingate keygen -mcp`)")
-		}
-	case "oauth":
-		if m.Issuer == "" {
-			return fmt.Errorf("config: MCP_AUTH_MODE=oauth requires MCP_AUTH_ISSUER")
-		}
-		if m.ResourceURL == "" {
-			return fmt.Errorf("config: MCP_AUTH_MODE=oauth requires MCP_RESOURCE_URL")
-		}
-	case "cloudflare":
-		if m.CFTeamDomain == "" {
-			return fmt.Errorf("config: MCP_AUTH_MODE=cloudflare requires MCP_CF_TEAM_DOMAIN")
-		}
-		if m.CFAud == "" {
-			return fmt.Errorf("config: MCP_AUTH_MODE=cloudflare requires MCP_CF_AUD")
-		}
-	case "":
-		return fmt.Errorf("config: -mcp requires MCP_AUTH_MODE (oauth, cloudflare or token)")
-	default:
-		return fmt.Errorf("config: unknown MCP_AUTH_MODE %q (oauth, cloudflare or token)", m.AuthMode)
+	if m.AuthDSN == "" {
+		return fmt.Errorf("config: -mcp requires MCP_AUTH_DSN (token://<token>, cloudflare://<team>?aud=<tag> or oauth://<issuer-host>)")
 	}
-	// An issuer with no resource URL produces a spec-broken RFC 9728
-	// surface regardless of mode: a relative resource_metadata pointer
-	// in WWW-Authenticate and a PRM document with an empty `resource`.
-	// oauth mode already requires both above; this catches token mode
-	// with MCP_AUTH_ISSUER set (which opts into the PRM route).
-	if m.Issuer != "" && m.ResourceURL == "" {
-		return fmt.Errorf("config: MCP_AUTH_ISSUER requires MCP_RESOURCE_URL")
-	}
-	return nil
+	return m.authErr
 }

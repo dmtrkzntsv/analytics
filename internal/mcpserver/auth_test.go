@@ -52,7 +52,7 @@ func newJWKSFixture(t *testing.T) *jwksFixture {
 	}
 	mux.HandleFunc("/jwks", jwksHandler)
 	// Same keys under Cloudflare Access's real JWKS path, so a fixture
-	// can double as an MCP_CF_TEAM_DOMAIN in cloudflare-mode tests
+	// can double as a cloudflare team domain in cloudflare-mode tests
 	// without a second key set to keep in sync.
 	mux.HandleFunc("/cdn-cgi/access/certs", jwksHandler)
 	f.server = httptest.NewServer(mux)
@@ -74,7 +74,7 @@ func (f *jwksFixture) sign(t *testing.T, claims jwt.MapClaims) string {
 
 func (f *jwksFixture) claims(over jwt.MapClaims) jwt.MapClaims {
 	c := jwt.MapClaims{
-		"iss": f.issuer, "aud": "https://analytics.example.com/mcp",
+		"iss": f.issuer, "aud": "https://twillingate.example.com/mcp",
 		"sub": "user@example.com", "exp": time.Now().Add(time.Hour).Unix(),
 	}
 	for k, v := range over {
@@ -89,7 +89,7 @@ func TestOAuthVerifier(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v := OAuthVerifier(f.issuer, "https://analytics.example.com/mcp",
+	v := OAuthVerifier(f.issuer, "https://twillingate.example.com/mcp",
 		NewJWKSCache(url, f.server.Client()))
 
 	info, err := v(context.Background(), f.sign(t, f.claims(nil)), nil)
@@ -120,7 +120,7 @@ func TestOAuthVerifier(t *testing.T) {
 func TestOAuthVerifierRejectsHMACAndNone(t *testing.T) {
 	f := newJWKSFixture(t)
 	url, _ := DiscoverJWKSURL(context.Background(), f.issuer, f.server.Client())
-	v := OAuthVerifier(f.issuer, "https://analytics.example.com/mcp",
+	v := OAuthVerifier(f.issuer, "https://twillingate.example.com/mcp",
 		NewJWKSCache(url, f.server.Client()))
 	// HMAC token signed with an arbitrary secret; alg allowlist must
 	// reject it before any key lookup happens.
@@ -386,7 +386,7 @@ func TestCloudflareVerifierPrependsScheme(t *testing.T) {
 	f := newJWKSFixture(t)
 	// f.issuer is an httptest URL like "http://127.0.0.1:PORT"; strip the
 	// scheme to get a bare "domain" the way an operator would configure
-	// MCP_CF_TEAM_DOMAIN, and sign a token whose iss has "https://" added
+	// the team domain, and sign a token whose iss has "https://" added
 	// back exactly the way CloudflareVerifier is documented to do it.
 	bareDomain := strings.TrimPrefix(f.issuer, "http://")
 	cache := NewJWKSCache(f.issuer+"/cdn-cgi/access/certs", f.server.Client())

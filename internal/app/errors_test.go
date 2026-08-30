@@ -138,11 +138,10 @@ func TestServeFailsOnMCPHandlerError(t *testing.T) {
 		manage.ProjectSpec{Alias: "app", Name: "App", AllowedOrigins: []string{"https://app.com"}},
 		"ak_test", "web")
 	cfg := configtest.Load(t, map[string]string{
-		"LISTEN_ADDR":      freePort(t),
-		"DATABASE_DSN":     "sqlite://" + dbPath,
-		"MCP_AUTH_MODE":    "oauth",
-		"MCP_AUTH_ISSUER":  "http://127.0.0.1:1", // nothing listens on port 1: fails fast
-		"MCP_RESOURCE_URL": "https://mcp.example.com",
+		"LISTEN_ADDR":  freePort(t),
+		"DATABASE_DSN": "sqlite://" + dbPath,
+		// nothing listens on port 1: fails fast
+		"MCP_AUTH_DSN": "oauth+insecure://127.0.0.1:1?resource=https://mcp.example.com",
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -162,12 +161,10 @@ func TestServeFailsOnMCPBuildErrorSharedListener(t *testing.T) {
 		"ak_test", "web")
 	addr := freePort(t)
 	cfg := configtest.Load(t, map[string]string{
-		"LISTEN_ADDR":      addr,
-		"DATABASE_DSN":     "sqlite://" + dbPath,
-		"MCP_ADDR":         addr, // same as LISTEN_ADDR: shared-listener path
-		"MCP_AUTH_MODE":    "oauth",
-		"MCP_AUTH_ISSUER":  "http://127.0.0.1:1",
-		"MCP_RESOURCE_URL": "https://mcp.example.com",
+		"LISTEN_ADDR":  addr,
+		"DATABASE_DSN": "sqlite://" + dbPath,
+		"MCP_ADDR":     addr, // same as LISTEN_ADDR: shared-listener path
+		"MCP_AUTH_DSN": "oauth+insecure://127.0.0.1:1?resource=https://mcp.example.com",
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

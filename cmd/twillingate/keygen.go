@@ -35,9 +35,9 @@ func runKeygen(args []string, stdout io.Writer) int {
 			fmt.Fprintf(stdout, "keygen: entropy: %v\n", err)
 			return 1
 		}
-		fmt.Fprintln(stdout, "Add to analytics.env:")
+		fmt.Fprintln(stdout, "Add to twillingate.env:")
 		fmt.Fprintln(stdout)
-		fmt.Fprintf(stdout, "  MCP_TOKEN=%s\n", tok)
+		fmt.Fprintf(stdout, "  MCP_AUTH_DSN=token://%s\n", tok)
 		return 0
 	}
 

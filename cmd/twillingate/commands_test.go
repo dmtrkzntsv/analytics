@@ -87,9 +87,9 @@ func TestExplicitMCPWithoutConfigFails(t *testing.T) {
 	withDB(t)
 	var out bytes.Buffer
 	if code := run([]string{"serve", "-mcp"}, &out); code != 1 {
-		t.Fatalf("serve -mcp without MCP_AUTH_MODE: exit %d, want 1: %s", code, out.String())
+		t.Fatalf("serve -mcp without MCP_AUTH_DSN: exit %d, want 1: %s", code, out.String())
 	}
-	if !strings.Contains(out.String(), "MCP_AUTH_MODE") {
+	if !strings.Contains(out.String(), "MCP_AUTH_DSN") {
 		t.Errorf("error must name the missing variable: %s", out.String())
 	}
 }

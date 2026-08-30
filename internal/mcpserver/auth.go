@@ -28,8 +28,8 @@ var allowedAlgs = []string{
 	"PS256", "PS384", "PS512",
 }
 
-// StaticVerifier implements MCP_AUTH_MODE=token: constant-time compare
-// against the single MCP_TOKEN. The middleware wrapping it must allow
+// StaticVerifier implements the token:// auth mode: constant-time compare
+// against the single static token from MCP_AUTH_DSN. The middleware wrapping it must allow
 // missing expiration (a static token has no exp).
 func StaticVerifier(token string) auth.TokenVerifier {
 	want := []byte(token)
@@ -201,7 +201,7 @@ func verifyJWT(raw, issuer, audience string, cache *JWKSCache) (*auth.TokenInfo,
 	return info, nil
 }
 
-// OAuthVerifier implements MCP_AUTH_MODE=oauth: the bearer token itself
+// OAuthVerifier implements the oauth:// auth mode: the bearer token itself
 // is a JWT from the external IdP.
 func OAuthVerifier(issuer, audience string, cache *JWKSCache) auth.TokenVerifier {
 	return func(_ context.Context, token string, _ *http.Request) (*auth.TokenInfo, error) {
@@ -209,7 +209,7 @@ func OAuthVerifier(issuer, audience string, cache *JWKSCache) auth.TokenVerifier
 	}
 }
 
-// CloudflareVerifier implements MCP_AUTH_MODE=cloudflare (endpoint spec
+// CloudflareVerifier implements the cloudflare:// auth mode (endpoint spec
 // §5.2): under Access managed OAuth the bearer is opaque and validated
 // at the edge; the origin validates the resolved identity JWT in
 // Cf-Access-Jwt-Assertion. This is also what closes the

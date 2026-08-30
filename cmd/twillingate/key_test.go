@@ -53,7 +53,7 @@ func TestKeygenMCP(t *testing.T) {
 	if code := run([]string{"keygen", "-mcp"}, &out); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
-	if !regexp.MustCompile(`MCP_TOKEN=ar_[0-9a-f]{64}`).MatchString(out.String()) {
+	if !regexp.MustCompile(`MCP_AUTH_DSN=token://ar_[0-9a-f]{64}`).MatchString(out.String()) {
 		t.Fatalf("output: %s", out.String())
 	}
 	if strings.Contains(out.String(), "ingest_keys") {

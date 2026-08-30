@@ -46,7 +46,7 @@ func Build(ctx context.Context, cfg *config.Config, reg *manage.Registry, ops *m
 // transport, auth middleware, and (mode-dependent) the RFC 9728
 // metadata route, mounted on its own mux. Routes registered on the
 // returned mux: /mcp, /healthz, and
-// /.well-known/oauth-protected-resource when issuer is configured.
+// /.well-known/oauth-protected-resource in oauth mode.
 // The func() error closes the read DB.
 func NewHandler(ctx context.Context, cfg *config.Config, reg *manage.Registry, ops *manage.Ops, logger *slog.Logger) (http.Handler, func() error, error) {
 	protected, closeDB, err := Build(ctx, cfg, reg, ops, logger)
@@ -63,7 +63,7 @@ func NewHandler(ctx context.Context, cfg *config.Config, reg *manage.Registry, o
 // (ServeMux panics on duplicate patterns).
 func RegisterOn(mux *http.ServeMux, protected http.Handler, cfg *config.Config, withHealthz bool) {
 	mux.Handle("/mcp", protected)
-	if cfg.MCP.Issuer != "" && cfg.MCP.AuthMode != "cloudflare" {
+	if cfg.MCP.AuthMode == "oauth" {
 		meta := &oauthex.ProtectedResourceMetadata{
 			Resource:             cfg.MCP.ResourceURL,
 			AuthorizationServers: []string{cfg.MCP.Issuer},
@@ -84,14 +84,11 @@ func wrapAuth(ctx context.Context, m config.MCPConfig, next http.Handler) (http.
 	switch m.AuthMode {
 	case "token":
 		opts := &auth.RequireBearerTokenOptions{AllowMissingExpiration: true}
-		if m.Issuer != "" {
-			opts.ResourceMetadataURL = metadataURLFor(m.ResourceURL)
-		}
 		return auth.RequireBearerToken(StaticVerifier(m.Token), opts)(next), nil
 	case "oauth":
 		jwksURL, err := DiscoverJWKSURL(ctx, m.Issuer, nil)
 		if err != nil {
-			return nil, fmt.Errorf("mcp oauth mode: %w (is MCP_AUTH_ISSUER correct and reachable?)", err)
+			return nil, fmt.Errorf("mcp oauth mode: %w (is the MCP_AUTH_DSN issuer correct and reachable?)", err)
 		}
 		v := OAuthVerifier(m.Issuer, m.Audience, NewJWKSCache(jwksURL, nil))
 		return auth.RequireBearerToken(v, &auth.RequireBearerTokenOptions{
