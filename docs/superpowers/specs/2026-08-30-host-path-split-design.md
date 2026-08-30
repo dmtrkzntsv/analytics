@@ -112,8 +112,8 @@ Removal surface (live code only; historical plans and specs under
 
 ### 3.3 Accepted cost: one cache window of rejections
 
-`script.go` serves both scripts with `Cache-Control: public,
-max-age=86400`. For up to 24 hours after the release, browsers run the
+`script.go` serves every script from one table with `Cache-Control:
+public, max-age=86400`. For up to 24 hours after the release, browsers run the
 *previous* `twillingate.js` build — which sends `$url` — against the new
 server, and those pageviews are rejected. Migrating the sites does not
 help: the tag is unchanged, only the bytes behind it are.
@@ -373,7 +373,7 @@ that `script.js` may run alongside the SDK are updated.
 
 ## 5. Storage
 
-### 5.1 Migration `006_web_host.sql`
+### 5.1 Migration `008_web_host.sql`
 
 ```sql
 ALTER TABLE web_hits ADD COLUMN host TEXT NOT NULL DEFAULT '';
@@ -397,6 +397,9 @@ live half computed from raw rows, so today and yesterday are included.
 Rows written before the migration carry `host = ''`. The empty bucket is
 documented, not hidden.
 
+Numbered `008`: `006_attributes.sql` and `007_product_attrs_view.sql`
+landed on main in `4cb5f71` after this spec was first written.
+
 ### 5.2 Fan-out
 
 | Surface | Change |
@@ -407,7 +410,7 @@ documented, not hidden.
 | `sqlite/registry.go` | `agg_web_hosts` in the export/import table list |
 | `sqlite/retention.go` | aggregate pruning follows the same list |
 | `mcpserver/tools_read.go` | `"hosts": {"v_web_hosts", "host"}` in `webDimensions`, plus the enum and tool description |
-| `mcpserver/resources.go` | `v_web_hosts` in `schemaViews` |
+| `mcpserver/resources.go` | `v_web_hosts` in `schemaViews` (which also gained `v_product_attrs` on main) |
 | `evidence/sources/twillingate/` | `v_web_hosts.sql` + a tile on `pages/web/[project].md` |
 
 ## 6. Server
@@ -437,10 +440,14 @@ not exist.
 
 `docs/twillingate.md` becomes the single normative document, embedded
 through the `docs` package (the `//go:embed` pattern `docs.IngestAPI`
-already uses) and exposed as `docs://twillingate`.
+already uses) and exposed as `docs://twillingate`. Note the package is no
+longer docs-only: `4cb5f71` added `docs.PlausibleShim`, so `embed.go`
+carries both served documentation and a served asset.
 
 - It absorbs `docs/sdk.md` and `docs/ingest-api.md`, which are replaced by
-  short pointers.
+  short pointers. `docs/plausible/README.md` stays where it is: it
+  documents the bytes served at `/js/plausible-shim.js` and is bound to
+  them by `TestPlausibleShimServed`.
 - `docsEvents` and `docsJSSDK` are deleted.
 - `docs_sync_test.go` is repointed to bind `docs/twillingate.md` to
   `reservedKeys`: every reserved key documented, no documented key absent
@@ -509,7 +516,7 @@ Identity is set after load via `twillingate.identify("u_123")`; there is no
 | Hard cut | a `$url`-only payload yields both the `unknown reserved key $url` warning and the `$pageview requires $path` rejection; `GET /js/script.js` returns 404 |
 | `CleanReferrer` | self-referral suppressed with host; taken at face value without |
 | `aggregate_web` | `agg_web_hosts` rolls up; empty host bucket survives |
-| Migration | `006` applies to a populated database; existing rows read back with `host = ''` |
+| Migration | `008` applies to a populated database; existing rows read back with `host = ''` |
 | SDK mask resolution | built-ins, comma-separated built-ins, regexp, global function, each failure mode in §4.5 |
 | SDK listeners | threading composes; `false` cancels; registration order |
 | `<script>`/`init()` parity | every `getAttribute("data-…")` in the bootstrap has an `InitOptions` field; `maskUrl` string and `data-mask-url` resolve identically; `maskUrl` also takes a RegExp and a function |
