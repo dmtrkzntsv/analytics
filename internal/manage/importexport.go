@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 
 	"github.com/dmtrkzntsv/twillingate/internal/config"
 	"github.com/dmtrkzntsv/twillingate/internal/store"
@@ -94,6 +95,31 @@ func (o *Ops) Import(ctx context.Context, actor string, r io.Reader) (ImportResu
 			return res, fmt.Errorf("import: unsupported version %d", doc.Version)
 		}
 		projects = doc.Projects
+	}
+
+	// Validate every alias that would need to be CREATED before applying
+	// anything. CreateProject enforces the ^[a-z0-9]+$ charset
+	// (validateNew); UpdateProject exempts existing rows from it so a
+	// legacy alias already in the registry stays editable. Checking this
+	// upfront, across the whole document, keeps import all-or-nothing on
+	// validation: without it, a document like [blog, my_app, shop] would
+	// create blog, fail on my_app, and never reach shop, leaving the
+	// registry half migrated (spec §8 promises a declarative document,
+	// not a partial one). Reporting every bad alias in one error also
+	// saves the operator from fixing them one failed attempt at a time.
+	snap := o.Reg.Snapshot(ctx)
+	seen := map[string]bool{}
+	var badAliases []string
+	for _, ep := range projects {
+		if seen[ep.Alias] || snap.Project(ep.Alias) != nil || validAlias(ep.Alias) {
+			continue
+		}
+		seen[ep.Alias] = true
+		badAliases = append(badAliases, ep.Alias)
+	}
+	if len(badAliases) > 0 {
+		return res, fmt.Errorf("import: alias(es) %s do not match ^[a-z0-9]+$ and no matching project exists to update; rename them first with `twillingate project rename`",
+			strings.Join(badAliases, ", "))
 	}
 
 	for _, ep := range projects {

@@ -261,3 +261,40 @@ func TestExportImportArchivedState(t *testing.T) {
 		t.Errorf("round trip changed archived state:\n%s\nvs\n%s", exported, buf2.String())
 	}
 }
+
+// TestImportRejectsWholeDocumentOnABadAlias proves import is all-or-nothing
+// on alias validation: a document with a bad alias in the middle
+// ([blog, my_app, shop]) must write NOTHING, including "shop" which is
+// valid and listed AFTER the offender. Before this fix, Import applied
+// projects one at a time and returned on the first error, so "blog" would
+// already exist and "shop" would never be reached — a half-migrated
+// registry. See internal/manage/importexport.go's pre-validation pass.
+func TestImportRejectsWholeDocumentOnABadAlias(t *testing.T) {
+	st := testStore(t)
+	reg := New(st, defaults, discard())
+	ctx := context.Background()
+	reg.Reload(ctx)
+	ops := NewOps(reg, st)
+
+	doc := `{"version":1,"projects":[
+	  {"alias":"blog","name":"Blog","identity":"anonymous","allowed_origins":[],"ingest_keys":[]},
+	  {"alias":"my_app","name":"My app","identity":"anonymous","allowed_origins":[],"ingest_keys":[]},
+	  {"alias":"shop","name":"Shop","identity":"anonymous","allowed_origins":[],"ingest_keys":[]}
+	]}`
+	res, err := ops.Import(ctx, "cli", strings.NewReader(doc))
+	if err == nil {
+		t.Fatal("expected an error naming the bad alias, got nil")
+	}
+	if !strings.Contains(err.Error(), "my_app") {
+		t.Errorf("error = %v; want it to name my_app", err)
+	}
+	if res.Created != 0 || res.Updated != 0 {
+		t.Fatalf("result = %+v; want nothing applied", res)
+	}
+	if reg.Snapshot(ctx).Project("blog") != nil {
+		t.Error("blog was created despite the document being rejected")
+	}
+	if reg.Snapshot(ctx).Project("shop") != nil {
+		t.Error("shop (listed after the bad alias) was created despite the document being rejected")
+	}
+}
