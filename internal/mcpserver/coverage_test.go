@@ -66,7 +66,7 @@ func TestCheckRangeRejectsBadDateFormat(t *testing.T) {
 func TestCreateProjectSkipKey(t *testing.T) {
 	_, cs := newTestHost(t)
 	res := callTool(t, cs, "create_project", map[string]any{
-		"alias": "noKey", "name": "No Key", "skip_key": true})
+		"alias": "nokey", "name": "No Key", "skip_key": true})
 	if res.IsError {
 		t.Fatalf("error: %s", textOf(res))
 	}
@@ -74,7 +74,7 @@ func TestCreateProjectSkipKey(t *testing.T) {
 	if strings.Contains(out, `"key"`) || strings.Contains(out, "script.js") {
 		t.Errorf("skip_key:true still returned a key/snippet: %s", out)
 	}
-	list := callTool(t, cs, "list_ingest_keys", map[string]any{"project": "noKey"})
+	list := callTool(t, cs, "list_ingest_keys", map[string]any{"project": "nokey"})
 	if strings.Contains(textOf(list), "default") {
 		t.Errorf("skip_key:true still issued a key: %s", textOf(list))
 	}

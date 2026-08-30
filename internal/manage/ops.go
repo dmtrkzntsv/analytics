@@ -69,6 +69,40 @@ func (sp *ProjectSpec) validate() error {
 	return nil
 }
 
+// validateNew applies validate's shared rules plus the alias charset
+// check. It is the entry point for any operation that proposes a new
+// alias — CreateProject and (Task 5) project rename. UpdateProject
+// deliberately keeps calling validate: there the alias selects a row that
+// already exists rather than proposing a new name, so a legacy alias that
+// predates this rule (e.g. "my_app") must remain editable. Without that
+// exception, an operator holding such a row could never fix it via
+// `config export | config import`, since import re-runs through this same
+// path.
+func (sp *ProjectSpec) validateNew() error {
+	if err := sp.validate(); err != nil {
+		return err
+	}
+	if !validAlias(sp.Alias) {
+		return fmt.Errorf("project alias %q must match ^[a-z0-9]+$", sp.Alias)
+	}
+	return nil
+}
+
+// validAlias is ^[a-z0-9]+$. The alias is the project column on every
+// stored row and the dashboard label, so it is kept to one predictable
+// shape; it is never spliced into SQL.
+func validAlias(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') {
+			return false
+		}
+	}
+	return true
+}
+
 func (sp *ProjectSpec) row() (store.RegistryProject, error) {
 	origins, err := json.Marshal(sp.AllowedOrigins)
 	if sp.AllowedOrigins == nil {
@@ -98,7 +132,7 @@ func (sp *ProjectSpec) row() (store.RegistryProject, error) {
 }
 
 func (o *Ops) CreateProject(ctx context.Context, actor string, spec ProjectSpec) (*Project, error) {
-	if err := spec.validate(); err != nil {
+	if err := spec.validateNew(); err != nil {
 		return nil, err
 	}
 	row, err := spec.row()

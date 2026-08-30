@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/dmtrkzntsv/twillingate/internal/store"
 )
 
 func TestCreateProjectValidatesAndReloads(t *testing.T) {
@@ -37,6 +39,55 @@ func TestCreateProjectValidatesAndReloads(t *testing.T) {
 		if _, err := ops.CreateProject(ctx, "cli", bad); err == nil {
 			t.Errorf("spec %+v did not fail", bad)
 		}
+	}
+}
+
+func TestCreateRejectsBadAlias(t *testing.T) {
+	st := testStore(t)
+	reg := New(st, defaults, discard())
+	if err := reg.Reload(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ops := NewOps(reg, st)
+	ctx := context.Background()
+
+	for _, bad := range []string{"My-Blog", "my_app", "shop uk", "blog!", ""} {
+		if _, err := ops.CreateProject(ctx, "test",
+			ProjectSpec{Alias: bad, Identity: "anonymous"}); err == nil {
+			t.Errorf("CreateProject(%q) = nil error, want rejection", bad)
+		}
+	}
+	for _, ok := range []string{"blog", "blog2", "2048"} {
+		if _, err := ops.CreateProject(ctx, "test",
+			ProjectSpec{Alias: ok, Identity: "anonymous"}); err != nil {
+			t.Errorf("CreateProject(%q) = %v, want nil", ok, err)
+		}
+	}
+}
+
+func TestUpdateDoesNotCharsetCheck(t *testing.T) {
+	// A legacy row predating the rule must stay editable, or `config
+	// export | config import` locks its owner out of the fix.
+	st := testStore(t)
+	ctx := context.Background()
+	if err := st.CreateProject(ctx, store.RegistryProject{
+		Alias: "my_app", Name: "my_app", Identity: "anonymous",
+		AllowedOrigins: "[]",
+	}, store.AuditEntry{Actor: "test", Action: "project.create", Subject: "my_app"}); err != nil {
+		t.Fatal(err)
+	}
+	reg := New(st, defaults, discard())
+	if err := reg.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ops := NewOps(reg, st)
+
+	if _, err := ops.UpdateProject(ctx, "test",
+		ProjectSpec{Alias: "my_app", Name: "renamed", Identity: "anonymous"}); err != nil {
+		t.Fatalf("UpdateProject on legacy alias = %v, want nil", err)
+	}
+	if got := reg.Snapshot(ctx).Project("my_app"); got == nil || got.Name != "renamed" {
+		t.Fatalf("update did not apply: %+v", got)
 	}
 }
 

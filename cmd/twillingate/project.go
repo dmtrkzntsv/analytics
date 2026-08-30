@@ -129,7 +129,7 @@ func cmdProject(args []string, stdout io.Writer) int {
 			snap := ops.Reg.Snapshot(ctx)
 			current := snap.Project(*alias)
 			if current == nil {
-				fmt.Fprintf(stdout, "project %q not found\n", *alias)
+				fmt.Fprintf(stdout, "no project %q; aliases are immutable — use `project rename` to change one, or `project create` to make a new one\n", *alias)
 				return 1
 			}
 			// Start from current values

@@ -219,10 +219,10 @@ func TestExportImportArchivedState(t *testing.T) {
 	reg.Reload(ctx)
 	ops := NewOps(reg, st)
 	if _, err := ops.CreateProject(ctx, "cli", ProjectSpec{
-		Alias: "archived-blog", Name: "Archived blog", Identity: "anonymous"}); err != nil {
+		Alias: "archivedblog", Name: "Archived blog", Identity: "anonymous"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ops.ArchiveProject(ctx, "cli", "archived-blog"); err != nil {
+	if err := ops.ArchiveProject(ctx, "cli", "archivedblog"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -247,9 +247,9 @@ func TestExportImportArchivedState(t *testing.T) {
 	}
 
 	// Verify archived state is preserved in store B
-	p := reg2.Snapshot(ctx).Project("archived-blog")
+	p := reg2.Snapshot(ctx).Project("archivedblog")
 	if p == nil || !p.Archived {
-		t.Fatalf("archived-blog = %+v; must be archived", p)
+		t.Fatalf("archivedblog = %+v; must be archived", p)
 	}
 
 	// Re-export from store B and verify byte equality
