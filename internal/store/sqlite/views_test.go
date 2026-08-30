@@ -539,3 +539,58 @@ func TestProductAttrsViewDefaultsCapWhenMetaMissing(t *testing.T) {
 		t.Fatalf("signup/plan rows with no cap row = %d, want %d", n, defaultAttrsTopN+1)
 	}
 }
+
+// aggregate_product.go:29-31 clamps a non-positive topN to defaultAttrsTopN
+// precisely so breakdowns are not silently lost -- `rn <= 0` keeps nothing,
+// which would sweep every value into "(other)". The view's cap must clamp
+// identically, or PRODUCT_ATTRIBUTES_TOP_N=0 (or a hand-edited meta row)
+// makes the current day collapse to a single "(other)" row while the same
+// day after rollup shows the full top-N: exactly the jump the invariant
+// forbids.
+func TestProductAttrsViewClampsBadMetaCap(t *testing.T) {
+	for _, tc := range []struct {
+		name, meta string
+		goTopN     int // what the Go side is handed for the same setting
+	}{
+		{"zero", "0", 0},
+		{"negative", "-7", -7},
+		// A non-numeric value casts to 0 in SQL. No env value produces it,
+		// so the Go side is handed the configured default while meta has
+		// been hand-edited to garbage; both must still agree.
+		{"non numeric", "banana", defaultAttrsTopN},
+		{"empty", "", defaultAttrsTopN},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newTestDB(t)
+			ctx := context.Background()
+			if err := db.SetMeta(ctx, "product_attributes_top_n", tc.meta); err != nil {
+				t.Fatal(err)
+			}
+			seedDeclaredProject(t, db, "blog", []string{"plan"})
+			seedAttrDay(t, db, "blog")
+
+			before := readAttrs(t, db, "blog", "2026-08-01")
+			var plans int
+			for _, r := range before {
+				if r.Event == "signup" && r.Key == "plan" {
+					plans++
+				}
+			}
+			// The clamp must land on defaultAttrsTopN, not on "keep
+			// nothing": one row per kept value plus the tail.
+			if plans != defaultAttrsTopN+1 {
+				t.Fatalf("live signup/plan rows with meta=%q = %d, want %d "+
+					"(the cap must clamp to defaultAttrsTopN, not collapse to (other))",
+					tc.meta, plans, defaultAttrsTopN+1)
+			}
+			if err := db.AggregateProductDay(ctx, "blog",
+				civil.DateOf(ts("2026-08-01T00:00:00Z")), []string{"plan"}, tc.goTopN); err != nil {
+				t.Fatal(err)
+			}
+			if after := readAttrs(t, db, "blog", "2026-08-01"); !reflect.DeepEqual(before, after) {
+				t.Fatalf("view changed when the day aggregated with meta=%q:\nbefore %v\nafter  %v",
+					tc.meta, before, after)
+			}
+		})
+	}
+}

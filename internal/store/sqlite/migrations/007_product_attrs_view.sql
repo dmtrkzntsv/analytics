@@ -14,11 +14,26 @@
 --
 -- Both inputs are reachable from SQL, so this is static: the declared keys
 -- live in projects.attributes and the cardinality cap is written to meta
--- at boot by internal/app. The cap is read with a COALESCE'd scalar
--- subquery, never a cross join against a cap CTE: a missing meta row would
--- make that CTE empty and the whole live half silently vanish.
+-- at boot by internal/app.
 CREATE VIEW v_product_attrs AS
-WITH declared AS (
+WITH cap AS (
+  -- The cardinality cap, resolved exactly the way AggregateProductDay
+  -- resolves it (aggregate_product.go:29-31): a non-positive topN clamps
+  -- to defaultAttrsTopN rather than erroring, because `rn <= 0` keeps
+  -- nothing and would sweep every value into "(other)" -- a permanent,
+  -- undetected loss of breakdowns. The WHERE does the clamping: a missing
+  -- row, a non-positive one, and a non-numeric one (CAST yields 0) all
+  -- select no row, so COALESCE returns the default.
+  --
+  -- This SELECT has no FROM, so it yields exactly one row always, and it
+  -- is read below as a scalar subquery rather than cross-joined. Both
+  -- matter: a cap relation that could be empty would silently drop the
+  -- entire live half instead of degrading to the default.
+  SELECT COALESCE((SELECT CAST(value AS INTEGER) FROM meta
+                   WHERE key='product_attributes_top_n'
+                     AND CAST(value AS INTEGER) > 0), 50) AS n
+),
+declared AS (
   -- DISTINCT because a duplicated key in the JSON array would join each
   -- event row twice and double its counts, where the aggregation's
   -- INSERT OR REPLACE just writes the same row twice. json_valid guards a
@@ -67,8 +82,7 @@ FROM agg_product_attrs
 UNION ALL
 SELECT project, day, event_name, attr_key, attr_value, c, u
 FROM ranked
-WHERE rn <= COALESCE(
-  (SELECT CAST(value AS INTEGER) FROM meta WHERE key='product_attributes_top_n'), 50)
+WHERE rn <= (SELECT n FROM cap)
 UNION ALL
 SELECT v.project, v.day, v.event_name, v.attr_key, '(other)',
        COUNT(*), COUNT(DISTINCT v.actor_id)
@@ -78,6 +92,5 @@ WHERE NOT EXISTS (
   WHERE r.project = v.project AND r.day = v.day
     AND r.event_name = v.event_name AND r.attr_key = v.attr_key
     AND r.attr_value = v.attr_value
-    AND r.rn <= COALESCE(
-      (SELECT CAST(value AS INTEGER) FROM meta WHERE key='product_attributes_top_n'), 50))
+    AND r.rn <= (SELECT n FROM cap))
 GROUP BY v.project, v.day, v.event_name, v.attr_key;
