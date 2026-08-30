@@ -158,16 +158,22 @@ project, which does not belong on the agent-facing surface.
 ## 6. `v_product_attrs`
 
 `agg_product_attrs` is the only aggregate table with no stitch view, so
-Evidence reads it directly and works around the resulting empty-table case
-with a sentinel row and a six-line comment
-(`evidence/sources/twillingate/agg_product_attrs.sql:1-6`). The practical
-effect is that attribute breakdowns only materialise when a day is
-aggregated, at `today - product.raw_days` (`internal/jobs/jobs.go:104`) —
-so with `raw_days: 30`, `v_product_daily` shows today while attribute
-breakdowns are up to a month stale.
+Evidence reads it directly. Like every other source in
+`evidence/sources/twillingate/`, it works around the sqlite connector's
+empty-table failure with a sentinel row — that guard is the house pattern,
+identical byte-for-byte across all 21 sources, and stays. What is specific
+to this source is one comment sentence explaining *why* the table might be
+empty: "The attribute-breakdown rollup job may not have run yet, leaving
+this table empty" (`evidence/sources/twillingate/agg_product_attrs.sql:1`).
+The practical effect behind that sentence is that attribute breakdowns
+only materialise when a day is aggregated, at `today - product.raw_days`
+(`internal/jobs/jobs.go:104`) — so with `raw_days: 30`, `v_product_daily`
+shows today while attribute breakdowns are up to a month stale.
 
-Adding `v_product_attrs` fixes that and retires the sentinel hack. It is
-the most intricate piece of this change, because `002_views.sql:5-8` states
+Adding `v_product_attrs` fixes that lag and removes the now-inaccurate
+sentence — the empty-database sentinel guard itself carries over unchanged
+onto the new view. It is the most intricate piece of this change, because
+`002_views.sql:5-8` states
 an invariant: live halves must be numerically identical to what the
 aggregation writes, or a dashboard jumps the moment a day ages over. So the
 live half has to replicate the top-N-plus-`(other)` collapsing from
