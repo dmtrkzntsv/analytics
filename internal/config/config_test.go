@@ -38,6 +38,9 @@ func TestDefaultsApplied(t *testing.T) {
 		c.Retention.Web.AggregateDays != 365 || c.Retention.Product.AggregateDays != 365 {
 		t.Errorf("Retention = %+v", c.Retention)
 	}
+	if c.ProductAttributesTopN != 50 {
+		t.Errorf("ProductAttributesTopN = %d, want 50", c.ProductAttributesTopN)
+	}
 	if c.Dashboards.Addr != "0.0.0.0:3000" || c.Dashboards.Interval != 15*time.Minute {
 		t.Errorf("Dashboards = %+v", c.Dashboards)
 	}
@@ -204,6 +207,47 @@ func TestParseProjectsRejectsUnknownFields(t *testing.T) {
 func TestParseProjectsRejectsNonArray(t *testing.T) {
 	if _, err := ParseProjects(strings.NewReader(`{"projects":[]}`)); err == nil {
 		t.Fatal("want error when the top level is not an array")
+	}
+}
+
+// TestParseProjectsAcceptsLegacyProductAggregation asserts an unmodified
+// pre-upgrade projects.json — including the enabled and top_n fields the
+// new shape drops — still parses under DisallowUnknownFields.
+func TestParseProjectsAcceptsLegacyProductAggregation(t *testing.T) {
+	ps, err := ParseProjects(strings.NewReader(`[
+	  {"alias":"a","name":"A","identity":"anonymous",
+	   "product_aggregation":{"enabled":true,"attributes":{"*":["plan"],"subscribed":["tier","plan"]},"top_n":25}}
+	]`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(ps) != 1 || ps[0].LegacyAggregation == nil {
+		t.Fatalf("got %+v", ps)
+	}
+	if got := ps[0].DeclaredAttributes(); len(got) != 2 || got[0] != "plan" || got[1] != "tier" {
+		t.Fatalf("DeclaredAttributes() = %v, want [plan tier] (sorted DISTINCT union)", got)
+	}
+}
+
+// TestDeclaredAttributesPrefersExplicitOverLegacy: when both the new
+// attributes field and the legacy product_aggregation block are present,
+// attributes wins.
+func TestDeclaredAttributesPrefersExplicitOverLegacy(t *testing.T) {
+	p := Project{
+		Attributes:        []string{"source"},
+		LegacyAggregation: &LegacyAggregation{Attributes: map[string][]string{"*": {"plan"}}},
+	}
+	if got := p.DeclaredAttributes(); len(got) != 1 || got[0] != "source" {
+		t.Fatalf("DeclaredAttributes() = %v, want [source]", got)
+	}
+}
+
+// TestDeclaredAttributesNilWhenNeitherPresent: no attributes, no legacy
+// block -> nil, not a spurious empty slice.
+func TestDeclaredAttributesNilWhenNeitherPresent(t *testing.T) {
+	p := Project{}
+	if got := p.DeclaredAttributes(); len(got) != 0 {
+		t.Fatalf("DeclaredAttributes() = %v, want empty", got)
 	}
 }
 

@@ -22,11 +22,27 @@ type Ops struct {
 
 func NewOps(reg *Registry, st store.Store) *Ops { return &Ops{Reg: reg, St: st} }
 
+// rebuildFlatView refreshes v_events_flat from the registry's CURRENT
+// snapshot, so a config edit (a new/changed attribute list, or — for a
+// later caller — a renamed project) reaches BI tools immediately rather
+// than waiting for the next daily pass. Callers must Reg.Reload first.
+//
+// Errors are logged, not returned: a view rebuild is a side effect of the
+// operation, not the thing the caller asked for, so it must never fail
+// project creation/update/import over a rebuild hiccup — the nightly pass
+// is the repair net.
+func (o *Ops) rebuildFlatView(ctx context.Context) {
+	keys := o.Reg.Snapshot(ctx).DeclaredAttributeKeys()
+	if err := o.St.RebuildFlatView(ctx, keys); err != nil {
+		o.Reg.logger.Warn("flat view rebuild failed", "error", err)
+	}
+}
+
 type ProjectSpec struct {
 	Alias, Name, Identity string
 	AllowedOrigins        []string
 	Retention             *config.RetentionOverride
-	Aggregation           *config.ProductAggregation
+	Attributes            []string
 }
 
 func (sp *ProjectSpec) validate() error {
@@ -53,6 +69,40 @@ func (sp *ProjectSpec) validate() error {
 	return nil
 }
 
+// validateNew applies validate's shared rules plus the alias charset
+// check. It is the entry point for any operation that proposes a new
+// alias — CreateProject and (Task 5) project rename. UpdateProject
+// deliberately keeps calling validate: there the alias selects a row that
+// already exists rather than proposing a new name, so a legacy alias that
+// predates this rule (e.g. "my_app") must remain editable. Without that
+// exception, an operator holding such a row could never fix it via
+// `config export | config import`, since import re-runs through this same
+// path.
+func (sp *ProjectSpec) validateNew() error {
+	if err := sp.validate(); err != nil {
+		return err
+	}
+	if !validAlias(sp.Alias) {
+		return fmt.Errorf("project alias %q must match ^[a-z0-9]+$", sp.Alias)
+	}
+	return nil
+}
+
+// validAlias is ^[a-z0-9]+$. The alias is the project column on every
+// stored row and the dashboard label, so it is kept to one predictable
+// shape; it is never spliced into SQL.
+func validAlias(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') {
+			return false
+		}
+	}
+	return true
+}
+
 func (sp *ProjectSpec) row() (store.RegistryProject, error) {
 	origins, err := json.Marshal(sp.AllowedOrigins)
 	if sp.AllowedOrigins == nil {
@@ -70,18 +120,19 @@ func (sp *ProjectSpec) row() (store.RegistryProject, error) {
 		}
 		row.Retention = string(b)
 	}
-	if sp.Aggregation != nil {
-		b, err := json.Marshal(sp.Aggregation)
-		if err != nil {
-			return row, err
-		}
-		row.Aggregation = string(b)
+	attrs, err := json.Marshal(sp.Attributes)
+	if sp.Attributes == nil {
+		attrs, err = []byte("[]"), nil
 	}
+	if err != nil {
+		return row, err
+	}
+	row.Attributes = string(attrs)
 	return row, nil
 }
 
 func (o *Ops) CreateProject(ctx context.Context, actor string, spec ProjectSpec) (*Project, error) {
-	if err := spec.validate(); err != nil {
+	if err := spec.validateNew(); err != nil {
 		return nil, err
 	}
 	row, err := spec.row()
@@ -95,6 +146,7 @@ func (o *Ops) CreateProject(ctx context.Context, actor string, spec ProjectSpec)
 	if err := o.Reg.Reload(ctx); err != nil {
 		return nil, err
 	}
+	o.rebuildFlatView(ctx)
 	return o.Reg.Snapshot(ctx).Project(spec.Alias), nil
 }
 
@@ -113,6 +165,7 @@ func (o *Ops) UpdateProject(ctx context.Context, actor string, spec ProjectSpec)
 	if err := o.Reg.Reload(ctx); err != nil {
 		return nil, err
 	}
+	o.rebuildFlatView(ctx)
 	return o.Reg.Snapshot(ctx).Project(spec.Alias), nil
 }
 
@@ -164,6 +217,30 @@ func (o *Ops) EnableIngestKey(ctx context.Context, actor, project, label string)
 		return err
 	}
 	return o.Reg.Reload(ctx)
+}
+
+// RenameProject rewrites a project's alias — its physical identity, the
+// `project` column on every keyed table plus the projects row and its
+// ingest keys — leaving every row and key intact under the new alias.
+// validateNew runs against the PROPOSED alias (a throwaway spec carrying
+// just it), matching CreateProject's rule: a rename is choosing a new
+// alias, not editing an existing row, so the charset check applies here
+// too. CLI only, like DeleteProject (spec §7.3): it rewrites every table
+// keyed by the project, which does not belong on the agent-facing surface.
+func (o *Ops) RenameProject(ctx context.Context, actor, old, newAlias string) error {
+	spec := ProjectSpec{Alias: newAlias}
+	if err := spec.validateNew(); err != nil {
+		return err
+	}
+	if err := o.St.RenameProject(ctx, old, newAlias, store.AuditEntry{
+		Actor: actor, Action: "project.rename", Subject: old + "->" + newAlias}); err != nil {
+		return err
+	}
+	if err := o.Reg.Reload(ctx); err != nil {
+		return err
+	}
+	o.rebuildFlatView(ctx)
+	return nil
 }
 
 // DeleteProject is exposed by the CLI only — never as an MCP tool

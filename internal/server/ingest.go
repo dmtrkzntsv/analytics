@@ -123,8 +123,9 @@ func mergeAttributes(batch, event map[string]any) map[string]any {
 
 // resolveAttributes splits merged attributes into typed reserved fields and
 // ordinary attributes, returning the unknown `$` keys it dropped. Unknown
-// reserved keys are dropped rather than stored: keeping one would add a
-// column to v_events_flat for a typo.
+// reserved keys are dropped rather than stored: the `$` namespace is
+// reserved for system fields, so a `$` key this server does not recognize
+// is a client bug, and silently storing it as data would hide that.
 func resolveAttributes(m map[string]any) (resolved, []string) {
 	r := resolved{Custom: map[string]string{}}
 	var unknown []string

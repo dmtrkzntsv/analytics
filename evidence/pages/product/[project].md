@@ -70,7 +70,7 @@ group by event_name order by total desc
 
 ```sql attr_breakdowns
 select day, event_name, attr_key, attr_value, count, unique_users
-from twillingate.agg_product_attrs
+from twillingate.v_product_attrs
 where project = '${params.project}'
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')

@@ -97,11 +97,10 @@ func (h *host) integrationGuide(ctx context.Context, _ *mcp.CallToolRequest, in 
 		b.WriteString("- $install_id: generate once per install, store locally, send on every\n  batch. Under anonymous identity it is salted and rotated daily.\n- Send $screen_view per screen; custom names for product events.\n- Queue offline, replay with original ts and stable UUIDv7 ids —\n  docs://ingest-api has a worked offline-queue design.\n\n")
 	}
 
-	agg := p.Aggregation != nil && p.Aggregation.Enabled
-	if agg {
-		fmt.Fprintf(&b, "Product aggregation is ENABLED (attribute breakdowns per: %v).\n", p.Aggregation.Attributes)
+	if len(p.Attributes) > 0 {
+		fmt.Fprintf(&b, "Declared product attributes (broken down in v_events_flat and product_attributes): %v.\n", p.Attributes)
 	} else {
-		b.WriteString("Product aggregation is OFF: product events are counted per day, but\nattribute breakdowns need opting in — call update_project with e.g.\n{\"product_aggregation\":{\"enabled\":true,\"attributes\":{\"*\":[\"plan\"]}}}.\n")
+		b.WriteString("No product attributes declared: events are counted per day, but no\nattribute breakdowns are exposed — call update_project with e.g.\n{\"attributes\":[\"plan\"]} to declare which keys to break down.\n")
 	}
 	b.WriteString("\nDeeper reference: docs://events (semantics), docs://js-sdk (snippet API),\ndocs://ingest-api (wire format, batching, retries, offline replay).\n")
 	return nil, guideOut{Markdown: b.String()}, nil

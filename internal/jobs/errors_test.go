@@ -116,11 +116,11 @@ func (f *faultyStore) AggregateWebDay(ctx context.Context, project string, day c
 	return f.Store.AggregateWebDay(ctx, project, day)
 }
 
-func (f *faultyStore) AggregateProductDay(ctx context.Context, project string, day civil.Date, agg store.ProductAggSettings) error {
+func (f *faultyStore) AggregateProductDay(ctx context.Context, project string, day civil.Date, attrs []string, topN int) error {
 	if f.shouldFail("AggregateProductDay") {
 		return errBoom
 	}
-	return f.Store.AggregateProductDay(ctx, project, day, agg)
+	return f.Store.AggregateProductDay(ctx, project, day, attrs, topN)
 }
 
 func (f *faultyStore) AggregateAppDay(ctx context.Context, project string, day civil.Date) error {
@@ -149,13 +149,6 @@ func (f *faultyStore) PruneIdentities(ctx context.Context, project string, befor
 		return errBoom
 	}
 	return f.Store.PruneIdentities(ctx, project, before)
-}
-
-func (f *faultyStore) KnownAttributeKeys(ctx context.Context) ([]string, error) {
-	if f.shouldFail("KnownAttributeKeys") {
-		return nil, errBoom
-	}
-	return f.Store.KnownAttributeKeys(ctx)
 }
 
 func (f *faultyStore) RebuildFlatView(ctx context.Context, keys []string) error {
@@ -380,17 +373,6 @@ func TestRunDailyPassLogsPruneIdentitiesFailure(t *testing.T) {
 	}
 	if !logged(buf, "prune identities failed") {
 		t.Errorf("log output = %q, want mention of prune identities failed", buf.String())
-	}
-}
-
-func TestRunDailyPassLogsAttributeKeyScanFailure(t *testing.T) {
-	_, fst, r, buf := setupFaulty(t, jobsVars, jobsProjectSpecs)
-	fst.failing("KnownAttributeKeys")
-	if err := r.RunDailyPass(context.Background()); err != nil {
-		t.Fatalf("RunDailyPass = %v, want nil", err)
-	}
-	if !logged(buf, "attribute key scan failed") {
-		t.Errorf("log output = %q, want mention of attribute key scan failed", buf.String())
 	}
 }
 

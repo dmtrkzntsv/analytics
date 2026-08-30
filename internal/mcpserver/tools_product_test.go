@@ -21,17 +21,19 @@ func TestProductEvents(t *testing.T) {
 	}
 }
 
-// docs is seeded with product_aggregation left at its default (off); blog
-// has it enabled (see seed_test.go) for TestProductAttributesReturnsRows.
-func TestProductAttributesExplainsWhenOff(t *testing.T) {
+// docs is seeded with no attributes declared; blog declares "plan" (see
+// seed_test.go) for TestProductAttributesReturnsRows. Rollups are
+// unconditional now (no enabled flag to opt into), so an undeclared-key
+// project returns an empty result rather than an error.
+func TestProductAttributesReturnsEmptyForUndeclaredProject(t *testing.T) {
 	_, cs := newTestHost(t)
 	res := callTool(t, cs, "product_attributes", map[string]any{
 		"project": "docs", "from": "2026-08-01", "to": "2026-08-31"})
-	if !res.IsError {
-		t.Fatal("aggregation-off project did not error")
+	if res.IsError {
+		t.Fatalf("error: %s", textOf(res))
 	}
-	if out := textOf(res); !strings.Contains(out, "product_aggregation") {
-		t.Errorf("error must name the setting: %s", out)
+	if out := textOf(res); strings.Contains(out, "\"plan\"") {
+		t.Errorf("docs has no agg_product_attrs rows and must not see blog's: %s", out)
 	}
 }
 

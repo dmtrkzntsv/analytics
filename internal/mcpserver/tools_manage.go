@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/dmtrkzntsv/twillingate/internal/config"
-
 	"github.com/dmtrkzntsv/twillingate/internal/manage"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -21,28 +19,14 @@ type projectIn struct {
 	Name           string   `json:"name,omitempty" jsonschema:"display name, defaults to alias"`
 	Identity       string   `json:"identity,omitempty" jsonschema:"anonymous (default) or identified. identified stores user ids and names as given — a privacy-significant setting; see the GDPR docs"`
 	AllowedOrigins []string `json:"allowed_origins,omitempty" jsonschema:"origins allowed to post events. * is a wildcard: https://*.example.com covers every subdomain, a bare * allows any origin"`
-	// ProductAggregation opts the project into product-event rollups and
-	// attribute breakdowns. Pointer: nil (omitted) keeps the current
-	// setting on update_project. A local type rather than
-	// config.ProductAggregation so every field is optional in the
-	// inferred schema.
-	ProductAggregation *aggregationIn `json:"product_aggregation,omitempty" jsonschema:"opt-in product event rollups; attribute keys are per event name or * for every event"`
+	// Attributes declares which product-event attribute keys are broken
+	// down (v_events_flat columns, agg_product_attrs rollups). Rollups
+	// always run regardless of this list; nil (omitted) keeps the current
+	// setting on update_project.
+	Attributes []string `json:"attributes,omitempty" jsonschema:"attribute keys to break down and expose as flat-view columns"`
 	// SkipKey rather than IssueKey: JSON booleans have no "unset", and
 	// the zero value must give the default behaviour (issue a key).
 	SkipKey bool `json:"skip_key,omitempty" jsonschema:"create_project only: set true to NOT issue a first ingest key"`
-}
-
-type aggregationIn struct {
-	Enabled    bool                `json:"enabled,omitempty" jsonschema:"turn product-event rollups on"`
-	Attributes map[string][]string `json:"attributes,omitempty" jsonschema:"event name (or *) -> attribute keys to break down"`
-	TopN       int                 `json:"top_n,omitempty" jsonschema:"distinct values kept per attribute, default 50; the rest collapse into (other)"`
-}
-
-func (a *aggregationIn) toConfig() *config.ProductAggregation {
-	if a == nil {
-		return nil
-	}
-	return &config.ProductAggregation{Enabled: a.Enabled, Attributes: a.Attributes, TopN: a.TopN}
 }
 
 type projectToolOut struct {
@@ -56,7 +40,7 @@ type projectToolOut struct {
 func (h *host) createProject(ctx context.Context, _ *mcp.CallToolRequest, in projectIn) (*mcp.CallToolResult, projectToolOut, error) {
 	p, err := h.ops.CreateProject(ctx, "mcp", manage.ProjectSpec{
 		Alias: in.Alias, Name: in.Name, Identity: in.Identity,
-		AllowedOrigins: in.AllowedOrigins, Aggregation: in.ProductAggregation.toConfig()})
+		AllowedOrigins: in.AllowedOrigins, Attributes: in.Attributes})
 	if err != nil {
 		return nil, projectToolOut{}, err
 	}
@@ -88,7 +72,7 @@ func (h *host) createProject(ctx context.Context, _ *mcp.CallToolRequest, in pro
 
 // updateProject merges rather than replaces (binding ruling, Task 9):
 // Ops.UpdateProject itself is full-replace, so the tool starts from the
-// project's current values — including Retention and Aggregation, which
+// project's current values — including Retention and Attributes, which
 // this tool has no fields for and must not silently clear — and overlays
 // only what the caller actually provided. AllowedOrigins is the one field
 // that is not field-merged: when the caller supplies a non-empty list it
@@ -109,10 +93,10 @@ func (h *host) updateProject(ctx context.Context, _ *mcp.CallToolRequest, in pro
 		Identity:       cur.Identity,
 		AllowedOrigins: cur.AllowedOrigins,
 		Retention:      cur.Retention,
-		Aggregation:    cur.Aggregation,
+		Attributes:     cur.Attributes,
 	}
-	if in.ProductAggregation != nil {
-		spec.Aggregation = in.ProductAggregation.toConfig()
+	if in.Attributes != nil {
+		spec.Attributes = in.Attributes
 	}
 	if in.Name != "" {
 		spec.Name = in.Name
@@ -231,7 +215,7 @@ func (h *host) registerManage(s *mcp.Server) {
 		Description: "Create a project and (by default) its first ingest key; returns a paste-ready embed snippet. Set skip_key to suppress the key."},
 		h.createProject)
 	mcp.AddTool(s, &mcp.Tool{Name: "update_project", Annotations: write,
-		Description: "Update a project's name, identity mode, allowed origins and/or product_aggregation (opt-in attribute breakdowns for product events). Fields you omit are left unchanged (this is a merge, not a replace) — except allowed_origins, which if provided non-empty replaces the whole list; origins cannot be cleared to empty via this tool (clear origins via `twillingate config import`, an explicit empty allowed_origins list in the document). Switching to identity=identified starts storing user ids and names as given — privacy-significant, say so to the user before doing it."},
+		Description: "Update a project's name, identity mode, allowed origins and/or declared product-event attributes (breakdown keys for flat-view columns and attribute rollups). Fields you omit are left unchanged (this is a merge, not a replace) — except allowed_origins, which if provided non-empty replaces the whole list; origins cannot be cleared to empty via this tool (clear origins via `twillingate config import`, an explicit empty allowed_origins list in the document). Switching to identity=identified starts storing user ids and names as given — privacy-significant, say so to the user before doing it."},
 		h.updateProject)
 	mcp.AddTool(s, &mcp.Tool{Name: "archive_project", Annotations: idem,
 		Description: "Archive a project: ingestion stops, data and dashboards keep working, fully reversible with restore_project. There is no delete over MCP — deletion requires the CLI."},

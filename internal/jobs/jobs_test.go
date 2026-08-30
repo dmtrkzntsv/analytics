@@ -24,7 +24,7 @@ func intPtr(n int) *int { return &n }
 
 var jobsProjectSpecs = []manage.ProjectSpec{
 	{Alias: "app", Name: "App", AllowedOrigins: []string{"https://a.com"},
-		Aggregation: &config.ProductAggregation{Enabled: true, Attributes: map[string][]string{"*": {"plan"}}, TopN: 50}},
+		Attributes: []string{"plan"}},
 }
 
 // jobsVars pins the retention windows the assertions below rely on.

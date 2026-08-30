@@ -2,49 +2,78 @@ package sqlite
 
 import (
 	"context"
-	"sort"
 	"testing"
 
 	"github.com/dmtrkzntsv/twillingate/internal/store"
 )
 
-func TestKnownAttributeKeys(t *testing.T) {
+// The view's column set now comes from the caller-supplied declared keys,
+// not a scan of stored events, so an undeclared attribute must stay
+// reachable only through the raw attributes JSON, never as its own column.
+func TestFlatViewOnlyDeclaredKeys(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
-	evs := []store.ProductEvent{
-		{ID: "1", Project: "app", EventName: "e", ActorID: "u", TS: ts("2026-08-10T10:00:00Z"),
-			Attributes: map[string]string{"plan": "pro", "weird key!": "x"}},
-		{ID: "2", Project: "app", EventName: "e", ActorID: "u", TS: ts("2026-08-10T11:00:00Z"),
-			Attributes: map[string]string{"plan": "free", "source": "ads"}},
-		// No attributes at all: must not break json_each or add keys.
-		{ID: "3", Project: "app", EventName: "e", ActorID: "u", TS: ts("2026-08-10T12:00:00Z")},
-	}
-	if err := db.WriteProductEvents(ctx, evs); err != nil {
+	seedProductEvent(t, db, "blog", "signup", "2026-08-01T10:00:00Z",
+		map[string]string{"plan": "pro", "undeclared": "x"}, "", "")
+	if err := db.RebuildFlatView(ctx, []string{"plan"}); err != nil {
 		t.Fatal(err)
 	}
-	keys, err := db.KnownAttributeKeys(ctx)
-	if err != nil {
+	cols := viewColumns(t, db, "v_events_flat")
+	if !cols["attr_plan"] || cols["attr_undeclared"] {
+		t.Fatalf("columns = %v, want attr_plan and not attr_undeclared", cols)
+	}
+	// Undeclared keys stay reachable through the raw JSON base column.
+	var got string
+	if err := db.db.QueryRow(
+		`SELECT json_extract(attributes,'$.undeclared') FROM v_events_flat`).Scan(&got); err != nil {
 		t.Fatal(err)
 	}
-	sort.Strings(keys)
-	want := []string{"plan", "source", "weird key!"}
-	if len(keys) != len(want) {
-		t.Fatalf("keys = %v, want %v", keys, want)
-	}
-	for i := range want {
-		if keys[i] != want[i] {
-			t.Fatalf("keys = %v, want %v", keys, want)
-		}
+	if got != "x" {
+		t.Fatalf("undeclared via attributes = %q, want x", got)
 	}
 }
 
-func TestKnownAttributeKeysEmpty(t *testing.T) {
-	keys, err := newTestDB(t).KnownAttributeKeys(context.Background())
-	if err != nil {
+// A rebuild with an unchanged column set must not re-execute the
+// DROP/CREATE — the daily pass runs this every night and should be a
+// no-op in steady state.
+func TestRebuildFlatViewIsNoOpWhenUnchanged(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	if err := db.RebuildFlatView(ctx, []string{"plan"}); err != nil {
 		t.Fatal(err)
 	}
-	if len(keys) != 0 {
-		t.Fatalf("keys = %v, want none", keys)
+	before := viewSQL(t, db, "v_events_flat")
+	if err := db.RebuildFlatView(ctx, []string{"plan"}); err != nil {
+		t.Fatal(err)
+	}
+	if viewSQL(t, db, "v_events_flat") != before {
+		t.Fatal("view was rebuilt despite an unchanged column set")
+	}
+}
+
+// sanitizeAlias is lossy and many-to-one: "plan!" and "plan" both sanitize
+// to attr_plan. A no-op check that compares only column names would treat
+// fixing a typo'd declared key as unchanged and leave the view extracting
+// the stale JSON path forever. The check must compare the full CREATE VIEW
+// text, which embeds the json_extract path literal, so this rebuild is
+// correctly detected as a real change.
+func TestRebuildFlatViewDetectsRenameBehindAnUnchangedAlias(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	seedProductEvent(t, db, "app", "e", "2026-08-10T10:00:00Z",
+		map[string]string{"plan": "pro", "plan!": "stale"}, "", "")
+	if err := db.RebuildFlatView(ctx, []string{"plan!"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RebuildFlatView(ctx, []string{"plan"}); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := db.db.QueryRow(`SELECT attr_plan FROM v_events_flat`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != "pro" {
+		t.Fatalf("attr_plan = %q, want %q — view is still extracting the stale key", got, "pro")
 	}
 }
 
@@ -101,7 +130,10 @@ func TestRebuildFlatView(t *testing.T) {
 func TestRebuildFlatViewHostileKeys(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
-	// Injection attempts and collisions must not break the DDL.
+	// Injection attempts and collisions must not break the DDL. Declared
+	// keys are operator-authored now rather than client-supplied, but
+	// sanitizeAlias stays the defence in depth between a fat-fingered
+	// config and broken DDL, so these must keep passing unchanged.
 	hostile := []string{
 		`x"; DROP TABLE product_events; --`,
 		"weird key!",
@@ -117,15 +149,16 @@ func TestRebuildFlatViewHostileKeys(t *testing.T) {
 	if err := db.db.QueryRow(`SELECT COUNT(*) FROM product_events`).Scan(&n); err != nil {
 		t.Fatalf("table gone — injection succeeded: %v", err)
 	}
-	cols := flatViewColumns(t, db)
+	cols := viewColumns(t, db, "v_events_flat")
 	if !cols["attr_weirdkey"] || !cols["attr_weirdkey_2"] {
 		t.Fatalf("collision suffixing failed: %v", cols)
 	}
 	if !cols["attr_1starts_with_digit"] {
 		t.Errorf("digit-leading key not prefixed into a valid identifier: %v", cols)
 	}
-	if len(cols) != 5+4 {
-		t.Errorf("cols = %v, want 5 base + 4 attrs (漢字 skipped)", cols)
+	// 5 base columns (id, project, event_name, actor_id, ts) + attributes + 4 attrs (漢字 skipped).
+	if len(cols) != 6+4 {
+		t.Errorf("cols = %v, want 6 base + 4 attrs (漢字 skipped)", cols)
 	}
 }
 
@@ -140,11 +173,7 @@ func TestRebuildFlatViewQuotedKeys(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	keys, err := db.KnownAttributeKeys(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.RebuildFlatView(ctx, keys); err != nil {
+	if err := db.RebuildFlatView(ctx, []string{"it's", `say"hi`}); err != nil {
 		t.Fatal(err)
 	}
 	var apos, dq string
@@ -168,11 +197,11 @@ func TestRebuildFlatViewDeterministicOrder(t *testing.T) {
 	if err := db.RebuildFlatView(ctx, []string{"zeta", "alpha", "mu"}); err != nil {
 		t.Fatal(err)
 	}
-	first := flatViewColumnList(t, db)
+	first := viewColumnList(t, db, "v_events_flat")
 	if err := db.RebuildFlatView(ctx, []string{"mu", "zeta", "alpha"}); err != nil {
 		t.Fatal(err)
 	}
-	second := flatViewColumnList(t, db)
+	second := viewColumnList(t, db, "v_events_flat")
 	if len(first) != len(second) {
 		t.Fatalf("%v vs %v", first, second)
 	}
@@ -181,7 +210,8 @@ func TestRebuildFlatViewDeterministicOrder(t *testing.T) {
 			t.Fatalf("column order not deterministic: %v vs %v", first, second)
 		}
 	}
-	want := []string{"id", "project", "event_name", "actor_id", "ts", "attr_alpha", "attr_mu", "attr_zeta"}
+	want := []string{"id", "project", "event_name", "actor_id", "ts", "attributes",
+		"attr_alpha", "attr_mu", "attr_zeta"}
 	for i := range want {
 		if first[i] != want[i] {
 			t.Fatalf("columns = %v, want %v", first, want)
@@ -189,9 +219,12 @@ func TestRebuildFlatViewDeterministicOrder(t *testing.T) {
 	}
 }
 
-func flatViewColumnList(t *testing.T, db *DB) []string {
+// viewColumnList returns a view's (or table's) column names in schema
+// order, via pragma_table_info — used to assert both column presence and
+// deterministic ordering.
+func viewColumnList(t *testing.T, db *DB, view string) []string {
 	t.Helper()
-	rows, err := db.db.Query(`SELECT name FROM pragma_table_info('v_events_flat')`)
+	rows, err := db.db.Query(`SELECT name FROM pragma_table_info(?)`, view)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,11 +243,24 @@ func flatViewColumnList(t *testing.T, db *DB) []string {
 	return out
 }
 
-func flatViewColumns(t *testing.T, db *DB) map[string]bool {
+// viewColumns is viewColumnList as a set, for presence checks that don't
+// care about order.
+func viewColumns(t *testing.T, db *DB, view string) map[string]bool {
 	t.Helper()
 	cols := map[string]bool{}
-	for _, c := range flatViewColumnList(t, db) {
+	for _, c := range viewColumnList(t, db, view) {
 		cols[c] = true
 	}
 	return cols
+}
+
+// viewSQL returns the CREATE VIEW text sqlite_master recorded for view, so
+// a test can assert a rebuild did or didn't happen.
+func viewSQL(t *testing.T, db *DB, view string) string {
+	t.Helper()
+	var sql string
+	if err := db.db.QueryRow(`SELECT sql FROM sqlite_master WHERE name = ?`, view).Scan(&sql); err != nil {
+		t.Fatal(err)
+	}
+	return sql
 }

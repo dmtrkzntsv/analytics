@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -80,6 +81,14 @@ func Serve(ctx context.Context, cfg *config.Config, logger *slog.Logger, api, mc
 	if err := st.Migrate(ctx); err != nil {
 		return err
 	}
+	// v_product_attrs' live half reads the cardinality cap from meta with a
+	// scalar subquery -- SQL cannot see the environment. Written before
+	// anything queries the view so the first read uses the configured cap
+	// rather than the view's built-in fallback.
+	if err := st.SetMeta(ctx, "product_attributes_top_n",
+		strconv.Itoa(cfg.ProductAttributesTopN)); err != nil {
+		return err
+	}
 
 	reg := manage.New(st, cfg.Retention, logger)
 	if err := reg.Reload(ctx); err != nil {
@@ -91,9 +100,7 @@ func Serve(ctx context.Context, cfg *config.Config, logger *slog.Logger, api, mc
 	warnLegacyProjectsFile(cfg, logger)
 
 	// Seed the flat view so it exists before the first daily pass.
-	if keys, err := st.KnownAttributeKeys(ctx); err != nil {
-		logger.Warn("flat view seed: attribute scan", "error", err)
-	} else if err := st.RebuildFlatView(ctx, keys); err != nil {
+	if err := st.RebuildFlatView(ctx, reg.Snapshot(ctx).DeclaredAttributeKeys()); err != nil {
 		logger.Warn("flat view seed", "error", err)
 	}
 

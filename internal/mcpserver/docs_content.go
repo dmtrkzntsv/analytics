@@ -52,18 +52,22 @@ stable and lowercase; they are the aggregation key. Non-$ attributes are
 yours (up to 50 per event, keys <= 64 chars, values <= 512 chars).
 
 Product events are counted per day out of the box (count + unique users
-per event name, plus daily totals). ATTRIBUTE BREAKDOWNS are opt-in per
-project via product_aggregation:
+per event name, plus daily totals) whether or not any attributes are
+declared. ATTRIBUTE BREAKDOWNS need a project to declare which keys are
+worth reporting on:
 
-    {"enabled": true, "attributes": {"*": ["plan"], "subscribed": ["tier"]}, "top_n": 50}
+    {"attributes": ["plan", "tier"]}
 
-- attributes maps an event name (or "*" for every event) to the attribute
-  keys worth breaking down; only listed keys are aggregated.
-- top_n caps distinct values kept per attribute (default 50); the rest
-  collapse into an "(other)" row with a true unique-user count.
-- Set it with the update_project tool (product_aggregation field) or
-  ` + "`twillingate project`" + ` CLI + config import. Without it,
-  product_attributes returns an error explaining the setting.
+- attributes is a flat list of custom keys; each declared key gets a value
+  breakdown in product_attributes (and its own attr_* column in
+  v_events_flat). Undeclared keys are still stored, just not broken down.
+- PRODUCT_ATTRIBUTES_TOP_N (server-wide, default 50) caps distinct values
+  kept per key; the rest collapse into an "(other)" row with a true
+  unique-user count.
+- Set attributes with the update_project tool or ` + "`twillingate project create/update -attr`" + `.
+  $platform and $app_version break down automatically without being
+  declared — do not add them to attributes, $-prefixed keys never reach
+  the custom attribute blob.
 
 ## Identity across all families
 

@@ -57,11 +57,11 @@ func TestIntegrationGuideAnonymousAndPlatforms(t *testing.T) {
 	if !res.IsError || !strings.Contains(textOf(res), "web") {
 		t.Errorf("bad platform: %v %s", res.IsError, textOf(res))
 	}
-	// aggregation-off pointer
+	// no-attributes-declared pointer
 	res = callTool(t, cs, "integration_guide", map[string]any{
 		"project": "docs", "platform": "web"})
-	if out := textOf(res); !strings.Contains(out, "product_aggregation") {
-		t.Errorf("aggregation-off guidance missing: %s", out)
+	if out := textOf(res); !strings.Contains(out, "No product attributes declared") {
+		t.Errorf("no-attributes-declared guidance missing: %s", out)
 	}
 }
 
@@ -82,19 +82,17 @@ func TestDocsResourcesReadable(t *testing.T) {
 	}
 }
 
-func TestUpdateProjectSetsAggregation(t *testing.T) {
+func TestUpdateProjectSetsAttributes(t *testing.T) {
 	h, cs := newTestHost(t)
 	res := callTool(t, cs, "update_project", map[string]any{
-		"alias": "blog",
-		"product_aggregation": map[string]any{
-			"enabled": true, "attributes": map[string]any{"*": []string{"plan"}}},
+		"alias": "blog", "attributes": []string{"plan", "tier"},
 	})
 	if res.IsError {
 		t.Fatalf("error: %s", textOf(res))
 	}
 	p := h.reg.Snapshot(context.Background()).Project("blog")
-	if p.Aggregation == nil || !p.Aggregation.Enabled || p.Aggregation.TopN != 50 {
-		t.Fatalf("aggregation not set (TopN default expected): %+v", p.Aggregation)
+	if len(p.Attributes) != 2 || p.Attributes[0] != "plan" || p.Attributes[1] != "tier" {
+		t.Fatalf("attributes not set: %+v", p.Attributes)
 	}
 	// omitted on a later update -> preserved
 	if res := callTool(t, cs, "update_project", map[string]any{
@@ -102,7 +100,7 @@ func TestUpdateProjectSetsAggregation(t *testing.T) {
 		t.Fatalf("rename: %s", textOf(res))
 	}
 	p = h.reg.Snapshot(context.Background()).Project("blog")
-	if p.Aggregation == nil || !p.Aggregation.Enabled {
-		t.Fatal("aggregation lost on unrelated update")
+	if len(p.Attributes) != 2 {
+		t.Fatal("attributes lost on unrelated update")
 	}
 }

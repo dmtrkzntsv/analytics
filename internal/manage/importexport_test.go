@@ -97,6 +97,41 @@ func TestImportLegacyProjectsJSON(t *testing.T) {
 	}
 }
 
+// TestImportV1DocumentFoldsLegacyProductAggregation exercises the
+// DisallowUnknownFields compatibility guarantee the brief singled out: a
+// v1 export document (not the legacy bare-array projects.json) that still
+// carries the pre-2026-08 product_aggregation block — because it was
+// exported before this change, or hand-edited — must still decode (the
+// field is kept, just no longer written) and its event-keyed map must
+// fold into the new flat attributes list on import. The bare-array legacy
+// path is covered by TestImportLegacyProjectsJSON; this is the other of
+// the two places exportProject.declaredAttributes's fold branch is
+// reachable from, and until now neither test exercised it.
+func TestImportV1DocumentFoldsLegacyProductAggregation(t *testing.T) {
+	st := testStore(t)
+	reg := New(st, defaults, discard())
+	ctx := context.Background()
+	reg.Reload(ctx)
+	ops := NewOps(reg, st)
+	doc := `{"version":1,"projects":[{"alias":"blog","name":"My blog","identity":"anonymous",
+	  "allowed_origins":[],"ingest_keys":[],
+	  "product_aggregation":{"enabled":true,"attributes":{"*":["plan"],"subscribed":["tier","plan"]},"top_n":50}}]}`
+	res, err := ops.Import(ctx, "cli", strings.NewReader(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Created != 1 {
+		t.Fatalf("result = %+v", res)
+	}
+	p := reg.Snapshot(ctx).Project("blog")
+	if p == nil {
+		t.Fatal("blog not imported")
+	}
+	if len(p.Attributes) != 2 || p.Attributes[0] != "plan" || p.Attributes[1] != "tier" {
+		t.Fatalf("Attributes = %v, want [plan tier] (sorted DISTINCT union of the legacy map)", p.Attributes)
+	}
+}
+
 // findKey looks up a RegistryKey by key value directly from the store,
 // bypassing the snapshot (which drops disabled keys — see the "list"
 // comment in cmd/twillingate/key.go).
@@ -184,10 +219,10 @@ func TestExportImportArchivedState(t *testing.T) {
 	reg.Reload(ctx)
 	ops := NewOps(reg, st)
 	if _, err := ops.CreateProject(ctx, "cli", ProjectSpec{
-		Alias: "archived-blog", Name: "Archived blog", Identity: "anonymous"}); err != nil {
+		Alias: "archivedblog", Name: "Archived blog", Identity: "anonymous"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ops.ArchiveProject(ctx, "cli", "archived-blog"); err != nil {
+	if err := ops.ArchiveProject(ctx, "cli", "archivedblog"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -212,9 +247,9 @@ func TestExportImportArchivedState(t *testing.T) {
 	}
 
 	// Verify archived state is preserved in store B
-	p := reg2.Snapshot(ctx).Project("archived-blog")
+	p := reg2.Snapshot(ctx).Project("archivedblog")
 	if p == nil || !p.Archived {
-		t.Fatalf("archived-blog = %+v; must be archived", p)
+		t.Fatalf("archivedblog = %+v; must be archived", p)
 	}
 
 	// Re-export from store B and verify byte equality
@@ -224,5 +259,42 @@ func TestExportImportArchivedState(t *testing.T) {
 	}
 	if buf2.String() != exported {
 		t.Errorf("round trip changed archived state:\n%s\nvs\n%s", exported, buf2.String())
+	}
+}
+
+// TestImportRejectsWholeDocumentOnABadAlias proves import is all-or-nothing
+// on alias validation: a document with a bad alias in the middle
+// ([blog, my_app, shop]) must write NOTHING, including "shop" which is
+// valid and listed AFTER the offender. Before this fix, Import applied
+// projects one at a time and returned on the first error, so "blog" would
+// already exist and "shop" would never be reached — a half-migrated
+// registry. See internal/manage/importexport.go's pre-validation pass.
+func TestImportRejectsWholeDocumentOnABadAlias(t *testing.T) {
+	st := testStore(t)
+	reg := New(st, defaults, discard())
+	ctx := context.Background()
+	reg.Reload(ctx)
+	ops := NewOps(reg, st)
+
+	doc := `{"version":1,"projects":[
+	  {"alias":"blog","name":"Blog","identity":"anonymous","allowed_origins":[],"ingest_keys":[]},
+	  {"alias":"my_app","name":"My app","identity":"anonymous","allowed_origins":[],"ingest_keys":[]},
+	  {"alias":"shop","name":"Shop","identity":"anonymous","allowed_origins":[],"ingest_keys":[]}
+	]}`
+	res, err := ops.Import(ctx, "cli", strings.NewReader(doc))
+	if err == nil {
+		t.Fatal("expected an error naming the bad alias, got nil")
+	}
+	if !strings.Contains(err.Error(), "my_app") {
+		t.Errorf("error = %v; want it to name my_app", err)
+	}
+	if res.Created != 0 || res.Updated != 0 {
+		t.Fatalf("result = %+v; want nothing applied", res)
+	}
+	if reg.Snapshot(ctx).Project("blog") != nil {
+		t.Error("blog was created despite the document being rejected")
+	}
+	if reg.Snapshot(ctx).Project("shop") != nil {
+		t.Error("shop (listed after the bad alias) was created despite the document being rejected")
 	}
 }

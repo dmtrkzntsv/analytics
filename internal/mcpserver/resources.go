@@ -44,7 +44,7 @@ Views (all carry a 'project' column — always filter on it):
   v_app_countries(project, day, country, actives, views)
   v_identity_daily(project, day, kind, id, actors, users, hits, views, events)  -- kind: 'user'|'group'
   v_retention(project, surface, cohort_day, day_offset, actors, cohort_size)    -- surface: 'web'|'app'
-  agg_product_attrs(project, day, event_name, attr_key, attr_value, count, unique_users)
+  v_product_attrs(project, day, event_name, attr_key, attr_value, count, unique_users)
   identities(project, kind, id, name)  -- display names, joinable to v_identity_daily
 
 Cost note: the views' live halves sessionize raw rows with window
@@ -63,7 +63,7 @@ func textResource(s *mcp.Server, uri, name, desc, text string) {
 
 func (h *host) registerResources(s *mcp.Server) {
 	textResource(s, "docs://events", "events",
-		"The event model: $pageview (web), $screen_view (app) and custom product events — what each family feeds, reserved attributes, identity, and product_aggregation config. Read before instrumenting anything.",
+		"The event model: $pageview (web), $screen_view (app) and custom product events — what each family feeds, reserved attributes, identity, and the declared attributes list. Read before instrumenting anything.",
 		docsEvents)
 	textResource(s, "docs://js-sdk", "js-sdk",
 		"The JS SDK: snippet and SDK-only modes, twillingate page/screen/track/identify/reset, SPA auto-tracking, localhost silence, opt-out.",

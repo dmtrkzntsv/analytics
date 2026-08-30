@@ -2,6 +2,8 @@ package sqlite
 
 import (
 	"context"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/dmtrkzntsv/twillingate/internal/store"
@@ -82,7 +84,7 @@ func TestUpdateProjectAppliesFieldsAndAudits(t *testing.T) {
 
 	updated := store.RegistryProject{Alias: "blog", Name: "Renamed blog",
 		Identity: "identified", AllowedOrigins: `["https://blog.example.com","https://www.blog.example.com"]`,
-		Retention: `{"web":{"raw_days":90}}`, Aggregation: `{"enabled":true}`}
+		Retention: `{"web":{"raw_days":90}}`, Attributes: `["plan"]`}
 	if err := d.UpdateProject(ctx, updated, store.AuditEntry{
 		Actor: "cli", Action: "project.update", Subject: "blog"}); err != nil {
 		t.Fatal(err)
@@ -98,7 +100,7 @@ func TestUpdateProjectAppliesFieldsAndAudits(t *testing.T) {
 	got := ps[0]
 	if got.Name != "Renamed blog" || got.Identity != "identified" ||
 		got.AllowedOrigins != updated.AllowedOrigins ||
-		got.Retention != updated.Retention || got.Aggregation != updated.Aggregation {
+		got.Retention != updated.Retention || got.Attributes != updated.Attributes {
 		t.Fatalf("LoadRegistry after update = %+v", got)
 	}
 
@@ -256,6 +258,121 @@ func TestMigrationUpgradeFrom004(t *testing.T) {
 	}
 }
 
+// TestProjectsAttributesDefaultsToEmptyArray asserts the new column's
+// NOT NULL DEFAULT '[]', for a row inserted (via ExecForTest, bypassing the
+// application write path) without ever mentioning it.
+func TestProjectsAttributesDefaultsToEmptyArray(t *testing.T) {
+	db := newTestDB(t) // existing helper; applies all migrations
+	ctx := context.Background()
+	if _, err := db.ExecForTest(
+		`INSERT INTO projects (id, alias, name, identity, allowed_origins)
+		 VALUES ('i1','blog','Blog','anonymous','[]')`); err != nil {
+		t.Fatal(err)
+	}
+	ps, _, err := db.LoadRegistry(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ps) != 1 || ps[0].Attributes != "[]" {
+		t.Fatalf("Attributes = %q, want \"[]\"", ps[0].Attributes)
+	}
+}
+
+// TestMigrationBackfillsAttributesFromLegacyMap is the risky part of 006:
+// it reconstructs pre-006 state (product_aggregation's old event-keyed
+// map), runs the REAL embedded migration via d.Migrate (not a copy of its
+// SQL — a copy previously drifted from the shipped migration when the
+// json_valid/json_type/m.type/v.type guards were hardened in, leaving the
+// real UPDATE's union path with no in-repo coverage), and asserts the
+// backfill produced the sorted DISTINCT union of every array in the map —
+// {"*":["plan"],"subscribed":["tier","plan"]} -> ["plan","tier"]. This
+// also exercises whether the correlated
+// json_each(json_extract(projects.product_aggregation, '$.attributes'))
+// reference actually works on this SQLite build.
+func TestMigrationBackfillsAttributesFromLegacyMap(t *testing.T) {
+	d, err := openAt(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	ctx := context.Background()
+
+	// Reconstruct pre-006 state: migrations 001-005 applied, so
+	// product_aggregation exists as a plain TEXT column.
+	if err := applyMigrationsUpTo(ctx, d, 5); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.db.ExecContext(ctx,
+		`INSERT INTO projects (id, alias, name, identity, allowed_origins, product_aggregation)
+		 VALUES (?,?,?,?,?,?)`,
+		"id1", "blog", "Blog", "anonymous", "[]",
+		`{"enabled":true,"attributes":{"*":["plan"],"subscribed":["tier","plan"]},"top_n":50}`); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run every remaining migration (006 and 007) for real.
+	if err := d.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	var attrs string
+	if err := d.db.QueryRowContext(ctx,
+		`SELECT attributes FROM projects WHERE alias='blog'`).Scan(&attrs); err != nil {
+		t.Fatal(err)
+	}
+	if attrs != `["plan","tier"]` {
+		t.Fatalf("attributes = %q, want [\"plan\",\"tier\"] (sorted DISTINCT union)", attrs)
+	}
+}
+
+// TestMigrationBackfillSkipsMalformedProductAggregation is the corruption
+// case: migrations are forward-only with no scripted way back, so a
+// hand-edited or otherwise malformed product_aggregation value must not
+// abort the migration transaction (which would leave the server unable to
+// boot). Runs the real embedded 006 migration via d.Migrate, not a copy of
+// its SQL, so it also proves the DROP COLUMN step still completes.
+func TestMigrationBackfillSkipsMalformedProductAggregation(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value string
+	}{
+		{"not JSON at all", "not json"},
+		{"scalar where an array is expected", `{"enabled":true,"attributes":{"*":"plan"},"top_n":50}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, err := openAt(t.TempDir() + "/test.db")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer d.Close()
+			ctx := context.Background()
+
+			if err := applyMigrationsUpTo(ctx, d, 5); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := d.db.ExecContext(ctx,
+				`INSERT INTO projects (id, alias, name, identity, allowed_origins, product_aggregation)
+				 VALUES (?,?,?,?,?,?)`,
+				"id1", "blog", "Blog", "anonymous", "[]", tc.value); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := d.Migrate(ctx); err != nil {
+				t.Fatalf("migration aborted on malformed product_aggregation %q: %v", tc.value, err)
+			}
+
+			var attrs string
+			if err := d.db.QueryRowContext(ctx,
+				`SELECT attributes FROM projects WHERE alias='blog'`).Scan(&attrs); err != nil {
+				t.Fatal(err)
+			}
+			if attrs != "[]" {
+				t.Fatalf("attributes = %q, want \"[]\" (malformed input must backfill to empty, not abort)", attrs)
+			}
+		})
+	}
+}
+
 // applyMigrationsUpTo applies migrations 001 through maxVersion to the database.
 // It mimics the Migrate logic but stops at a specific version.
 func applyMigrationsUpTo(ctx context.Context, d *DB, maxVersion int) error {
@@ -376,6 +493,255 @@ func projectCol(table string) string {
 		return "alias"
 	}
 	return "project"
+}
+
+// TestRenameProjectMovesEveryTable is the core rename contract: the
+// registry row and every table in projectTables move to the new alias in
+// one transaction. ingest_keys is one of those tables, so a rename must
+// not orphan the keys a deployed site is already sending data with — that
+// is the difference between a usable rename and a data-loss trap.
+func TestRenameProjectMovesEveryTable(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	p := store.RegistryProject{Alias: "blog", Name: "Blog", Identity: "anonymous", AllowedOrigins: "[]"}
+	if err := db.CreateProject(ctx, p, store.AuditEntry{
+		Actor: "test", Action: "project.create", Subject: "blog"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InsertIngestKey(ctx, store.RegistryKey{Key: "ak_blog", Project: "blog", Label: "web"},
+		store.AuditEntry{Actor: "test", Action: "key.issue", Subject: "web"}); err != nil {
+		t.Fatal(err)
+	}
+	seedProductEvent(t, db, "blog", "signup", "2026-08-01T10:00:00Z", nil, "", "")
+
+	if err := db.RenameProject(ctx, "blog", "journal", store.AuditEntry{
+		Actor: "test", Action: "project.rename", Subject: "blog->journal"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"product_events", "ingest_keys"} {
+		var n int
+		if err := db.db.QueryRow(
+			`SELECT COUNT(*) FROM ` + table + ` WHERE project='blog'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 0 {
+			t.Errorf("%s still has %d rows under the old alias", table, n)
+		}
+	}
+	var keys int
+	if err := db.db.QueryRow(
+		`SELECT COUNT(*) FROM ingest_keys WHERE project='journal'`).Scan(&keys); err != nil {
+		t.Fatal(err)
+	}
+	if keys == 0 {
+		t.Fatal("ingest keys did not follow the rename; deployed clients would break")
+	}
+	var events int
+	if err := db.db.QueryRow(
+		`SELECT COUNT(*) FROM product_events WHERE project='journal'`).Scan(&events); err != nil {
+		t.Fatal(err)
+	}
+	if events != 1 {
+		t.Fatalf("product_events under journal = %d, want 1", events)
+	}
+	// the registry row itself must have moved, not just the data tables
+	var c int
+	if err := db.db.QueryRow(`SELECT COUNT(*) FROM projects WHERE alias='blog'`).Scan(&c); err != nil {
+		t.Fatal(err)
+	}
+	if c != 0 {
+		t.Fatal("old alias still present in projects")
+	}
+	if err := db.db.QueryRow(`SELECT COUNT(*) FROM projects WHERE alias='journal'`).Scan(&c); err != nil {
+		t.Fatal(err)
+	}
+	if c != 1 {
+		t.Fatal("new alias not present in projects")
+	}
+}
+
+func TestRenameProjectRejectsExistingTarget(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	for _, alias := range []string{"blog", "journal"} {
+		if err := db.CreateProject(ctx, store.RegistryProject{
+			Alias: alias, Name: alias, Identity: "anonymous", AllowedOrigins: "[]"},
+			store.AuditEntry{Actor: "test", Action: "project.create", Subject: alias}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.RenameProject(ctx, "blog", "journal", store.AuditEntry{
+		Actor: "test", Action: "project.rename", Subject: "blog->journal"}); err == nil {
+		t.Fatal("rename onto an already-taken alias did not fail")
+	}
+}
+
+func TestRenameProjectUnknownSource(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	if err := db.RenameProject(ctx, "ghost", "journal", store.AuditEntry{
+		Actor: "test", Action: "project.rename", Subject: "ghost->journal"}); err == nil {
+		t.Fatal("rename of an unknown source alias did not fail")
+	}
+}
+
+// TestRenameProjectRejectedTargetLeavesSourceUntouched guards against the
+// worst failure mode for this command: a half-applied rename that leaves
+// rows stranded under an alias with no registry row. It seeds a source
+// project with data and ingest keys, attempts a rename onto an alias that
+// is already taken, and asserts nothing moved and config_version did not
+// bump — the whole attempt must be a no-op.
+func TestRenameProjectRejectedTargetLeavesSourceUntouched(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	for _, alias := range []string{"blog", "journal"} {
+		if err := db.CreateProject(ctx, store.RegistryProject{
+			Alias: alias, Name: alias, Identity: "anonymous", AllowedOrigins: "[]"},
+			store.AuditEntry{Actor: "test", Action: "project.create", Subject: alias}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.InsertIngestKey(ctx, store.RegistryKey{Key: "ak_blog", Project: "blog", Label: "web"},
+		store.AuditEntry{Actor: "test", Action: "key.issue", Subject: "web"}); err != nil {
+		t.Fatal(err)
+	}
+	seedProductEvent(t, db, "blog", "signup", "2026-08-01T10:00:00Z", nil, "", "")
+	v0, err := db.ConfigVersion(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.RenameProject(ctx, "blog", "journal", store.AuditEntry{
+		Actor: "test", Action: "project.rename", Subject: "blog->journal"}); err == nil {
+		t.Fatal("rename onto an already-taken alias did not fail")
+	}
+
+	var alias string
+	if err := db.db.QueryRow(`SELECT alias FROM projects WHERE alias='blog'`).Scan(&alias); err != nil {
+		t.Fatalf("source project row disappeared after a rejected rename: %v", err)
+	}
+	var pe int
+	if err := db.db.QueryRow(`SELECT COUNT(*) FROM product_events WHERE project='blog'`).Scan(&pe); err != nil {
+		t.Fatal(err)
+	}
+	if pe != 1 {
+		t.Errorf("product_events under blog = %d, want 1 (untouched)", pe)
+	}
+	var ik int
+	if err := db.db.QueryRow(`SELECT COUNT(*) FROM ingest_keys WHERE project='blog'`).Scan(&ik); err != nil {
+		t.Fatal(err)
+	}
+	if ik != 1 {
+		t.Errorf("ingest_keys under blog = %d, want 1 (untouched)", ik)
+	}
+	v1, err := db.ConfigVersion(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v1 != v0 {
+		t.Errorf("config_version changed on a rejected rename: %d -> %d", v0, v1)
+	}
+}
+
+// TestRenameProjectSameAliasIsRejectedWithItsOwnMessage pins the error an
+// operator sees when re-running a rename they already completed (or
+// mistyping -to as -alias's value). Reusing the "already exists" message
+// here would read as a collision with some other project, when in fact
+// nothing is wrong except the no-op; give it a distinct message.
+func TestRenameProjectSameAliasIsRejectedWithItsOwnMessage(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	if err := db.CreateProject(ctx, store.RegistryProject{
+		Alias: "blog", Name: "blog", Identity: "anonymous", AllowedOrigins: "[]"},
+		store.AuditEntry{Actor: "test", Action: "project.create", Subject: "blog"}); err != nil {
+		t.Fatal(err)
+	}
+	err := db.RenameProject(ctx, "blog", "blog", store.AuditEntry{
+		Actor: "test", Action: "project.rename", Subject: "blog->blog"})
+	if err == nil {
+		t.Fatal("renaming a project to its own alias did not fail")
+	}
+	if !strings.Contains(err.Error(), "already named") {
+		t.Errorf("error = %q, want a distinct message about already having that name, not a collision-with-another-project message", err.Error())
+	}
+	if strings.Contains(err.Error(), "already exists") {
+		t.Errorf("error = %q, reused the taken-alias wording; an operator would read this as colliding with a DIFFERENT project", err.Error())
+	}
+}
+
+// TestProjectTablesMatchesSchema keeps the projectTables comment's claim
+// honest: it independently enumerates every table in the live schema that
+// carries a `project` column (via sqlite_master + pragma_table_info) and
+// asserts the set is exactly projectTables, in both directions. A missing
+// entry silently orphans rows on DeleteProjectData and RenameProject; a
+// stale entry (a dropped or renamed table still listed) is dead weight
+// that hides the day a real gap opens up. Either defect fails loudly here
+// with the offending table names, rather than staying invisible until
+// someone loses data.
+func TestProjectTablesMatchesSchema(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	// Collect table names and close the cursor before running any further
+	// query: the pool is capped at one connection (single-writer, spec
+	// §7.2), so a nested query issued while these rows are still open
+	// would deadlock waiting for a connection that never frees up.
+	rows, err := db.db.QueryContext(ctx,
+		`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tables []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		tables = append(tables, name)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		t.Fatal(err)
+	}
+	rows.Close()
+
+	actual := map[string]bool{}
+	for _, name := range tables {
+		if hasColumn(t, db, name, "project") {
+			actual[name] = true
+		}
+	}
+
+	expected := map[string]bool{}
+	for _, table := range projectTables {
+		expected[table] = true
+	}
+
+	var missing, stale []string
+	// missing: schema says this table has a project column, but
+	// projectTables does not list it.
+	for table := range actual {
+		if !expected[table] {
+			missing = append(missing, table)
+		}
+	}
+	// stale: projectTables lists this table, but the schema says it does
+	// not (or no longer) have a project column.
+	for table := range expected {
+		if !actual[table] {
+			stale = append(stale, table)
+		}
+	}
+	sort.Strings(missing)
+	sort.Strings(stale)
+
+	if len(missing) > 0 || len(stale) > 0 {
+		t.Fatalf("projectTables (internal/store/sqlite/registry.go) is out of sync with the schema.\n"+
+			"missing from projectTables (have a project column, not listed — DeleteProjectData/RenameProject will orphan their rows): %v\n"+
+			"stale in projectTables (listed but table dropped or no longer has a project column): %v",
+			missing, stale)
+	}
 }
 
 // parseVersion extracts the version number from a migration filename.

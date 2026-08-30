@@ -24,6 +24,7 @@ variable with its default.
 | `RETENTION_WEB_AGGREGATE_DAYS` | Days aggregates are kept. Default 365. |
 | `RETENTION_PRODUCT_RAW_DAYS` | Days raw product events are kept before rollup. Default 30. |
 | `RETENTION_PRODUCT_AGGREGATE_DAYS` | Days product aggregates are kept. Default 365. |
+| `PRODUCT_ATTRIBUTES_TOP_N` | Distinct attribute values kept per (project, day, event, key) in `agg_product_attrs` before the rest collapse into `(other)`. Default 50. See [Attribute breakdowns](#attribute-breakdowns). |
 | `RETENTION_APP_RAW_DAYS` | Days raw app events are kept before rollup. Default 30. |
 | `RETENTION_APP_AGGREGATE_DAYS` | Days app aggregates are kept. Default 365. |
 | `DASHBOARDS_DB_PATH` | Database `dashboards` renders. Defaults to the `DATABASE_DSN` path. |
@@ -49,9 +50,10 @@ managed entirely through the CLI (or an MCP management tool):
 
 ```bash
 twillingate project create -alias myapp -name "My App" -identity anonymous \
-  -origin https://myapp.com
+  -origin https://myapp.com -attr plan -attr tier
 twillingate project list
 twillingate project update -alias myapp -origin https://myapp.com -origin https://www.myapp.com
+twillingate project rename -alias oldname -to newname  # data and ingest keys follow
 twillingate project archive -alias myapp    # reversible: `project restore` undoes it
 twillingate key issue -project myapp -label web
 twillingate key list -project myapp
@@ -70,33 +72,21 @@ Each project record has these fields:
 
 | Key | Meaning |
 | --- | --- |
-| `alias` | Internal key: the `project` column on every stored row and the dashboard label. Never transmitted. |
+| `alias` | Internal key: the `project` column on every stored row and the dashboard label. Never transmitted. New aliases must match `^[a-z0-9]+$` (lower-case letters and digits only — `blog`, `blog2`, `2048` are fine, `my_app` and `shop-uk` are not). Aliases are immutable once created; change one with `twillingate project rename -alias old -to new`, which rewrites the `project` column across every table in one transaction. Ingest keys follow the rename, so deployed clients keep working without redeploying. An alias created before this rule existed keeps working and can still be edited — only new aliases are checked. |
 | `name` | Display name. |
 | `identity` | `anonymous` (default) or `identified`. See the README's Privacy and GDPR section. |
 | `ingest_keys` | One or more `{key, label, disabled}` credentials. Required — `twillingate key issue` mints and registers one in a single step. |
 | `allowed_origins` | Origins allowed to post for this project. `*` is a wildcard — `https://*.example.com` covers every subdomain, a bare `*` allows any origin. Add `tauri://localhost` or `app://.` for Electron/Tauri. |
 | `retention` | Per-project override of any retention window. |
-| `product_aggregation` | Opt-in product rollup, see below. |
+| `attributes` | Custom attribute keys to break down, see below. |
 
-`retention` and `product_aggregation` are not plain CLI flags — set them
-through `twillingate config export` (dumps every project as JSON) and
-`twillingate config import FILE` (upserts from that same JSON, or from a
-pre-upgrade `projects.json` — it detects the legacy bare-array format
-automatically). Import never archives or deletes anything absent from the
-file, so it is safe to import a partial edit.
-
-Product aggregation is off unless enabled. Attribute breakdowns are opt-in
-per key, `"*"` applies to every event, and only the top `top_n` values per
-attribute are kept — the rest collapse into a single `(other)` row whose
-unique-user count is computed from the raw data rather than summed:
-
-```json
-"product_aggregation": {
-  "enabled": true,
-  "attributes": { "*": ["plan"], "subscribed": ["tier", "source"] },
-  "top_n": 50
-}
-```
+`retention` is not a plain CLI flag — set it through `twillingate config
+export` (dumps every project as JSON) and `twillingate config import FILE`
+(upserts from that same JSON, or from a pre-upgrade `projects.json` — it
+detects the legacy bare-array format automatically). Import never archives
+or deletes anything absent from the file, so it is safe to import a partial
+edit. `attributes` can go through the same round-trip, but `-attr` on
+`project create`/`project update` is the normal path — see below.
 
 Retention overrides are field-level, so a project can keep raw hits longer
 without restating the rest:
@@ -104,6 +94,57 @@ without restating the rest:
 ```json
 "retention": { "web": { "raw_days": 90 } }
 ```
+
+### Attribute breakdowns
+
+A project declares which product-event attribute keys are worth reporting
+on:
+
+```json
+"attributes": ["plan", "tier"]
+```
+
+or, without touching JSON at all:
+
+```bash
+twillingate project update -alias myapp -attr plan -attr tier
+```
+
+`-attr` is repeatable and, like `-origin`, replaces the whole list when
+supplied at all. Declaring a key drives two things: it gets its own
+`attr_*` column in `v_events_flat`, and a value breakdown (counts and
+unique users per distinct value, per event, per day) in
+`agg_product_attrs` / `v_product_attrs`.
+
+Everything sent is still stored regardless of `attributes`. An undeclared
+key has no dedicated column but stays reachable via
+`json_extract(attributes, '$.junk')`; declaring a key later does not
+backfill past history, only future rollups. Rollups themselves run
+unconditionally now — there is no `enabled` flag. Previously a project
+that never opted in had its raw product events deleted at
+`product.raw_days` with nothing rolled up first, silently losing that
+history; a project with no `attributes` declared still gets daily counts
+and totals, it just has nothing to break down.
+
+Declaring a key bounds columns, not the values inside one — clients supply
+those, and `agg_product_attrs` stores one row per distinct value per key
+per event per day. An unbounded-cardinality key like a URL or session id
+would make the aggregate grow as fast as the raw data it exists to
+summarise, defeating retention. `PRODUCT_ATTRIBUTES_TOP_N` (default 50)
+guards against that globally: only the top N values per key are kept, and
+the rest collapse into one `(other)` row whose unique-user count is
+recomputed from raw data rather than summed. This means a client sending
+the literal string `(other)` as an attribute value collides with that
+overflow bucket: its rows get merged into the tail and its own count is
+lost, not just mislabeled. Avoid that literal value in anything sent as an
+attribute.
+
+`$platform` and `$app_version` roll up automatically without being
+declared, the same way web and app surfaces have always aggregated their
+own system dimensions — they appear in `agg_product_attrs` /
+`v_product_attrs` under those `$`-prefixed keys. Do not add them to
+`attributes`: `$`-prefixed keys are reserved and never reach the custom
+attribute blob, so `"attributes": ["$platform"]` would extract nothing.
 
 ## Ingest keys
 

@@ -89,17 +89,17 @@ func (h *host) table(ctx context.Context, q string, args ...any) (tableOut, erro
 // ---- list_projects ----
 
 type projectOut struct {
-	Alias              string                     `json:"alias"`
-	Name               string                     `json:"name"`
-	Identity           string                     `json:"identity"`
-	Archived           bool                       `json:"archived,omitempty"`
-	FirstWebDay        string                     `json:"first_web_day,omitempty"`
-	LastWebDay         string                     `json:"last_web_day,omitempty"`
-	FirstAppDay        string                     `json:"first_app_day,omitempty"`
-	LastAppDay         string                     `json:"last_app_day,omitempty"`
-	AllowedOrigins     []string                   `json:"allowed_origins"`
-	Retention          *config.RetentionOverride  `json:"retention,omitempty"`
-	ProductAggregation *config.ProductAggregation `json:"product_aggregation,omitempty"`
+	Alias          string                    `json:"alias"`
+	Name           string                    `json:"name"`
+	Identity       string                    `json:"identity"`
+	Archived       bool                      `json:"archived,omitempty"`
+	FirstWebDay    string                    `json:"first_web_day,omitempty"`
+	LastWebDay     string                    `json:"last_web_day,omitempty"`
+	FirstAppDay    string                    `json:"first_app_day,omitempty"`
+	LastAppDay     string                    `json:"last_app_day,omitempty"`
+	AllowedOrigins []string                  `json:"allowed_origins"`
+	Retention      *config.RetentionOverride `json:"retention,omitempty"`
+	Attributes     []string                  `json:"attributes,omitempty"`
 }
 
 type listProjectsOut struct {
@@ -111,7 +111,7 @@ func (h *host) listProjects(ctx context.Context, _ *mcp.CallToolRequest, _ struc
 	for _, p := range h.reg.Snapshot(ctx).Projects() {
 		po := projectOut{
 			Alias: p.Alias, Name: p.Name, Identity: p.Identity, Archived: p.Archived,
-			AllowedOrigins: p.AllowedOrigins, Retention: p.Retention, ProductAggregation: p.Aggregation,
+			AllowedOrigins: p.AllowedOrigins, Retention: p.Retention, Attributes: p.Attributes,
 		}
 		// coverage probe: cheap MIN/MAX over the stitch views
 		for _, probe := range []struct {
