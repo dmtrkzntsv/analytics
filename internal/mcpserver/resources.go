@@ -63,7 +63,7 @@ func textResource(s *mcp.Server, uri, name, desc, text string) {
 
 func (h *host) registerResources(s *mcp.Server) {
 	textResource(s, "docs://events", "events",
-		"The event model: $pageview (web), $screen_view (app) and custom product events — what each family feeds, reserved attributes, identity, and product_aggregation config. Read before instrumenting anything.",
+		"The event model: $pageview (web), $screen_view (app) and custom product events — what each family feeds, reserved attributes, identity, and the declared attributes list. Read before instrumenting anything.",
 		docsEvents)
 	textResource(s, "docs://js-sdk", "js-sdk",
 		"The JS SDK: snippet and SDK-only modes, twillingate page/screen/track/identify/reset, SPA auto-tracking, localhost silence, opt-out.",

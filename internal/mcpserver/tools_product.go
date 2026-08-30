@@ -145,10 +145,10 @@ func (h *host) identities(ctx context.Context, _ *mcp.CallToolRequest, in identi
 func (h *host) registerProduct(s *mcp.Server) {
 	ro := &mcp.ToolAnnotations{ReadOnlyHint: true}
 	mcp.AddTool(s, &mcp.Tool{Name: "product_events", Annotations: ro,
-		Description: "Opt-in product events per day: count and unique users per event name, plus daily totals."},
+		Description: "Product events per day: count and unique users per event name, plus daily totals. Unconditional — no attribute declaration is required to see it."},
 		h.productEvents)
 	mcp.AddTool(s, &mcp.Tool{Name: "product_attributes", Annotations: ro,
-		Description: "Attribute breakdowns for product events. Only returns rows for keys the project declares in attributes (see update_project); an undeclared key yields an empty result, not an error."},
+		Description: "Attribute breakdowns for product events. The system dimensions $platform and $app_version are always included; a custom key only appears once the project declares it in attributes (see update_project)."},
 		h.productAttributes)
 	mcp.AddTool(s, &mcp.Tool{Name: "retention", Annotations: ro,
 		Description: "D1/D7/D30-style cohort curves for identified projects. Returns aggregated_through: cohorts after it are absent (refreshed 03:00 UTC), not zero. Anonymous projects have no retention by design."},
