@@ -158,10 +158,10 @@ project, which does not belong on the agent-facing surface.
 ## 6. `v_product_attrs`
 
 `agg_product_attrs` is the only aggregate table with no stitch view, so
-Evidence reads it directly. Like every other source in
+Evidence reads it directly. Like the other sources in
 `evidence/sources/twillingate/`, it works around the sqlite connector's
-empty-table failure with a sentinel row — that guard is the house pattern,
-identical byte-for-byte across all 21 sources, and stays. What is specific
+empty-table failure with a sentinel row — that guard is the shared house
+pattern across the Evidence sources, and stays. What is specific
 to this source is one comment sentence explaining *why* the table might be
 empty: "The attribute-breakdown rollup job may not have run yet, leaving
 this table empty" (`evidence/sources/twillingate/agg_product_attrs.sql:1`).

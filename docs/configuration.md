@@ -133,7 +133,11 @@ would make the aggregate grow as fast as the raw data it exists to
 summarise, defeating retention. `PRODUCT_ATTRIBUTES_TOP_N` (default 50)
 guards against that globally: only the top N values per key are kept, and
 the rest collapse into one `(other)` row whose unique-user count is
-recomputed from raw data rather than summed.
+recomputed from raw data rather than summed. This means a client sending
+the literal string `(other)` as an attribute value collides with that
+overflow bucket: its rows get merged into the tail and its own count is
+lost, not just mislabeled. Avoid that literal value in anything sent as an
+attribute.
 
 `$platform` and `$app_version` roll up automatically without being
 declared, the same way web and app surfaces have always aggregated their

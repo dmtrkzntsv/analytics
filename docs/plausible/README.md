@@ -93,7 +93,8 @@ discarded. A site-wide CTA would otherwise be indistinguishable from page to
 page, so the shim stamps `path: location.pathname` on every event it fires
 (pass an explicit `plausible-event-path--…` class to override it). Drop that
 line if a CTA appears on enough distinct URLs to make the breakdown noisy —
-`TopN` caps what reaches the dashboard, but the raw rows keep everything.
+the server-wide `PRODUCT_ATTRIBUTES_TOP_N` setting caps what reaches the
+dashboard, but the raw rows keep everything.
 
 **No navigation delay.** Plausible's script holds a link click for ~150 ms
 so the request escapes before unload. The tracker sends through
