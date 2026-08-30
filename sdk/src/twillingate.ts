@@ -1,5 +1,5 @@
 /* twillingate SDK core — web, product and app analytics against the
- * collector's POST /api/events (docs/ingest-api.md is the normative wire
+ * collector's POST /api/events (docs/twillingate.md is the normative wire
  * format). Bundled as an IIFE by build.mjs and served at /js/twillingate.js.
  *
  * Two usage modes:

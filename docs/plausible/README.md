@@ -60,7 +60,7 @@ click, so a tagged form wrapping a tagged button does not count twice.
 Middle-clicks fire too — they open links.
 
 Keys beginning with `$` are refused by the shim. They are reserved
-attributes (§6 of [ingest-api.md](../ingest-api.md)) and an unrecognized one
+attributes (see [twillingate.md](../twillingate.md)) and an unrecognized one
 is dropped server-side, so failing at the source beats losing it in transit.
 
 ---

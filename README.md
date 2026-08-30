@@ -20,8 +20,8 @@ that is a second compose file, and skipping it costs you nothing else.
 ## Run it
 
 Tracking is one file: ingestion, the tracker script and — once `MCP_AUTH_DSN`
-is set, see [docs/mcp-auth.md](docs/mcp-auth.md) and
-[docs/mcp-clients.md](docs/mcp-clients.md) — the MCP endpoint, all on
+is set, see [Connect an MCP client](docs/twillingate.md#connect-an-mcp-client)
+— the MCP endpoint, all on
 `:8080`:
 
 ```bash
@@ -49,7 +49,7 @@ The `COMPOSE_FILE` line saves repeating `-f` on every later command. Beyond a
 hobby install, keep tracking and reporting apart: reporting reads a Litestream
 replica rather than the live database, so a reporting outage cannot cost you
 events. Each file ships the litestream service it needs, commented out.
-[docs/deployment.md](docs/deployment.md) is the runbook.
+[docs/twillingate.md](docs/twillingate.md) is the runbook.
 
 ## Track something
 
@@ -73,20 +73,27 @@ twillingate.reset();                            // on logout
 ```
 
 Native apps and backends skip the SDK and POST batches straight to
-`/api/events`. Details: [docs/sdk.md](docs/sdk.md) and
-[docs/ingest-api.md](docs/ingest-api.md).
+`/api/events`. Details: [Instrument a website](docs/twillingate.md#instrument-a-website)
+and [The wire format](docs/twillingate.md#the-wire-format).
 
 ## Documentation
 
-| Doc | Covers |
+[docs/twillingate.md](docs/twillingate.md) is the whole of it — install,
+configure, instrument, connect, query, operate. It is also what the MCP
+endpoint serves to agents as `docs://twillingate`, so the text you read and
+the text they read are the same bytes.
+
+| Section | Covers |
 | --- | --- |
-| [docs/deployment.md](docs/deployment.md) | Systemd install, splitting tracking from reporting, upgrades, backup drills, disaster recovery, routine ops |
-| [docs/configuration.md](docs/configuration.md) | Every environment variable, projects, ingest keys, retention, low-resource tuning |
-| [docs/sdk.md](docs/sdk.md) | twillingate.js: snippet mode, SDK-only mode, runtime API, offline queue |
-| [docs/ingest-api.md](docs/ingest-api.md) | The normative wire format for `/api/events` |
-| [docs/mcp-auth.md](docs/mcp-auth.md) | MCP auth modes: static token, Cloudflare Access, generic OAuth IdP |
-| [docs/mcp-clients.md](docs/mcp-clients.md) | Pointing Claude Code, Claude Desktop and claude.ai at the MCP endpoint |
-| [docs/litestream.md](docs/litestream.md) | Backup and replication: bucket setup, writer, reader, recovery |
+| [Install](docs/twillingate.md#install) | systemd and docker compose, verifying ingestion |
+| [Configure](docs/twillingate.md#configure) | Every environment variable, projects, ingest keys, retention, attribute breakdowns, low-resource tuning |
+| [Instrument a website](docs/twillingate.md#instrument-a-website) | twillingate.js: snippet and SDK modes, URL masking, routing modes, offline queue |
+| [Instrument anything else](docs/twillingate.md#the-event-model) | The event model for native apps and backends |
+| [The wire format](docs/twillingate.md#the-wire-format) | The normative contract for `/api/events` |
+| [Connect an MCP client](docs/twillingate.md#connect-an-mcp-client) | Auth modes and pointing Claude Code, Desktop or claude.ai at the endpoint |
+| [Query the data](docs/twillingate.md#query-the-data) | The views and the caveats needed to write correct SQL |
+| [Operate and recover](docs/twillingate.md#operate-and-recover) | Upgrades, litestream replication, backup drills, disaster recovery |
+| [docs/plausible/](docs/plausible/) | The Plausible class-tagging shim |
 
 ## Development
 

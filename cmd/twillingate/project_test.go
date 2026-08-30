@@ -167,7 +167,7 @@ func TestProjectAttrFlag(t *testing.T) {
 }
 
 // TestProjectAttrUpdateMergeSemantics is the CLI-level guard for the merge
-// rule -attr must follow, matching -origin exactly (docs/configuration.md:63):
+// rule -attr must follow, matching -origin exactly (docs/twillingate.md):
 // omitting -attr on `project update` leaves the current list untouched, and
 // supplying it at all replaces the whole list wholesale.
 func TestProjectAttrUpdateMergeSemantics(t *testing.T) {
