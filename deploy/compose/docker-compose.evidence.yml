@@ -2,12 +2,6 @@
 #
 # DASHBOARDS_DB_PATH defaults to the database tracking writes. Point it at
 # /data/replica.db instead when a restore is what puts one there.
-#
-# A brand-new named volume belongs to root and both images run as uid 10001, so
-# nothing can write to it. Once, before the first `up`:
-#   docker run --rm -v <project>_data:/data alpine chown 10001:10001 /data
-# Sharing the volume with the collector needs none of this — it creates
-# /var/lib/twillingate owned by 10001 and the volume inherits that.
 services:
   dashboards:
     image: ghcr.io/dmtrkzntsv/twillingate-evidence:${TWILLINGATE_VERSION:-latest}
@@ -30,8 +24,8 @@ services:
   #
   # SOURCE_DB is the writer's path, litestream's key for the replica, and must
   # match `path:` in litestream.yml. REPLICA_PATH is where it lands here, and
-  # is what DASHBOARDS_DB_PATH must point at. `user` is required: the
-  # dashboards cannot open a root-owned replica in WAL mode.
+  # is what DASHBOARDS_DB_PATH must point at. `user` matches the dashboards,
+  # which cannot open a root-owned replica.
   # restore:
   #   image: litestream/litestream:0.5
   #   restart: unless-stopped
