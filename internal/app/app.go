@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -78,6 +79,14 @@ func Serve(ctx context.Context, cfg *config.Config, logger *slog.Logger, api, mc
 	}
 	defer st.Close()
 	if err := st.Migrate(ctx); err != nil {
+		return err
+	}
+	// v_product_attrs' live half reads the cardinality cap from meta with a
+	// scalar subquery -- SQL cannot see the environment. Written before
+	// anything queries the view so the first read uses the configured cap
+	// rather than the view's built-in fallback.
+	if err := st.SetMeta(ctx, "product_attributes_top_n",
+		strconv.Itoa(cfg.ProductAttributesTopN)); err != nil {
 		return err
 	}
 

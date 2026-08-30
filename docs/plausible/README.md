@@ -72,10 +72,10 @@ click → twillingate.track("signup_cloud")
 ```
 
 Class props are stored in `product_events.attributes` and broken down per
-key and value by `agg_product_attrs` — but only when the product attribute
-rollup is enabled (`ProductAggSettings{Enabled: true, TopN: …}`). Without it
-the props are still stored and still queryable, just not pre-aggregated for
-the dashboard.
+key and value by `v_product_attrs` — but only for the keys the project
+declares in `attributes`. Undeclared props are still stored and still
+queryable through the raw `attributes` column, just not broken down for the
+dashboard.
 
 ---
 

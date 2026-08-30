@@ -59,7 +59,7 @@ func (h *host) productAttributes(ctx context.Context, _ *mcp.CallToolRequest, in
 		return nil, tableOut{}, h.unknownProjectErr(ctx, in.Project)
 	}
 	q := `SELECT day, event_name, attr_key, attr_value, count, unique_users
-		FROM agg_product_attrs WHERE project=? AND day BETWEEN ? AND ?`
+		FROM v_product_attrs WHERE project=? AND day BETWEEN ? AND ?`
 	args := []any{in.Project, in.From, in.To}
 	if in.Event != "" {
 		q += ` AND event_name=?`

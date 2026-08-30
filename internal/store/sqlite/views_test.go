@@ -2,10 +2,13 @@ package sqlite
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
+	"github.com/dmtrkzntsv/twillingate/internal/civil"
 	"github.com/dmtrkzntsv/twillingate/internal/store"
 )
 
@@ -295,5 +298,244 @@ func TestStitchViewIdentityDailyCoversRawDays(t *testing.T) {
 	}
 	if actors != 2 || users != 2 || views != 2 {
 		t.Errorf("aggregated group row = actors %d users %d views %d; want 2 2 2", actors, users, views)
+	}
+}
+
+// seedDeclaredProject registers a project row with a declared attribute
+// list. v_product_attrs' live half reads projects.attributes, so the row
+// must exist or the declared half of the view is empty.
+func seedDeclaredProject(t *testing.T, db *DB, alias string, attrs []string) {
+	t.Helper()
+	if attrs == nil {
+		attrs = []string{}
+	}
+	b, err := json.Marshal(attrs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.db.Exec(
+		`INSERT INTO projects (id, alias, name, attributes) VALUES (?,?,?,?)`,
+		alias, alias, alias, string(b)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// attrRow mirrors one v_product_attrs row for before/after comparison.
+type attrRow struct {
+	Event, Key, Value string
+	Count, Uniques    int
+}
+
+// readAttrs drains every v_product_attrs row for one project/day into a
+// slice. It fully drains and closes the cursor before returning: the pool
+// is SetMaxOpenConns(1), so holding rows open while the caller issues the
+// next query would deadlock.
+func readAttrs(t *testing.T, db *DB, project, day string) []attrRow {
+	t.Helper()
+	rows, err := db.db.Query(`SELECT event_name, attr_key, attr_value, count, unique_users
+		FROM v_product_attrs WHERE project=? AND day=?
+		ORDER BY event_name, attr_key, attr_value`, project, day)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []attrRow
+	for rows.Next() {
+		var r attrRow
+		if err := rows.Scan(&r.Event, &r.Key, &r.Value, &r.Count, &r.Uniques); err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		out = append(out, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// seedAttrDay writes 60 distinct "plan" values for one event on one day --
+// more than the 50 cap, so the top-N cutoff and the "(other)" tail are both
+// exercised. Counts vary (1..3) so the ranking is not a pure alphabetical
+// tiebreak, and the four actors repeat across values so the tail's
+// unique_users is strictly less than the sum of its per-value uniques --
+// the exact case a summed "(other)" row would get wrong.
+func seedAttrDay(t *testing.T, db *DB, project string) {
+	t.Helper()
+	var evs []store.ProductEvent
+	id := 0
+	for i := 0; i < 60; i++ {
+		for n := 0; n <= i%3; n++ {
+			id++
+			evs = append(evs, store.ProductEvent{
+				ID: fmt.Sprintf("e%04d", id), Project: project, EventName: "signup",
+				ActorID: fmt.Sprintf("a%d", (i+n)%4), TS: ts("2026-08-01T10:00:00Z"),
+				Attributes: map[string]string{"plan": fmt.Sprintf("p%02d", i)},
+				Platform:   []string{"ios", "android"}[i%2],
+				AppVersion: []string{"1.0", "2.0", "3.0"}[i%3],
+			})
+		}
+	}
+	// A second event name, so the per-event partitioning is exercised too.
+	evs = append(evs, store.ProductEvent{
+		ID: "ping1", Project: project, EventName: "ping", ActorID: "a9",
+		TS: ts("2026-08-01T11:00:00Z"), Attributes: map[string]string{"plan": "pro"},
+		Platform: "web", AppVersion: "1.0",
+	})
+	if err := db.WriteProductEvents(context.Background(), evs); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The binding invariant (002_views.sql:5-8) for the attribute breakdown:
+// v_product_attrs must return identical rows before and after the day is
+// aggregated, including the top-N cutoff, its count-desc/value-asc
+// tiebreak, and the recomputed "(other)" tail.
+func TestProductAttrsViewInvariant(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	seedDeclaredProject(t, db, "blog", []string{"plan"})
+	seedAttrDay(t, db, "blog")
+
+	before := readAttrs(t, db, "blog", "2026-08-01")
+	if len(before) == 0 {
+		t.Fatal("live v_product_attrs returned no rows; the comparison would be vacuous")
+	}
+	// Sanity: the cap and the tail must actually be in play, or the
+	// interesting half of the invariant is untested.
+	var plans, other int
+	for _, r := range before {
+		if r.Event == "signup" && r.Key == "plan" {
+			plans++
+			if r.Value == "(other)" {
+				other = r.Uniques
+			}
+		}
+	}
+	if plans != 51 {
+		t.Fatalf("live signup/plan rows = %d, want 51 (50 capped + one (other))", plans)
+	}
+	if other == 0 {
+		t.Fatal("no (other) row: the tail path is untested")
+	}
+
+	if err := db.AggregateProductDay(ctx, "blog",
+		civil.DateOf(ts("2026-08-01T00:00:00Z")), []string{"plan"}, 50); err != nil {
+		t.Fatal(err)
+	}
+	after := readAttrs(t, db, "blog", "2026-08-01")
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("view changed when the day aggregated:\nbefore %v\nafter  %v", before, after)
+	}
+}
+
+// The "(other)" row's unique_users must be a fresh COUNT(DISTINCT actor_id)
+// over the tail, not a sum of the per-value uniques: an actor appearing
+// under several tail values would otherwise be counted once per value.
+func TestProductAttrsViewOtherRecomputesUniques(t *testing.T) {
+	db := newTestDB(t)
+	seedDeclaredProject(t, db, "blog", []string{"plan"})
+	seedAttrDay(t, db, "blog")
+	var count, uniques int
+	if err := db.db.QueryRow(`SELECT count, unique_users FROM v_product_attrs
+		WHERE project='blog' AND day='2026-08-01' AND event_name='signup'
+		  AND attr_key='plan' AND attr_value='(other)'`).Scan(&count, &uniques); err != nil {
+		t.Fatal(err)
+	}
+	if uniques >= count {
+		t.Fatalf("(other) = count %d uniques %d; the fixture repeats actors across "+
+			"tail values, so uniques must be strictly smaller than a summed count",
+			count, uniques)
+	}
+}
+
+// System dimensions roll up unconditionally (task 2), so the live half must
+// produce them for a project that declares no attributes at all -- and the
+// invariant must hold for them too.
+func TestProductAttrsViewSystemDimensionsWithoutDeclaredKeys(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	seedDeclaredProject(t, db, "blog", nil)
+	seedAttrDay(t, db, "blog")
+
+	before := readAttrs(t, db, "blog", "2026-08-01")
+	var sys, custom int
+	for _, r := range before {
+		switch r.Key {
+		case "$platform", "$app_version":
+			sys++
+		default:
+			custom++
+		}
+	}
+	if sys == 0 {
+		t.Fatal("no $platform/$app_version rows for an undeclared project")
+	}
+	if custom != 0 {
+		t.Fatalf("%d rows for undeclared custom keys; only system dimensions were expected", custom)
+	}
+	if err := db.AggregateProductDay(ctx, "blog",
+		civil.DateOf(ts("2026-08-01T00:00:00Z")), nil, 50); err != nil {
+		t.Fatal(err)
+	}
+	if after := readAttrs(t, db, "blog", "2026-08-01"); !reflect.DeepEqual(before, after) {
+		t.Fatalf("system dimensions changed when the day aggregated:\nbefore %v\nafter  %v",
+			before, after)
+	}
+}
+
+// The cap comes from the meta row the app writes at boot, so a non-default
+// value must move the cutoff in the live half exactly as it moves it in the
+// aggregation.
+func TestProductAttrsViewHonoursMetaCap(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	if err := db.SetMeta(ctx, "product_attributes_top_n", "3"); err != nil {
+		t.Fatal(err)
+	}
+	seedDeclaredProject(t, db, "blog", []string{"plan"})
+	seedAttrDay(t, db, "blog")
+	before := readAttrs(t, db, "blog", "2026-08-01")
+	var plans int
+	for _, r := range before {
+		if r.Event == "signup" && r.Key == "plan" {
+			plans++
+		}
+	}
+	if plans != 4 {
+		t.Fatalf("live signup/plan rows = %d, want 4 (3 capped + one (other))", plans)
+	}
+	if err := db.AggregateProductDay(ctx, "blog",
+		civil.DateOf(ts("2026-08-01T00:00:00Z")), []string{"plan"}, 3); err != nil {
+		t.Fatal(err)
+	}
+	if after := readAttrs(t, db, "blog", "2026-08-01"); !reflect.DeepEqual(before, after) {
+		t.Fatalf("capped view changed when the day aggregated:\nbefore %v\nafter  %v",
+			before, after)
+	}
+}
+
+// A missing meta row must fall back to the same default the aggregation
+// clamps to (defaultAttrsTopN), not silently return zero live rows -- which
+// would make every invariant assertion above pass vacuously.
+func TestProductAttrsViewDefaultsCapWhenMetaMissing(t *testing.T) {
+	db := newTestDB(t)
+	seedDeclaredProject(t, db, "blog", []string{"plan"})
+	seedAttrDay(t, db, "blog")
+	var n int
+	if err := db.db.QueryRow(`SELECT COUNT(*) FROM meta
+		WHERE key='product_attributes_top_n'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("fixture unexpectedly has a cap row (%d)", n)
+	}
+	if err := db.db.QueryRow(`SELECT COUNT(*) FROM v_product_attrs
+		WHERE project='blog' AND day='2026-08-01' AND event_name='signup'
+		  AND attr_key='plan'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != defaultAttrsTopN+1 {
+		t.Fatalf("signup/plan rows with no cap row = %d, want %d", n, defaultAttrsTopN+1)
 	}
 }
