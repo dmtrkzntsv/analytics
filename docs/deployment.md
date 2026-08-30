@@ -27,12 +27,12 @@ store works; only `endpoint` and `bucket` change.
 
 ```bash
 # From a published release (no checkout needed):
-curl -fsSL https://raw.githubusercontent.com/dmtrkzntsv/analytics/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/dmtrkzntsv/twillingate/main/deploy/systemd/install.sh | sudo bash
 
 # Or from a checkout:
-git clone <repo> && cd analytics
+git clone <repo> && cd twillingate
 make build
-sudo ./install.sh                 # --user NAME to skip the prompt, --yes for defaults
+sudo ./deploy/systemd/install.sh                 # --user NAME to skip the prompt, --yes for defaults
 ```
 
 The curl form detects the architecture, downloads the matching tarball from
@@ -41,19 +41,19 @@ SHA256 before installing. Releases are published by CI on every push to
 `main`.
 
 The installer creates a system account, installs the binary to
-`/usr/local/bin/analytics`, creates `/var/lib/analytics` (0750, owned by the
-service account), installs an example `analytics.env` (infra settings + R2
+`/usr/local/bin/twillingate`, creates `/var/lib/twillingate` (0750, owned by the
+service account), installs an example `twillingate.env` (infra settings + R2
 credentials, loaded by both units via `EnvironmentFile=`), renders both
 systemd units with the chosen user, and enables them. It never overwrites an
-existing analytics.env, so re-running it to deploy a new binary is safe.
+existing twillingate.env, so re-running it to deploy a new binary is safe.
 
 Then edit the file it flagged, and create your first project — projects live
 in the database, not a shipped file:
 
 ```bash
-sudo vi /etc/analytics/analytics.env    # R2 credentials from step 1, geo
-sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics project create -alias myapp'
-sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics key issue -project myapp -label web'
+sudo vi /etc/twillingate/twillingate.env    # R2 credentials from step 1, geo
+sudo -u twillingate sh -ac '. /etc/twillingate/twillingate.env; twillingate project create -alias myapp'
+sudo -u twillingate sh -ac '. /etc/twillingate/twillingate.env; twillingate key issue -project myapp -label web'
 ```
 
 Install litestream (<https://litestream.io/install/>) if the installer
@@ -63,8 +63,8 @@ pin; writer and reader must run the same major/minor version (see
 
 ```bash
 sudo systemctl enable --now litestream
-sudo systemctl start analytics
-systemctl status analytics litestream
+sudo systemctl start twillingate
+systemctl status twillingate litestream
 curl -s localhost:8080/healthz
 ```
 
@@ -92,12 +92,12 @@ curl -i -X POST http://localhost:8080/api/hit \
 Ingestion and dashboards in one compose stack, no credentials needed:
 
 ```bash
-mkdir analytics && cd analytics
-base=https://raw.githubusercontent.com/dmtrkzntsv/analytics/main
+mkdir twillingate && cd twillingate
+base=https://raw.githubusercontent.com/dmtrkzntsv/twillingate/main
 curl -fsSLO $base/deploy/compose/docker-compose.yml
 docker compose up -d
-docker compose exec analytics analytics project create -alias myapp
-docker compose exec analytics analytics key issue -project myapp -label web
+docker compose exec twillingate twillingate project create -alias myapp
+docker compose exec twillingate twillingate key issue -project myapp -label web
 ```
 
 `:3000` answers `503` until Evidence finishes its first build — roughly a
@@ -134,10 +134,10 @@ A backup you have never restored is not a backup. On the VPS:
 
 ```bash
 # What is in the bucket? (0.5 syntax; replaces the old `snapshots`/`generations`)
-litestream ltx -config /etc/litestream.yml /var/lib/analytics/analytics.db
+litestream ltx -config /etc/litestream.yml /var/lib/twillingate/twillingate.db
 
 litestream restore -config /etc/litestream.yml -o /tmp/check.db \
-  /var/lib/analytics/analytics.db
+  /var/lib/twillingate/twillingate.db
 
 # It must be a valid database, not just a file that exists:
 sqlite3 /tmp/check.db 'PRAGMA quick_check;'          # expect: ok
@@ -161,7 +161,7 @@ major/minor version than the writer — see
 ## 5. Migrating one server → two
 
 1. Stand up the VPS per section 2, pointing litestream at the same bucket.
-2. On the machine that will render dashboards, stop the `analytics` service
+2. On the machine that will render dashboards, stop the `twillingate` service
    (and the litestream overlay, if you were replicating from here).
 3. Install `restore.sh` on cron per [docs/litestream.md](litestream.md) §4,
    with `SOURCE_DB` set to the database path **on the VPS** — it must match
@@ -177,19 +177,19 @@ major/minor version than the writer — see
 
 ```bash
 # On a fresh host:
-git clone <repo> && cd analytics && make build
-sudo ./install.sh --user analytics --yes
-sudo vi /etc/analytics/analytics.env       # same R2 credentials
+git clone <repo> && cd twillingate && make build
+sudo ./deploy/systemd/install.sh --user twillingate --yes
+sudo vi /etc/twillingate/twillingate.env       # same R2 credentials
 
 # Restore before starting the collector, so it does not create an empty db:
-sudo -u analytics litestream restore -config /etc/litestream.yml \
-  -o /var/lib/analytics/analytics.db /var/lib/analytics/analytics.db
-sudo -u analytics sqlite3 /var/lib/analytics/analytics.db 'PRAGMA quick_check;'
+sudo -u twillingate litestream restore -config /etc/litestream.yml \
+  -o /var/lib/twillingate/twillingate.db /var/lib/twillingate/twillingate.db
+sudo -u twillingate sqlite3 /var/lib/twillingate/twillingate.db 'PRAGMA quick_check;'
 
-sudo systemctl start analytics litestream
+sudo systemctl start twillingate litestream
 ```
 
-Restore first, always. Starting `analytics serve` against an empty data
+Restore first, always. Starting `twillingate serve` against an empty data
 directory creates a fresh database, and litestream would then replicate that
 empty database over the good backup.
 
@@ -203,26 +203,26 @@ buffered in memory when the host died — bounded by `BUFFER_FLUSH_INTERVAL`.
 
 | Task | Command |
 | --- | --- |
-| Logs | `journalctl -u analytics -f` |
-| Restart | `systemctl restart analytics` |
-| Upgrade (systemd) | `curl -fsSL …/install.sh \| sudo bash -s -- --yes && sudo systemctl restart analytics` (or `make build && sudo ./install.sh --yes` from a checkout) |
-| Upgrade (compose) | `docker compose pull && docker compose up -d`. Never `down -v`: the database lives in the named volume. Pin a release with `ANALYTICS_VERSION=v26.825.1` in `.env`. |
-| Apply migrations only | `sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics migrate'` |
-| Create a project | `sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics project create -alias myapp'` |
-| Issue an ingest key | `sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics key issue -project myapp -label web'` |
-| Export the registry (backup/inspect) | `sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics config export' > registry.json` |
-| Import/migrate the registry | `sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics config import registry.json'` — also accepts a pre-upgrade `projects.json`; never archives or deletes anything absent from the file |
-| Database size | `du -h /var/lib/analytics/analytics.db`. Dashboards need room for one more copy: each rebuild snapshots the database into `DASHBOARDS_WORK_DIR`. |
+| Logs | `journalctl -u twillingate -f` |
+| Restart | `systemctl restart twillingate` |
+| Upgrade (systemd) | `curl -fsSL …/install.sh \| sudo bash -s -- --yes && sudo systemctl restart twillingate` (or `make build && sudo ./deploy/systemd/install.sh --yes` from a checkout) |
+| Upgrade (compose) | `docker compose pull && docker compose up -d`. Never `down -v`: the database lives in the named volume. Pin a release with `TWILLINGATE_VERSION=v26.825.1` in `.env`. |
+| Apply migrations only | `sudo -u twillingate sh -ac '. /etc/twillingate/twillingate.env; twillingate migrate'` |
+| Create a project | `sudo -u twillingate sh -ac '. /etc/twillingate/twillingate.env; twillingate project create -alias myapp'` |
+| Issue an ingest key | `sudo -u twillingate sh -ac '. /etc/twillingate/twillingate.env; twillingate key issue -project myapp -label web'` |
+| Export the registry (backup/inspect) | `sudo -u twillingate sh -ac '. /etc/twillingate/twillingate.env; twillingate config export' > registry.json` |
+| Import/migrate the registry | `sudo -u twillingate sh -ac '. /etc/twillingate/twillingate.env; twillingate config import registry.json'` — also accepts a pre-upgrade `projects.json`; never archives or deletes anything absent from the file |
+| Database size | `du -h /var/lib/twillingate/twillingate.db`. Dashboards need room for one more copy: each rebuild snapshots the database into `DASHBOARDS_WORK_DIR`. |
 | Replication status | `journalctl -u litestream --since -1h`, or `docker compose logs litestream` |
 | Dashboard rebuilds | `docker compose logs dashboards` — one `dashboards: rebuilt` line per successful build |
-| Recent config changes (audit log) | `sudo -u analytics sqlite3 /var/lib/analytics/analytics.db "SELECT * FROM audit_log ORDER BY ts DESC LIMIT 20"` |
+| Recent config changes (audit log) | `sudo -u twillingate sqlite3 /var/lib/twillingate/twillingate.db "SELECT * FROM audit_log ORDER BY ts DESC LIMIT 20"` |
 
 Aggregation, pruning and incremental vacuum run daily at 03:00 UTC, and the
 visitor salt rotates at 00:00 UTC. A catch-up pass runs at startup, so
 downtime across those times does not skip a day.
 
 File logging (`log.file`) is optional and off by default; if enabled, install
-`deploy/logrotate/analytics` into `/etc/logrotate.d/`.
+`deploy/logrotate/twillingate` into `/etc/logrotate.d/`.
 
 ### Enabling MCP on an installed host
 
@@ -234,99 +234,45 @@ moment its auth is configured — until then it logs "MCP endpoint disabled"
 at boot and serves ingestion alone. Enabling MCP is therefore one edit:
 
 ```bash
-sudo vi /etc/analytics/analytics.env
-# Set MCP_AUTH_MODE (token, oauth or cloudflare) plus that mode's other
-# variables — see mcp-auth.md. For `token` mode, mint the value first:
-sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics keygen -mcp'
-sudo systemctl restart analytics
+sudo vi /etc/twillingate/twillingate.env
+# Set MCP_AUTH_DSN (token://…, cloudflare://…?aud=… or oauth://…) — see
+# mcp-auth.md. For token mode, mint the value first:
+sudo -u twillingate sh -ac '. /etc/twillingate/twillingate.env; twillingate keygen -mcp'
+sudo systemctl restart twillingate
 ```
 
 Set `MCP_ADDR` to give MCP its own port; unset, it shares the ingestion
 listener (bare `serve` logs a warning naming the shared address). To run
 the surfaces as separate processes — independently restartable, scalable
-and exposable — copy `deploy/systemd/analytics.service` to e.g.
-`analytics-mcp.service`, change `ExecStart=` to `analytics serve -mcp`
+and exposable — copy `deploy/systemd/twillingate.service` to e.g.
+`twillingate-mcp.service`, change `ExecStart=` to `twillingate serve -mcp`
 (explicitly requesting `-mcp` makes missing auth config a hard error),
-and change the original unit's `ExecStart=` to `analytics serve -api`.
+and change the original unit's `ExecStart=` to `twillingate serve -api`.
 
 A `serve -mcp`-only process still starts the store/jobs runner and so still
-runs the daily aggregation pass against `DATABASE_URL` — `-mcp` only makes
+runs the daily aggregation pass against `DATABASE_DSN` — `-mcp` only makes
 the HTTP listener conditional, not the background jobs. Point a `-mcp`-only
 unit at a Litestream replica and it will write to that replica on every
-pass. Set `MCP_DB_PATH` (the path MCP reads for queries) and `DATABASE_URL`
+pass. Set `MCP_DB_PATH` (the path MCP reads for queries) and `DATABASE_DSN`
 (the path the aggregation pass writes to) deliberately for your topology:
-either keep `DATABASE_URL` on a database this process is meant to own, or
+either keep `DATABASE_DSN` on a database this process is meant to own, or
 accept that a two-process topology (one `-api`, one `-mcp`, each with its
-own `DATABASE_URL`) runs the idempotent daily aggregation twice.
+own `DATABASE_DSN`) runs the idempotent daily aggregation twice.
 
 In `cloudflare` mode, the Access application sits in front of the MCP
 hostname or path only — the ingestion path (`/api/events`) must stay outside
 it so devices can keep posting without an Access session. Scope the
-application narrowly (for example `analytics.example.com/mcp`, not the bare
-hostname), turn on "managed OAuth" for it, and set `MCP_CF_TEAM_DOMAIN` and
-`MCP_CF_AUD` from that application. Access then serves the OAuth discovery
+application narrowly (for example `twillingate.example.com/mcp`, not the bare
+hostname), turn on "managed OAuth" for it, and build `MCP_AUTH_DSN`
+(`cloudflare://<team>.cloudflareaccess.com?aud=<tag>`) from that
+application. Access then serves the OAuth discovery
 documents and the `401` challenge at the edge; the binary only validates the
 `Cf-Access-Jwt-Assertion` header Access forwards, and requests that reach the
 origin without having passed Access are rejected.
 
 ---
 
-## 8. Upgrading to app analytics
+## 8. Migrating from the old `analytics` binary
 
-This release adds app ingestion and changes the ingest surface. Six things
-break, and two of them require a coordinated deploy — read this before
-upgrading a running install.
-
-### Breaking changes
-
-1. **`ingest_keys` is required.** The service refuses to start until every
-   project has at least one. This is deliberate: the gentler alternative —
-   key optional, warn when absent — leaves a silently unauthenticated
-   project, which is the exact condition the change exists to remove.
-2. **Every embedded snippet must be rewritten.** `data-key` and
-   `data-identity` replace `data-project`. Old snippets receive `401`.
-3. **`/api/hit` and `/api/event` are removed**, not deprecated. Everything
-   goes to `POST /api/events`.
-4. **An unknown project returns `401`**, not `204`.
-5. **`identity: "anonymous"` (the new default) salts the site-supplied web
-   `user_id`.** A site calling `analytics.identify("u_123")` previously wrote
-   `u_123` straight into the database as a persistent cross-day identifier
-   governed by nothing. Under the new default it is salted and rotated, so
-   **cross-day web funnels and any query joining product events across days
-   stop working** until that project sets `identity: "identified"`. This is a
-   behaviour change on data you may already be collecting, not a config
-   rename.
-6. Migrations 003 and 004 rename `web_hits.visitor_hash` to `actor_id` and
-   `product_events.user_id` to `actor_id`. Any custom SQL you have written
-   against those columns needs updating. The rename is deliberate: in
-   identified mode a column named `…_hash` would hold plaintext identifiers.
-
-### Order of operations
-
-Steps 2 and 3 are the coordinated pair. Between them, old snippets get `401`,
-so schedule them together — ideally within the same maintenance window.
-
-```bash
-# 1. Issue a key per client — this both mints and registers it.
-sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics key issue -project myapp -label web'
-sudo -u analytics sh -ac '. /etc/analytics/analytics.env; analytics key issue -project myapp -label ios'
-
-# 2. Deploy the new binary. Migrations 003/004 run on boot.
-curl -fsSL https://…/install.sh | sudo bash -s -- --yes
-sudo systemctl restart analytics
-
-# 3. Update every site snippet, then deploy the sites.
-#    <script defer src="https://…/js/script.js"
-#            data-key="ak_…" data-identity="anonymous"></script>
-
-# 4. Confirm traffic is arriving under each key label.
-journalctl -u analytics -f | grep 'ingest summary'
-```
-
-Step 4 is also how you retire a key later: watch its label fall to zero, then
-run `analytics key disable -project myapp -label ios`.
-
-### Rolling back
-
-Migrations are forward-only. Restore from a litestream replica if you need to
-go back — see §6.
+The one-time analytics → twillingate migration (paths, env vars, units,
+logrotate, images) is a separate runbook: [migration.md](migration.md).

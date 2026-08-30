@@ -72,7 +72,7 @@ func runKeygen(args []string, stdout io.Writer) int {
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, "Web snippet:")
 	fmt.Fprintln(stdout)
-	fmt.Fprintln(stdout, `  <script defer src="https://analytics.example.com/js/script.js"`)
+	fmt.Fprintln(stdout, `  <script defer src="https://twillingate.example.com/js/twillingate.js"`)
 	fmt.Fprintf(stdout, "          data-key=%q\n", keys[0])
 	fmt.Fprintln(stdout, `          data-identity="anonymous"></script>`)
 	return 0

@@ -76,7 +76,7 @@ type IngestKey struct {
 	Disabled bool   `json:"disabled"`
 }
 
-// Project is the legacy projects.json format, used only by `analytics
+// Project is the legacy projects.json format, used only by `twillingate
 // config import` to seed the registry (internal/manage) from a pre-upgrade
 // install. The running server never reads this type from a file.
 type Project struct {
@@ -89,7 +89,7 @@ type Project struct {
 	ProductAggregation *ProductAggregation `json:"product_aggregation"`
 }
 
-// DashboardsConfig configures `analytics dashboards`: which database to
+// DashboardsConfig configures `twillingate dashboards`: which database to
 // render, where the Evidence project lives, and how often to rebuild it.
 type DashboardsConfig struct {
 	DBPath     string
@@ -148,7 +148,7 @@ func Load() (*Config, error) {
 	return FromEnv(os.LookupEnv)
 }
 
-// LoadDashboards builds the configuration for `analytics dashboards`, which
+// LoadDashboards builds the configuration for `twillingate dashboards`, which
 // renders whatever database it is pointed at.
 func LoadDashboards() (*Config, error) {
 	return FromEnvDashboards(os.LookupEnv)
@@ -215,7 +215,7 @@ func parse(lookup func(string) (string, bool), dashboards bool) (*Config, error)
 		Listen:   e.str("LISTEN_ADDR", "127.0.0.1:8080"),
 		Database: e.str("DATABASE_DSN", ""),
 		Geo:      e.str("GEO_DSN", "cloudflare://"),
-		// The collector's public base URL (https://analytics.example.com).
+		// The collector's public base URL (https://twillingate.example.com).
 		// Embed snippets and MCP integration guidance are built from it;
 		// unset, they carry a placeholder and tell the model to ask.
 		PublicURL: strings.TrimSuffix(e.str("PUBLIC_URL", ""), "/"),

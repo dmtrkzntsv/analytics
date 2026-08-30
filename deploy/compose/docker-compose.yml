@@ -10,9 +10,8 @@
 #   docker compose exec twillingate twillingate key issue -project myapp -label web
 #
 # The image's default CMD is `serve`, which runs ingestion and — once
-# MCP_AUTH_MODE (plus its mode's other variables) is set in `.env` — the
-# MCP endpoint too; unconfigured, MCP is skipped with a logged warning.
-# See the README's MCP section and docs/mcp-auth.md.
+# MCP_AUTH_DSN is set in `.env` — the MCP endpoint too; unconfigured, MCP
+# is skipped with a logged warning. See docs/mcp-auth.md.
 services:
   twillingate:
     image: ghcr.io/dmtrkzntsv/twillingate:${TWILLINGATE_VERSION:-latest}

@@ -2,7 +2,8 @@
 
 Plausible's tagged-events build fires goals from `plausible-event-*` CSS
 classes on the markup. This tracker has no class-based binding: it
-auto-tracks pageviews and exposes `window.analytics.track()`, nothing more.
+auto-tracks pageviews and exposes `twillingate.track()` (or `window.analytics.track()` from the
+legacy snippet), nothing more.
 Swapping the script therefore silently stops every tagged CTA — the classes
 stay in the markup and simply nothing reads them.
 
@@ -17,7 +18,7 @@ had in Plausible, so historical goal names still line up.
 
 Copy the file into whatever the site serves as static assets
 (`public/scripts/` on most setups) and load it **after** the tracking
-snippet, which is what defines `analytics.track`:
+snippet, which is what defines the tracker global:
 
 ```html
 <script defer src="https://a.example.com/js/script.js" data-key="ak_9f3c…"></script>
@@ -25,7 +26,7 @@ snippet, which is what defines `analytics.track`:
 ```
 
 Both are `defer`, so they execute in document order. The shim also tolerates
-a missing tracker — if `window.analytics` is absent (blocked, failed to
+a missing tracker — if the tracker global is absent (blocked, failed to
 load) clicks are ignored rather than throwing.
 
 ---
@@ -63,7 +64,7 @@ Any name that is not `$pageview` or `$screen_view` is stored as a custom
 event, so every shimmed CTA becomes a **product event**:
 
 ```
-click → analytics.track("signup_cloud")
+click → twillingate.track("signup_cloud")
       → POST /api/events
       → product_events
       → v_product_daily / v_product_totals

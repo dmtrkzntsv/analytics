@@ -1,7 +1,7 @@
 # Replication with litestream
 
-The application does not replicate anything. `analytics serve -api` writes a
-SQLite file and `analytics dashboards` reads a SQLite file; moving that file
+The application does not replicate anything. `twillingate serve -api` writes a
+SQLite file and `twillingate dashboards` reads a SQLite file; moving that file
 off the machine, or onto a second one, is a deployment choice. This document
 describes the choice most installations make.
 
@@ -26,7 +26,7 @@ day behind like a nightly dump. Two things fall out of that:
 
 Any S3-compatible store works; these instructions use Cloudflare R2.
 
-1. Create a bucket, for example `analytics-backup`.
+1. Create a bucket, for example `twillingate-backup`.
 2. Create an API token with **Object Read & Write** for it. This is the
    *writer's* credential.
 3. If you run a second machine for dashboards, create a second token with
@@ -38,7 +38,7 @@ Both go in the environment, never in a config file:
 ```sh
 LITESTREAM_ACCESS_KEY_ID=…
 LITESTREAM_SECRET_ACCESS_KEY=…
-R2_BUCKET=analytics-backup
+R2_BUCKET=twillingate-backup
 R2_ENDPOINT=https://<account_id>.r2.cloudflarestorage.com
 ```
 
@@ -48,7 +48,7 @@ R2_ENDPOINT=https://<account_id>.r2.cloudflarestorage.com
 
 ```yaml
 dbs:
-  - path: /var/lib/analytics/analytics.db
+  - path: /var/lib/twillingate/twillingate.db
     replicas:
       - type: s3
         bucket: ${R2_BUCKET}
@@ -88,7 +88,7 @@ sudo systemctl enable --now litestream
 journalctl -u litestream -f
 ```
 
-The credentials live in `/etc/analytics/analytics.env`, which both units load.
+The credentials live in `/etc/twillingate/twillingate.env`, which both units load.
 
 **Writer and reader must run the same litestream major/minor version.**
 Litestream 0.5 stores backups in a new bucket format (LTX) that 0.3 cannot
@@ -109,7 +109,7 @@ is the entire reason not to restore over the live path directly.
 
 ```bash
 sudo install -m 0755 deploy/litestream/restore.sh /usr/local/bin/restore.sh
-sudo cp deploy/litestream/restore.cron /etc/cron.d/analytics-restore
+sudo cp deploy/litestream/restore.cron /etc/cron.d/twillingate-restore
 ```
 
 It needs `litestream`, `sqlite3` and (optionally, for the overlap guard)
@@ -117,8 +117,8 @@ It needs `litestream`, `sqlite3` and (optionally, for the overlap guard)
 
 | Variable | Meaning |
 | --- | --- |
-| `SOURCE_DB` | The database path **on the writer** — must equal `path:` in `litestream.yml`. Default `/var/lib/analytics/analytics.db`. |
-| `REPLICA_PATH` | Where the verified copy lands locally. Default `/var/lib/analytics/replica.db`. |
+| `SOURCE_DB` | The database path **on the writer** — must equal `path:` in `litestream.yml`. Default `/var/lib/twillingate/twillingate.db`. |
+| `REPLICA_PATH` | Where the verified copy lands locally. Default `/var/lib/twillingate/replica.db`. |
 | `LITESTREAM_CONFIG` | Default `/etc/litestream.yml`. |
 | `LOOP_INTERVAL` | Seconds between cycles. Unset means run once and exit, which is what cron wants. |
 
@@ -141,9 +141,9 @@ inside a container.
 A backup you have never restored is not a backup. Monthly, on the writer:
 
 ```bash
-litestream ltx -config /etc/litestream.yml /var/lib/analytics/analytics.db
+litestream ltx -config /etc/litestream.yml /var/lib/twillingate/twillingate.db
 litestream restore -config /etc/litestream.yml -o /tmp/check.db \
-  /var/lib/analytics/analytics.db
+  /var/lib/twillingate/twillingate.db
 sqlite3 /tmp/check.db 'PRAGMA quick_check;'                 # expect: ok
 sqlite3 /tmp/check.db 'SELECT MAX(day) FROM v_web_daily;'   # expect: recent
 rm /tmp/check.db
@@ -160,7 +160,7 @@ is being written usually means a version mismatch — see §3.
 
 ## 6. Recovering onto a fresh host
 
-**Restore before starting the collector.** `analytics serve -api` creates an
+**Restore before starting the collector.** `twillingate serve -api` creates an
 empty database if none exists, and litestream would then happily replicate
 that empty database over your backup.
 
@@ -170,10 +170,10 @@ if the bucket were empty (see §3).
 
 ```bash
 # install the binary and config first — see docs/deployment.md
-sudo -u analytics litestream restore -config /etc/litestream.yml \
-  -o /var/lib/analytics/analytics.db /var/lib/analytics/analytics.db
-sudo -u analytics sqlite3 /var/lib/analytics/analytics.db 'PRAGMA quick_check;'
-sudo systemctl start analytics litestream
+sudo -u twillingate litestream restore -config /etc/litestream.yml \
+  -o /var/lib/twillingate/twillingate.db /var/lib/twillingate/twillingate.db
+sudo -u twillingate sqlite3 /var/lib/twillingate/twillingate.db 'PRAGMA quick_check;'
+sudo systemctl start twillingate litestream
 ```
 
 The `-o` path and the trailing argument differ in meaning: the first is where

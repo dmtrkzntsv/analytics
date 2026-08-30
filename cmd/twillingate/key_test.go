@@ -23,7 +23,7 @@ func TestKeyIssueListDisableEnable(t *testing.T) {
 	if !regexp.MustCompile(`ak_[0-9a-f]{32}`).MatchString(out.String()) {
 		t.Fatalf("no key in output: %s", out.String())
 	}
-	if !strings.Contains(out.String(), "script.js") {
+	if !strings.Contains(out.String(), "twillingate.js") {
 		t.Fatalf("no snippet in output: %s", out.String())
 	}
 	out.Reset()

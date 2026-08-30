@@ -1,48 +1,49 @@
 # MCP authentication
 
-`analytics serve -mcp` refuses to run unauthenticated: `MCP_AUTH_MODE` must
-name one of three modes. This page is the operator's guide to each. All
-variables live in `/etc/analytics/analytics.env` (or the compose `.env`).
+`twillingate serve -mcp` refuses to run unauthenticated: `MCP_AUTH_DSN`
+must be set, and its scheme picks the mode. This page is the operator's
+guide to each. The variable lives in `/etc/twillingate/twillingate.env`
+(or the compose `.env`).
+
+```bash
+MCP_AUTH_DSN=token://<token>
+MCP_AUTH_DSN=cloudflare://<team>.cloudflareaccess.com?aud=<aud-tag>
+MCP_AUTH_DSN=oauth://idp.example.com[?resource=<url>][&audience=<aud>]
+```
 
 | Mode | Pick it when | Works with |
 | --- | --- | --- |
-| `token` | One operator, no identity provider — the simplest thing that is secure | Claude Code, Cursor, anything that can send a header. **Not** claude.ai connectors (they cannot send custom headers) |
-| `cloudflare` | Your domain is already on Cloudflare | Everything, including claude.ai — Access runs the login and the client self-registers |
-| `oauth` | You run or rent an identity provider (Keycloak, Auth0, Authentik, …) | Everything, if the IdP meets the requirements below |
+| `token://` | One operator, no identity provider — the simplest thing that is secure | Claude Code, Cursor, anything that can send a header. **Not** claude.ai connectors (they cannot send custom headers) |
+| `cloudflare://` | Your domain is already on Cloudflare | Everything, including claude.ai — Access runs the login and the client self-registers |
+| `oauth://` | You run or rent an identity provider (Keycloak, Auth0, Authentik, …) | Everything, if the IdP meets the requirements below |
 
 Whatever the mode, put the MCP surface on its own hostname when you can
-(`MCP_ADDR` + a second DNS name): `/api/events` and `/js/script.js` must
+(`MCP_ADDR` + a second DNS name): `/api/events` and the `/js/*` scripts must
 stay publicly reachable for ingestion, and a dedicated hostname keeps the
 access-control story simple.
 
-## `token` — a single static token
+## `token://` — a single static token
 
 ```bash
-analytics keygen -mcp          # prints: MCP_TOKEN=ar_…
+twillingate keygen -mcp        # prints: MCP_AUTH_DSN=token://ar_…
 ```
 
 ```bash
-# analytics.env
-MCP_AUTH_MODE=token
-MCP_TOKEN=ar_…
+# twillingate.env
+MCP_AUTH_DSN=token://ar_…
 ```
 
 Connect Claude Code:
 
 ```bash
-claude mcp add --transport http analytics https://analytics.example.com/mcp \
+claude mcp add --transport http twillingate https://twillingate.example.com/mcp \
   --header "Authorization: Bearer ar_…"
 ```
 
 The token is a true secret — unlike ingest keys it reads every project and
 authorizes the management tools. Rotate by minting a new one and restarting.
 
-Optionally also set `MCP_AUTH_ISSUER` + `MCP_RESOURCE_URL`: the server then
-serves the RFC 9728 discovery document, so clients can find the OAuth path
-the day you switch modes. Setting the issuer *requires* setting
-`MCP_RESOURCE_URL`.
-
-## `cloudflare` — Access managed OAuth
+## `cloudflare://` — Access managed OAuth
 
 Cloudflare Access acts as the OAuth authorization server ("managed OAuth",
 GA March 2026): it serves the discovery documents at the edge, runs the
@@ -66,10 +67,8 @@ client setup. Your only identity infrastructure is the Cloudflare account.
 6. **Configure the server**:
 
 ```bash
-# analytics.env
-MCP_AUTH_MODE=cloudflare
-MCP_CF_TEAM_DOMAIN=yourteam.cloudflareaccess.com
-MCP_CF_AUD=<the application AUD tag>
+# twillingate.env
+MCP_AUTH_DSN=cloudflare://yourteam.cloudflareaccess.com?aud=<the application AUD tag>
 ```
 
 How it works, and why the server still verifies: the token a client holds
@@ -83,18 +82,21 @@ origin port does not bypass Access. In this mode the binary deliberately
 serves no discovery document and sends no challenge header; the edge owns
 both.
 
-## `oauth` — any standards-compliant IdP
+## `oauth://` — any standards-compliant IdP
 
 The server is an OAuth 2.1 **resource server** only: it validates the JWTs
 your IdP issues, and never sees a password or runs a login page.
 
 ```bash
-# analytics.env
-MCP_AUTH_MODE=oauth
-MCP_AUTH_ISSUER=https://auth.example.com          # your IdP's issuer URL
-MCP_RESOURCE_URL=https://analytics.example.com/mcp # this server's canonical URL
-#MCP_AUTH_AUDIENCE=…   # only if your IdP's aud differs from MCP_RESOURCE_URL
+# twillingate.env — the issuer is https://<host>[/path] from the DSN
+MCP_AUTH_DSN=oauth://auth.example.com
 ```
+
+The RFC 9728 resource URL defaults to `PUBLIC_URL` + `/mcp` (set
+`PUBLIC_URL`, or pass `?resource=https://…/mcp` explicitly); the expected
+token audience defaults to that resource URL (`&audience=…` to override).
+For a local or plain-http IdP — development only — use the
+`oauth+insecure://` scheme, which makes the issuer `http://`.
 
 What the IdP must provide — verify each before pointing the server at it:
 
@@ -114,8 +116,8 @@ What the IdP must provide — verify each before pointing the server at it:
 2. **Asymmetrically signed access tokens** (RS/ES/PS families). HMAC and
    `alg=none` are rejected. If your IdP issues *opaque* access tokens by
    default, configure it to issue JWTs for this audience.
-3. **The audience claim**: tokens must carry `aud` containing
-   `MCP_RESOURCE_URL` (or `MCP_AUTH_AUDIENCE`). In most IdPs this means
+3. **The audience claim**: tokens must carry `aud` containing the resource
+   URL (or the DSN's `audience` override). In most IdPs this means
    registering the MCP server as an API/resource with that identifier and
    having clients request it.
 4. **For claude.ai**: Dynamic Client Registration (RFC 7591), or manually
@@ -127,15 +129,15 @@ throttled to once a minute.
 ## Verifying any mode
 
 ```bash
-curl -si https://analytics.example.com/mcp -X POST | head -3
-# → HTTP/1.1 401; in oauth (and issuer-configured token) mode the
-#   WWW-Authenticate header names the discovery document
+curl -si https://twillingate.example.com/mcp -X POST | head -3
+# → HTTP/1.1 401; in oauth mode the WWW-Authenticate header names the
+#   discovery document
 
-curl -s https://analytics.example.com/.well-known/oauth-protected-resource
-# → oauth mode: JSON naming your issuer; cloudflare mode: 404 (the edge
-#   serves discovery); token mode without issuer: 404
+curl -s https://twillingate.example.com/.well-known/oauth-protected-resource
+# → oauth mode: JSON naming your issuer; cloudflare and token modes: 404
+#   (the edge serves discovery, or there is none)
 
-curl -s https://analytics.example.com/healthz
+curl -s https://twillingate.example.com/healthz
 # → {"status":"ok"} — health stays unauthenticated in every mode
 ```
 

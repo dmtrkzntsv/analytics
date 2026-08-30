@@ -1,12 +1,13 @@
 /* plausible-shim.js — keeps Plausible's class-based tagging working after the
  * tracker swap. Serve it from the site (Plausible's own script is gone) and
- * load it AFTER the tracking snippet, which is what defines analytics.track:
+ * load it AFTER the tracking snippet (twillingate.js or the legacy
+ * script.js), which is what defines the tracker global:
  *
  *   <script defer src="https://a.example.com/js/script.js" data-key="ak_…"></script>
  *   <script defer src="/scripts/plausible-shim.js"></script>
  *
  *   <a class="plausible-event-name--signup_cloud" href="/register">
- *   → analytics.track("signup_cloud")
+ *   → twillingate.track("signup_cloud")
  *
  * See README.md in this folder for the class syntax and where the events land.
  */
@@ -65,7 +66,8 @@
     // Product events carry no page context of their own, so a nav CTA fires
     // identically from every page unless the path rides along as an attribute.
     if (!("path" in t.props)) t.props.path = location.pathname;
-    if (window.analytics && window.analytics.track) window.analytics.track(t.name, t.props);
+    var tg = window.twillingate || window.analytics;
+    if (tg && tg.track) tg.track(t.name, t.props);
   }
 
   // Capture phase: a handler that stops propagation must not eat the event.
@@ -76,7 +78,8 @@
   // Manual `plausible(...)` calls, for markup that mixes tagging with the
   // scripted form.
   window.plausible = function (name, opts) {
-    if (window.analytics && window.analytics.track) window.analytics.track(name, opts && opts.props);
+    var tg = window.twillingate || window.analytics;
+    if (tg && tg.track) tg.track(name, opts && opts.props);
     if (opts && typeof opts.callback === "function") opts.callback();
   };
 })();
