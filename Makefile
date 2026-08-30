@@ -1,6 +1,6 @@
 BIN := twillingate
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS := -s -w -X main.version=$(VERSION)
+LDFLAGS := -s -w -X github.com/dmtrkzntsv/twillingate/internal/version.Version=$(VERSION)
 
 .PHONY: build test check vet build-all dist docker run smoke test-install test-compose test-restore dashboards seed-demo clean
 

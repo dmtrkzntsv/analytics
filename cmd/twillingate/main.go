@@ -5,11 +5,12 @@ package main
 
 import (
 	"fmt"
+	internalversion "github.com/dmtrkzntsv/twillingate/internal/version"
 	"io"
 	"os"
 )
 
-var version = "dev" // overridden via -ldflags "-X main.version=..."
+var version = internalversion.Version
 
 var commands = map[string]func(args []string, stdout io.Writer) int{}
 

@@ -4,6 +4,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/dmtrkzntsv/twillingate/internal/version"
 )
 
 func TestTwillingateSDKServed(t *testing.T) {
@@ -21,8 +23,14 @@ func TestTwillingateSDKServed(t *testing.T) {
 		t.Errorf("cache-control = %q", cc)
 	}
 	body := w.Body.String()
-	if !strings.Contains(body, "twillingate.js v") {
-		t.Error("bundle is missing its version banner; rebuild with `npm run build` in sdk/")
+	// The committed bundle carries __TWILLINGATE_VERSION__; the served copy
+	// must have it substituted with the build version everywhere (banner
+	// and twillingate.VERSION).
+	if strings.Contains(body, "__TWILLINGATE_VERSION__") {
+		t.Error("served bundle still contains the version placeholder")
+	}
+	if !strings.Contains(body, "twillingate.js "+version.Version) {
+		t.Error("bundle banner does not carry the build version; rebuild with `npm run build` in sdk/")
 	}
 	// Behavioural markers the committed bundle must contain. The full
 	// behaviour is covered by the vitest suite in sdk/; this guards against

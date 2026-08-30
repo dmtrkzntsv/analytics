@@ -26,7 +26,7 @@ ARG TARGETARCH
 ARG TARGETVARIANT
 # GOARM takes the bare number ("7"), TARGETVARIANT the tag form ("v7").
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GOARM=${TARGETVARIANT#v} \
-    go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
+    go build -trimpath -ldflags "-s -w -X github.com/dmtrkzntsv/twillingate/internal/version.Version=${VERSION}" \
     -o /out/twillingate ./cmd/twillingate
 
 # @evidence-dev/sqlite depends on node-gyp's sqlite3, which publishes no musl

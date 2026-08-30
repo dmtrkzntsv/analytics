@@ -1,8 +1,11 @@
 package server
 
 import (
+	"bytes"
 	_ "embed"
 	"net/http"
+
+	"github.com/dmtrkzntsv/twillingate/internal/version"
 )
 
 // script.js is the frozen legacy snippet: deployed websites load it, so it
@@ -15,6 +18,11 @@ var trackingScript []byte
 //go:embed twillingate.js
 var sdkScript []byte
 
+// The committed bundle carries this placeholder (in its banner and in
+// twillingate.VERSION) so the artifact stays deterministic for CI's drift
+// check; the served copy names the release the binary shipped in.
+const sdkVersionPlaceholder = "__TWILLINGATE_VERSION__"
+
 func (s *Server) registerScript(mux *http.ServeMux) {
 	serve := func(body []byte) http.HandlerFunc {
 		return func(w http.ResponseWriter, _ *http.Request) {
@@ -24,6 +32,8 @@ func (s *Server) registerScript(mux *http.ServeMux) {
 			w.Write(body)
 		}
 	}
+	versioned := bytes.ReplaceAll(sdkScript,
+		[]byte(sdkVersionPlaceholder), []byte(version.Version))
 	mux.HandleFunc("GET /js/script.js", serve(trackingScript))
-	mux.HandleFunc("GET /js/twillingate.js", serve(sdkScript))
+	mux.HandleFunc("GET /js/twillingate.js", serve(versioned))
 }

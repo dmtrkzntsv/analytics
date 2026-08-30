@@ -2,10 +2,11 @@
 // /js/twillingate.js. Deterministic for a given esbuild version, so CI can
 // rebuild and `git diff --exit-code` the artifact.
 import { build } from "esbuild";
-import { readFileSync } from "node:fs";
 
-const { version } = JSON.parse(readFileSync(new URL("./package.json", import.meta.url)));
-
+// __TWILLINGATE_VERSION__ is substituted by the collector at serve time
+// with its own build version (the release tag), so the served file names
+// the release it shipped in while the committed artifact stays
+// deterministic for CI's drift check.
 await build({
   entryPoints: ["src/entry.ts"],
   bundle: true,
@@ -14,8 +15,8 @@ await build({
   minify: true,
   legalComments: "none",
   banner: {
-    js: `/* twillingate.js v${version} — web, product and app analytics SDK.\n * Source: sdk/ in https://github.com/dmtrkzntsv/twillingate */`,
+    js: "/* twillingate.js __TWILLINGATE_VERSION__ — web, product and app analytics SDK.\n * Source: sdk/ in https://github.com/dmtrkzntsv/twillingate */",
   },
   outfile: "../internal/server/twillingate.js",
 });
-console.log(`built ../internal/server/twillingate.js (v${version})`);
+console.log("built ../internal/server/twillingate.js");

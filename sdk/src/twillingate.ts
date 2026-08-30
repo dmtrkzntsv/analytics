@@ -15,7 +15,8 @@
  * no matter what the client claims, so a misconfigured client fails safe.
  */
 
-export const VERSION = "2.0.0";
+// Substituted by the collector at serve time with its build version.
+export const VERSION = "__TWILLINGATE_VERSION__";
 
 export interface InitOptions {
   /** Ingest key (ak_…). Required. */
