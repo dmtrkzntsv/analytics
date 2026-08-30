@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -37,7 +38,7 @@ type Snapshot struct {
 	byAlias  map[string]*Project
 	ordered  []*Project
 	keys     []keyOwner // active keys of non-archived projects only
-	origins  map[string]map[string]bool
+	origins  map[string]originSet
 	defaults config.Retention
 }
 
@@ -57,7 +58,7 @@ type Registry struct {
 
 func New(st store.Store, defaults config.Retention, logger *slog.Logger) *Registry {
 	r := &Registry{st: st, defaults: defaults, logger: logger}
-	r.snap.Store(&Snapshot{byAlias: map[string]*Project{}, origins: map[string]map[string]bool{}, defaults: defaults})
+	r.snap.Store(&Snapshot{byAlias: map[string]*Project{}, origins: map[string]originSet{}, defaults: defaults})
 	return r
 }
 
@@ -74,7 +75,7 @@ func (r *Registry) Reload(ctx context.Context) error {
 	}
 	s := &Snapshot{
 		byAlias:  make(map[string]*Project, len(ps)),
-		origins:  make(map[string]map[string]bool, len(ps)),
+		origins:  make(map[string]originSet, len(ps)),
 		defaults: r.defaults,
 	}
 	for _, rp := range ps {
@@ -101,9 +102,13 @@ func (r *Registry) Reload(ctx context.Context) error {
 		}
 		s.byAlias[p.Alias] = p
 		s.ordered = append(s.ordered, p)
-		set := map[string]bool{}
+		set := originSet{exact: map[string]bool{}}
 		for _, o := range p.AllowedOrigins {
-			set[trimSlash(o)] = true
+			if o = trimSlash(o); strings.ContainsRune(o, '*') {
+				set.globs = append(set.globs, o)
+				continue
+			}
+			set.exact[o] = true
 		}
 		s.origins[p.Alias] = set
 	}
@@ -139,6 +144,56 @@ func (r *Registry) Snapshot(ctx context.Context) *Snapshot {
 	return r.snap.Load()
 }
 
+// originSet is a project's allowed origins split at reload time, so the
+// hot path pays one map lookup and only walks patterns for the projects
+// that actually use them.
+type originSet struct {
+	exact map[string]bool
+	globs []string
+}
+
+func (s originSet) match(origin string) bool {
+	if s.exact[origin] {
+		return true
+	}
+	for _, g := range s.globs {
+		if matchOrigin(g, origin) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchOrigin reports whether an allowed_origins entry matches an origin.
+// A bare "*" allows every origin; anywhere else "*" stands for any run of
+// characters that contains no "/", so "https://*.example.com" covers every
+// subdomain but never another scheme, and an attacker cannot smuggle the
+// allowed host into some other part of the URL.
+func matchOrigin(pattern, origin string) bool {
+	if pattern == "*" {
+		return true
+	}
+	parts := strings.Split(pattern, "*")
+	if len(parts) == 1 {
+		return pattern == origin
+	}
+	if !strings.HasPrefix(origin, parts[0]) {
+		return false
+	}
+	rest := origin[len(parts[0]):]
+	for _, mid := range parts[1 : len(parts)-1] {
+		// Leftmost match: it consumes the least, leaving the most room
+		// for the remaining segments.
+		i := strings.Index(rest, mid)
+		if i < 0 || strings.Contains(rest[:i], "/") {
+			return false
+		}
+		rest = rest[i+len(mid):]
+	}
+	last := parts[len(parts)-1]
+	return strings.HasSuffix(rest, last) && !strings.Contains(rest[:len(rest)-len(last)], "/")
+}
+
 func trimSlash(o string) string {
 	if len(o) > 0 && o[len(o)-1] == '/' {
 		return o[:len(o)-1]
@@ -171,13 +226,13 @@ func (s *Snapshot) ProjectByKey(key string) (*Project, string, bool) {
 
 func (s *Snapshot) OriginAllowed(alias, origin string) bool {
 	set, ok := s.origins[alias]
-	return ok && set[trimSlash(origin)]
+	return ok && set.match(trimSlash(origin))
 }
 
 func (s *Snapshot) AnyOriginAllowed(origin string) bool {
 	o := trimSlash(origin)
 	for _, set := range s.origins {
-		if set[o] {
+		if set.match(o) {
 			return true
 		}
 	}

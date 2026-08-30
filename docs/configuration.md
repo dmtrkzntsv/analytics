@@ -74,7 +74,7 @@ Each project record has these fields:
 | `name` | Display name. |
 | `identity` | `anonymous` (default) or `identified`. See the README's Privacy and GDPR section. |
 | `ingest_keys` | One or more `{key, label, disabled}` credentials. Required — `twillingate key issue` mints and registers one in a single step. |
-| `allowed_origins` | Origins allowed to post for this project. Add `tauri://localhost` or `app://.` for Electron/Tauri. |
+| `allowed_origins` | Origins allowed to post for this project. `*` is a wildcard — `https://*.example.com` covers every subdomain, a bare `*` allows any origin. Add `tauri://localhost` or `app://.` for Electron/Tauri. |
 | `retention` | Per-project override of any retention window. |
 | `product_aggregation` | Opt-in product rollup, see below. |
 

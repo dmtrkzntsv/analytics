@@ -213,6 +213,13 @@ If an `Origin` header is present it must match the project's
 `allowed_origins`; if absent, the request is accepted. Native apps send no
 `Origin` and are unaffected.
 
+An entry may contain `*`. A bare `*` allows any origin; elsewhere it
+stands for any run of characters within the origin, so
+`https://*.example.com` matches every subdomain (but not the apex, and not
+`http://`) and `https://app.example.com:*` matches any port. The matched
+origin is echoed back, never `*`, so a wildcard entry stays compatible with
+browsers that reject a literal `*`.
+
 Electron and Tauri renderers **do** send one, so add their scheme
 (`tauri://localhost`, `app://.`, `file://`) to `allowed_origins`.
 

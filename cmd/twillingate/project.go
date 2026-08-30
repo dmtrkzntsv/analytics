@@ -112,7 +112,7 @@ func cmdProject(args []string, stdout io.Writer) int {
 		name := sf.String("name", "", "display name (defaults to alias)")
 		identity := sf.String("identity", "anonymous", "anonymous|identified")
 		var origins multiFlag
-		sf.Var(&origins, "origin", "allowed origin (repeatable)")
+		sf.Var(&origins, "origin", "allowed origin, `*` wildcards accepted (repeatable)")
 		if err := sf.Parse(subArgs); err != nil {
 			return 2
 		}

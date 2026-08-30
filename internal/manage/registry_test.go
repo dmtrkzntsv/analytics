@@ -160,3 +160,59 @@ func TestKeylessProjects(t *testing.T) {
 		t.Fatalf("KeylessProjects() = %v, want [retired] (blog has a key, gone is archived)", got)
 	}
 }
+
+func TestMatchOrigin(t *testing.T) {
+	cases := []struct {
+		pattern, origin string
+		want            bool
+	}{
+		{"*", "https://anything.example.com", true},
+		{"*", "tauri://localhost", true},
+		{"https://*.example.com", "https://blog.example.com", true},
+		{"https://*.example.com", "https://a.b.example.com", true},
+		{"https://*.example.com", "https://example.com", false},
+		{"https://*.example.com", "http://blog.example.com", false},
+		{"https://*.example.com", "https://blog.example.com.evil.net", false},
+		{"https://*.example.com", "https://evil.net/x.example.com", false},
+		{"https://*.example.com:*", "https://blog.example.com:8443", true},
+		{"https://example.com", "https://example.com", true},
+		{"https://example.com", "https://evil.com", false},
+	}
+	for _, c := range cases {
+		if got := matchOrigin(c.pattern, c.origin); got != c.want {
+			t.Errorf("matchOrigin(%q, %q) = %v, want %v", c.pattern, c.origin, got, c.want)
+		}
+	}
+}
+
+// A wildcard entry has to work through the whole reload path — split into
+// the pattern list, trailing slash trimmed — not just in the matcher.
+func TestSnapshotWildcardOrigins(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	if err := st.CreateProject(ctx, store.RegistryProject{
+		Alias: "blog", Name: "blog", Identity: "anonymous",
+		AllowedOrigins: `["https://*.example.com/", "https://fixed.test"]`,
+	}, store.AuditEntry{Actor: "test", Action: "project.create", Subject: "blog"}); err != nil {
+		t.Fatal(err)
+	}
+	reg := New(st, defaults, discard())
+	if err := reg.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	s := reg.Snapshot(ctx)
+	for _, o := range []string{"https://blog.example.com", "https://shop.example.com/", "https://fixed.test"} {
+		if !s.OriginAllowed("blog", o) {
+			t.Errorf("OriginAllowed(blog, %q) = false", o)
+		}
+		if !s.AnyOriginAllowed(o) {
+			t.Errorf("AnyOriginAllowed(%q) = false", o)
+		}
+	}
+	if s.OriginAllowed("blog", "https://example.com.evil.net") {
+		t.Error("wildcard matched a suffix-spoofing origin")
+	}
+	if s.AnyOriginAllowed("https://evil.net") {
+		t.Error("AnyOriginAllowed matched an origin nobody allows")
+	}
+}

@@ -20,7 +20,7 @@ type projectIn struct {
 	Alias          string   `json:"alias" jsonschema:"project alias (immutable)"`
 	Name           string   `json:"name,omitempty" jsonschema:"display name, defaults to alias"`
 	Identity       string   `json:"identity,omitempty" jsonschema:"anonymous (default) or identified. identified stores user ids and names as given — a privacy-significant setting; see the GDPR docs"`
-	AllowedOrigins []string `json:"allowed_origins,omitempty" jsonschema:"origins allowed to post events"`
+	AllowedOrigins []string `json:"allowed_origins,omitempty" jsonschema:"origins allowed to post events. * is a wildcard: https://*.example.com covers every subdomain, a bare * allows any origin"`
 	// ProductAggregation opts the project into product-event rollups and
 	// attribute breakdowns. Pointer: nil (omitted) keeps the current
 	// setting on update_project. A local type rather than
