@@ -445,8 +445,12 @@ person or an agent to do the job it covers.
 
 | new file | absorbs | covers |
 | --- | --- | --- |
-| `docs/twillingate.md` | `deployment.md`, `litestream.md`, `configuration.md`, `sdk.md`, `ingest-api.md` | install, upgrade, back up and restore, configure projects and keys, instrument a site or app, the wire format |
-| `docs/reporting.md` | `mcp-auth.md`, `mcp-clients.md`, `deployment.md` §3 (Dashboards) | Evidence dashboards, the MCP endpoint's auth modes, connecting a client, how to query |
+| `docs/twillingate.md` | `deployment.md`, `litestream.md`, `configuration.md`, `sdk.md`, `ingest-api.md`, `mcp-auth.md`, `mcp-clients.md` | install, upgrade, back up and restore, configure projects and keys, instrument a site or app, the wire format, enable and authenticate the MCP endpoint, connect a client — plus a short summary of what MCP then offers |
+| `docs/reporting.md` | `deployment.md` §3 (Dashboards) | Evidence dashboards, the MCP read tools in depth, how to query |
+
+Reading `twillingate.md` end to end should leave you with a running,
+backed-up, instrumented collector and a connected MCP client. `reporting.md`
+is what you read next to get answers out of it.
 
 Both embed through the `docs` package and are exposed as
 `docs://twillingate` and `docs://reporting`. The absorbed files are
@@ -457,10 +461,17 @@ to bind `docs/twillingate.md` to `reservedKeys`: every reserved key
 documented, no documented key absent from the map. That is a stronger test
 than the one it replaces and catches the new keys going undocumented.
 
-**`mcp-auth.md` goes with `reporting.md`, not `twillingate.md`.** It is
-server configuration, which argues for the collector doc, but anyone
-setting up the MCP endpoint needs auth and client setup in the same read.
-Splitting them would mean two documents for one task.
+**MCP setup belongs to `twillingate.md`.** Enabling the endpoint, choosing
+an auth mode and pointing a client at it are all part of standing the
+system up, so `mcp-auth.md` and `mcp-clients.md` go there together — auth
+and client setup are one task and must not be split across documents.
+
+`twillingate.md` closes that section with a **short** capability summary:
+the tool families (overview, breakdown, retention, product, management),
+the resources, and one worked question. Enough to know what the connection
+is worth without reproducing the tool reference. The depth — every tool,
+its arguments, and how to write queries — lives in `reporting.md`, which
+that summary links to.
 
 **`docs/plausible/README.md` stays where it is.** It documents the bytes
 served at `/js/plausible-shim.js` and `TestPlausibleShimServed` binds the
@@ -510,9 +521,11 @@ test can catch prose going stale:
 >   (`sdk/src/twillingate.ts`)
 > - config keys, env vars or project fields (`internal/config/`)
 > - install, upgrade or restore procedure (`deploy/`, `Makefile`)
+> - MCP auth modes or client setup (`internal/mcpserver/auth.go`)
+> - the set of MCP tools offered, which the capability summary names
 >
-> Update `reporting.md` in the same commit as any change to MCP auth modes,
-> client setup, or the Evidence dashboards.
+> Update `reporting.md` in the same commit as any change to the MCP read
+> tools' behaviour or arguments, or to the Evidence dashboards.
 >
 > Update `schemaViews` in `internal/mcpserver/resources.go` in the same
 > commit as any migration that adds or changes a queryable view.
