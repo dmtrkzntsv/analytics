@@ -179,7 +179,11 @@ func (o *Ops) Import(ctx context.Context, actor string, r io.Reader) (ImportResu
 			res.KeysAdded++
 		}
 	}
-	return res, o.Reg.Reload(ctx)
+	if err := o.Reg.Reload(ctx); err != nil {
+		return res, err
+	}
+	o.rebuildFlatView(ctx)
+	return res, nil
 }
 
 func firstNonSpace(br *bufio.Reader) (byte, error) {

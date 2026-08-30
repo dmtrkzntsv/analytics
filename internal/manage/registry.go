@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
 	"sync/atomic"
 	"time"
 
@@ -229,4 +230,22 @@ func (s *Snapshot) AttributesFor(alias string) []string {
 		return nil
 	}
 	return p.Attributes
+}
+
+// DeclaredAttributeKeys is the sorted, deduplicated union of every
+// project's declared keys — the column set of v_events_flat. Archived
+// projects are included: archiving keeps their data queryable.
+func (s *Snapshot) DeclaredAttributeKeys() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, p := range s.ordered {
+		for _, k := range p.Attributes {
+			if !seen[k] {
+				seen[k] = true
+				out = append(out, k)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
 }

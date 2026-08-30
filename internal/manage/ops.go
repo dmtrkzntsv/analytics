@@ -22,6 +22,22 @@ type Ops struct {
 
 func NewOps(reg *Registry, st store.Store) *Ops { return &Ops{Reg: reg, St: st} }
 
+// rebuildFlatView refreshes v_events_flat from the registry's CURRENT
+// snapshot, so a config edit (a new/changed attribute list, or — for a
+// later caller — a renamed project) reaches BI tools immediately rather
+// than waiting for the next daily pass. Callers must Reg.Reload first.
+//
+// Errors are logged, not returned: a view rebuild is a side effect of the
+// operation, not the thing the caller asked for, so it must never fail
+// project creation/update/import over a rebuild hiccup — the nightly pass
+// is the repair net.
+func (o *Ops) rebuildFlatView(ctx context.Context) {
+	keys := o.Reg.Snapshot(ctx).DeclaredAttributeKeys()
+	if err := o.St.RebuildFlatView(ctx, keys); err != nil {
+		o.Reg.logger.Warn("flat view rebuild failed", "error", err)
+	}
+}
+
 type ProjectSpec struct {
 	Alias, Name, Identity string
 	AllowedOrigins        []string
@@ -96,6 +112,7 @@ func (o *Ops) CreateProject(ctx context.Context, actor string, spec ProjectSpec)
 	if err := o.Reg.Reload(ctx); err != nil {
 		return nil, err
 	}
+	o.rebuildFlatView(ctx)
 	return o.Reg.Snapshot(ctx).Project(spec.Alias), nil
 }
 
@@ -114,6 +131,7 @@ func (o *Ops) UpdateProject(ctx context.Context, actor string, spec ProjectSpec)
 	if err := o.Reg.Reload(ctx); err != nil {
 		return nil, err
 	}
+	o.rebuildFlatView(ctx)
 	return o.Reg.Snapshot(ctx).Project(spec.Alias), nil
 }
 

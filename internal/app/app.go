@@ -91,9 +91,7 @@ func Serve(ctx context.Context, cfg *config.Config, logger *slog.Logger, api, mc
 	warnLegacyProjectsFile(cfg, logger)
 
 	// Seed the flat view so it exists before the first daily pass.
-	if keys, err := st.KnownAttributeKeys(ctx); err != nil {
-		logger.Warn("flat view seed: attribute scan", "error", err)
-	} else if err := st.RebuildFlatView(ctx, keys); err != nil {
+	if err := st.RebuildFlatView(ctx, reg.Snapshot(ctx).DeclaredAttributeKeys()); err != nil {
 		logger.Warn("flat view seed", "error", err)
 	}
 

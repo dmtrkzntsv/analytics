@@ -97,7 +97,6 @@ type Store interface {
 	PruneAggregates(ctx context.Context, project string, webBefore, productBefore, appBefore civil.Date) error
 	IncrementalVacuum(ctx context.Context) error
 	ProjectAliases(ctx context.Context) ([]string, error) // all rows incl. archived
-	KnownAttributeKeys(ctx context.Context) ([]string, error)
 	RebuildFlatView(ctx context.Context, keys []string) error
 	GetMeta(ctx context.Context, key string) (string, error) // "" if absent
 	SetMeta(ctx context.Context, key, value string) error

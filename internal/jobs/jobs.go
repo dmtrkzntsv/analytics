@@ -142,9 +142,7 @@ func (r *Runner) RunDailyPass(ctx context.Context) error {
 		}
 	}
 
-	if keys, err := r.store.KnownAttributeKeys(ctx); err != nil {
-		r.logger.Error("attribute key scan failed", "error", err)
-	} else if err := r.store.RebuildFlatView(ctx, keys); err != nil {
+	if err := r.store.RebuildFlatView(ctx, snap.DeclaredAttributeKeys()); err != nil {
 		r.logger.Error("flat view rebuild failed", "error", err)
 	}
 	if err := r.store.IncrementalVacuum(ctx); err != nil {

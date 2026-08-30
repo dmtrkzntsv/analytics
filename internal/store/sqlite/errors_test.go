@@ -327,17 +327,6 @@ BEGIN SELECT RAISE(ABORT, 'blocked'); END`); err != nil {
 
 // --- flatview.go ---
 
-func TestKnownAttributeKeysFailsOnMissingTable(t *testing.T) {
-	db := newTestDB(t)
-	ctx := context.Background()
-	if _, err := db.db.ExecContext(ctx, `DROP TABLE product_events`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.KnownAttributeKeys(ctx); err == nil {
-		t.Error("want error querying a missing product_events table")
-	}
-}
-
 // SQLite views are validated lazily (at query time, not creation time), so
 // a missing product_events table cannot make CREATE VIEW itself fail; the
 // reachable failure is DROP VIEW hitting an object of the wrong type.

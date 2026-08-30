@@ -74,11 +74,7 @@ func TestSeedEvidenceFixture(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	keys, err := db.KnownAttributeKeys(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.RebuildFlatView(ctx, keys); err != nil {
+	if err := db.RebuildFlatView(ctx, []string{"plan"}); err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("seeded %s: %d hits, %d events", path, len(hits), len(evs))
