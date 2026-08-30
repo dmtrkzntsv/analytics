@@ -187,6 +187,45 @@ reports full cardinality, with a note that recent days are complete while
 aged days are top-N — a difference invisible for any key with fewer than
 `PRODUCT_ATTRIBUTES_TOP_N` distinct values.
 
+## 7. System dimensions roll up automatically
+
+Web and app surfaces already aggregate every system dimension with no
+configuration: `$url` feeds `agg_web_pages` and `agg_web_utm`, `$screen`
+feeds `agg_app_screens`, `$app_version` feeds `agg_app_versions`, and so on.
+
+Product events are the exception. `003_app.sql:33-34` added `platform` and
+`app_version` columns to `product_events`, and they are written on every
+event, but nothing rolls them up — so they are queryable in the raw window,
+appear in `v_events_flat`, and then vanish at `product.raw_days` with no
+aggregate behind them. They are the only stored product data with no
+retention path.
+
+Declaring them is not an option: `resolveAttributes`
+(`internal/server/ingest.go:131-138`) routes `$`-prefixed keys to typed
+fields and drops unknown ones, so nothing `$`-prefixed ever reaches the
+JSON blob. `attributes: ["$platform"]` would extract NULL forever, and
+`["platform"]` would mean a different, genuinely custom key.
+
+So they roll up automatically, matching web and app. This needs **no new
+tables**: `agg_product_attrs` is already
+`(project, day, event_name, attr_key, attr_value, count, unique_users)`,
+which is exactly the shape required. `rollupProduct` writes the system
+columns into it with `$`-prefixed keys — `attr_key='$platform'`,
+`attr_value='ios'` — alongside the declared custom keys, unconditionally and
+independent of the `attributes` list.
+
+The `$` prefix namespaces them safely: since a `$` key can never be a custom
+key, collision is impossible by construction. They inherit `v_product_attrs`,
+the `product_attributes` MCP tool and the Evidence breakdown table for free,
+and `PRODUCT_ATTRIBUTES_TOP_N` caps `app_version` cardinality, which grows
+without bound over a product's life.
+
+The alternative — dedicated `agg_product_platforms` and
+`agg_product_versions` tables mirroring `agg_app_versions` — is more
+literally consistent with the web and app families, but costs two tables,
+two views and two Evidence sources, and every future typed column would need
+the same treatment.
+
 ## Rejected alternatives
 
 **Per-project views (`v_events_<alias>`).** Justified only while columns
@@ -235,3 +274,7 @@ it; the declared-attributes work ports directly.
   `projectTables` and leaves ingest keys valid.
 - `v_product_attrs` live and aggregated halves agree across the boundary
   (the invariant `views_test.go` already enforces for other surfaces).
+- `$platform` and `$app_version` rows appear in `agg_product_attrs` for a
+  project that declares no attributes at all, and survive raw deletion.
+- A custom key cannot collide with a system one: an event sending both
+  `$platform` and a custom `platform` yields distinct `attr_key` rows.
