@@ -280,7 +280,10 @@ func TestProjectsAttributesDefaultsToEmptyArray(t *testing.T) {
 
 // TestMigrationBackfillsAttributesFromLegacyMap is the risky part of 006:
 // it reconstructs pre-006 state (product_aggregation's old event-keyed
-// map), runs the migration's UPDATE statement verbatim, and asserts the
+// map), runs the REAL embedded migration via d.Migrate (not a copy of its
+// SQL — a copy previously drifted from the shipped migration when the
+// json_valid/json_type/m.type/v.type guards were hardened in, leaving the
+// real UPDATE's union path with no in-repo coverage), and asserts the
 // backfill produced the sorted DISTINCT union of every array in the map —
 // {"*":["plan"],"subscribed":["tier","plan"]} -> ["plan","tier"]. This
 // also exercises whether the correlated
@@ -307,24 +310,8 @@ func TestMigrationBackfillsAttributesFromLegacyMap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Run 006's ALTER + UPDATE verbatim (not the DROP COLUMN, which would
-	// remove the very column this test reads from).
-	if _, err := d.db.ExecContext(ctx,
-		`ALTER TABLE projects ADD COLUMN attributes TEXT NOT NULL DEFAULT '[]'`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.db.ExecContext(ctx, `
-UPDATE projects SET attributes = COALESCE((
-  SELECT json_group_array(k) FROM (
-    SELECT DISTINCT v.value AS k
-    FROM json_each(json_extract(projects.product_aggregation, '$.attributes')) AS m,
-         json_each(m.value) AS v
-    ORDER BY 1
-  )
-), '[]')
-WHERE product_aggregation IS NOT NULL
-  AND product_aggregation <> ''
-  AND json_extract(product_aggregation, '$.attributes') IS NOT NULL`); err != nil {
+	// Run every remaining migration (006 and 007) for real.
+	if err := d.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
 
