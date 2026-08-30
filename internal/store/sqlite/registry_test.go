@@ -2,6 +2,8 @@ package sqlite
 
 import (
 	"context"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/dmtrkzntsv/twillingate/internal/store"
@@ -651,6 +653,107 @@ func TestRenameProjectRejectedTargetLeavesSourceUntouched(t *testing.T) {
 	}
 	if v1 != v0 {
 		t.Errorf("config_version changed on a rejected rename: %d -> %d", v0, v1)
+	}
+}
+
+// TestRenameProjectSameAliasIsRejectedWithItsOwnMessage pins the error an
+// operator sees when re-running a rename they already completed (or
+// mistyping -to as -alias's value). Reusing the "already exists" message
+// here would read as a collision with some other project, when in fact
+// nothing is wrong except the no-op; give it a distinct message.
+func TestRenameProjectSameAliasIsRejectedWithItsOwnMessage(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	if err := db.CreateProject(ctx, store.RegistryProject{
+		Alias: "blog", Name: "blog", Identity: "anonymous", AllowedOrigins: "[]"},
+		store.AuditEntry{Actor: "test", Action: "project.create", Subject: "blog"}); err != nil {
+		t.Fatal(err)
+	}
+	err := db.RenameProject(ctx, "blog", "blog", store.AuditEntry{
+		Actor: "test", Action: "project.rename", Subject: "blog->blog"})
+	if err == nil {
+		t.Fatal("renaming a project to its own alias did not fail")
+	}
+	if !strings.Contains(err.Error(), "already named") {
+		t.Errorf("error = %q, want a distinct message about already having that name, not a collision-with-another-project message", err.Error())
+	}
+	if strings.Contains(err.Error(), "already exists") {
+		t.Errorf("error = %q, reused the taken-alias wording; an operator would read this as colliding with a DIFFERENT project", err.Error())
+	}
+}
+
+// TestProjectTablesMatchesSchema keeps the projectTables comment's claim
+// honest: it independently enumerates every table in the live schema that
+// carries a `project` column (via sqlite_master + pragma_table_info) and
+// asserts the set is exactly projectTables, in both directions. A missing
+// entry silently orphans rows on DeleteProjectData and RenameProject; a
+// stale entry (a dropped or renamed table still listed) is dead weight
+// that hides the day a real gap opens up. Either defect fails loudly here
+// with the offending table names, rather than staying invisible until
+// someone loses data.
+func TestProjectTablesMatchesSchema(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	// Collect table names and close the cursor before running any further
+	// query: the pool is capped at one connection (single-writer, spec
+	// §7.2), so a nested query issued while these rows are still open
+	// would deadlock waiting for a connection that never frees up.
+	rows, err := db.db.QueryContext(ctx,
+		`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tables []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		tables = append(tables, name)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		t.Fatal(err)
+	}
+	rows.Close()
+
+	actual := map[string]bool{}
+	for _, name := range tables {
+		if hasColumn(t, db, name, "project") {
+			actual[name] = true
+		}
+	}
+
+	expected := map[string]bool{}
+	for _, table := range projectTables {
+		expected[table] = true
+	}
+
+	var missing, stale []string
+	// missing: schema says this table has a project column, but
+	// projectTables does not list it.
+	for table := range actual {
+		if !expected[table] {
+			missing = append(missing, table)
+		}
+	}
+	// stale: projectTables lists this table, but the schema says it does
+	// not (or no longer) have a project column.
+	for table := range expected {
+		if !actual[table] {
+			stale = append(stale, table)
+		}
+	}
+	sort.Strings(missing)
+	sort.Strings(stale)
+
+	if len(missing) > 0 || len(stale) > 0 {
+		t.Fatalf("projectTables (internal/store/sqlite/registry.go) is out of sync with the schema.\n"+
+			"missing from projectTables (have a project column, not listed — DeleteProjectData/RenameProject will orphan their rows): %v\n"+
+			"stale in projectTables (listed but table dropped or no longer has a project column): %v",
+			missing, stale)
 	}
 }
 

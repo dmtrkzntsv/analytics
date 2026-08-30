@@ -91,6 +91,83 @@ func TestUpdateDoesNotCharsetCheck(t *testing.T) {
 	}
 }
 
+// TestRenameProjectAllowsLegacyAlias pins the command's primary use case:
+// a legacy alias that predates the ^[a-z0-9]+$ rule (created directly
+// through the store, the way real legacy rows are — see
+// TestUpdateDoesNotCharsetCheck above) must still be renamable to a
+// conforming alias through Ops.RenameProject. validateNew runs against the
+// PROPOSED new alias only; if a future change made it also cover the OLD
+// alias, this command would silently stop doing the one thing it exists
+// for, and nothing else would catch it.
+func TestRenameProjectAllowsLegacyAlias(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	if err := st.CreateProject(ctx, store.RegistryProject{
+		Alias: "my_app", Name: "my_app", Identity: "anonymous", AllowedOrigins: "[]",
+	}, store.AuditEntry{Actor: "test", Action: "project.create", Subject: "my_app"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.InsertIngestKey(ctx, store.RegistryKey{Key: "ak_legacy", Project: "my_app", Label: "web"},
+		store.AuditEntry{Actor: "test", Action: "key.issue", Subject: "web"}); err != nil {
+		t.Fatal(err)
+	}
+	reg := New(st, defaults, discard())
+	if err := reg.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ops := NewOps(reg, st)
+
+	if err := ops.RenameProject(ctx, "test", "my_app", "myapp"); err != nil {
+		t.Fatalf("RenameProject off a legacy source alias = %v, want nil", err)
+	}
+
+	if got := reg.Snapshot(ctx).Project("my_app"); got != nil {
+		t.Fatal("legacy alias still present after rename")
+	}
+	if got := reg.Snapshot(ctx).Project("myapp"); got == nil {
+		t.Fatal("new alias not present after rename")
+	}
+	_, ks, err := st.LoadRegistry(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, k := range ks {
+		if k.Project == "my_app" {
+			t.Errorf("ingest key still under the legacy alias after rename: %+v", k)
+		}
+		if k.Project == "myapp" && k.Key == "ak_legacy" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("ingest key did not follow the rename off a legacy alias")
+	}
+}
+
+// TestRenameProjectRejectsInvalidNewAlias pins the other direction of the
+// charset rule: the source alias is exempt from validateNew (it is
+// TestRenameProjectAllowsLegacyAlias's whole point), but the alias being
+// proposed still is not. An invalid -to must be rejected, leaving the
+// source untouched.
+func TestRenameProjectRejectsInvalidNewAlias(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	seedProject(t, st, "blog")
+	reg := New(st, defaults, discard())
+	if err := reg.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ops := NewOps(reg, st)
+
+	if err := ops.RenameProject(ctx, "test", "blog", "My_App"); err == nil {
+		t.Fatal("RenameProject accepted a -to alias outside ^[a-z0-9]+$")
+	}
+	if got := reg.Snapshot(ctx).Project("blog"); got == nil {
+		t.Fatal("source project vanished despite the rejected target alias")
+	}
+}
+
 func TestIssueKeyMintsAndResolves(t *testing.T) {
 	st := testStore(t)
 	reg := New(st, defaults, discard())

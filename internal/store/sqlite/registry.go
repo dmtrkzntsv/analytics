@@ -178,7 +178,10 @@ func (d *DB) SetIngestKeyDisabled(ctx context.Context, project, label string, di
 
 // projectTables is every table carrying a per-project `project` column.
 // Kept in one place so a future migration adding a table has one list to
-// extend; the delete test cross-checks the count against sqlite_master.
+// extend; TestProjectTablesMatchesSchema (registry_test.go) cross-checks
+// this list against the live schema (sqlite_master + pragma_table_info) in
+// both directions, so a forgotten addition or a stale entry fails loudly
+// instead of silently orphaning rows on DeleteProjectData or RenameProject.
 var projectTables = []string{
 	"web_hits", "product_events", "app_views",
 	"agg_web_daily", "agg_web_pages", "agg_web_referrers", "agg_web_countries",
@@ -218,9 +221,13 @@ func (d *DB) DeleteProjectData(ctx context.Context, alias string, a store.AuditE
 // column on every table in projectTables, in one transaction. ingest_keys
 // is one of those tables, so keys follow the rename and deployed clients
 // keep working without redeploying — that is what makes this command
-// usable rather than a data-loss trap. Both failure checks (unknown source,
-// already-taken target) happen before any write, so a rejected rename
-// leaves the source alias and all its rows completely untouched.
+// usable rather than a data-loss trap. The already-taken check on the new
+// alias runs before any write. The unknown-source check is not a separate
+// pre-check: it is the RowsAffected()==0 result of the UPDATE projects
+// statement itself, and an error at that point aborts the transaction —
+// so either way a rejected rename leaves the source alias and all its rows
+// completely untouched, just via rollback rather than avoidance for the
+// unknown-source case.
 //
 // PRAGMA foreign_keys is never enabled in this codebase, so the
 // `REFERENCES projects(alias)` clause on ingest_keys does not constrain
@@ -228,6 +235,9 @@ func (d *DB) DeleteProjectData(ctx context.Context, alias string, a store.AuditE
 // design doc.
 func (d *DB) RenameProject(ctx context.Context, old, new string, a store.AuditEntry) error {
 	return d.tx(ctx, func(tx *sql.Tx) error {
+		if old == new {
+			return fmt.Errorf("rename: project %q is already named %q", old, new)
+		}
 		var taken int
 		if err := tx.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM projects WHERE alias=?`, new).Scan(&taken); err != nil {

@@ -204,3 +204,27 @@ func TestProjectRenameArchivedProjectWorks(t *testing.T) {
 		t.Fatalf("renamed project lost its archived state: %s", listing)
 	}
 }
+
+// TestProjectRenameSameAliasReportsItsOwnMessage: an operator re-running a
+// rename they already completed (or typing -alias and -to the same by
+// mistake) should not read "already exists" and think they collided with
+// some other project — nothing else is using that alias, this one already
+// has it.
+func TestProjectRenameSameAliasReportsItsOwnMessage(t *testing.T) {
+	withDB(t)
+	var out bytes.Buffer
+	if code := run([]string{"project", "create", "-alias", "blog"}, &out); code != 0 {
+		t.Fatalf("create: exit %d: %s", code, out.String())
+	}
+	out.Reset()
+	if code := run([]string{"project", "rename", "-alias", "blog", "-to", "blog"}, &out); code == 0 {
+		t.Fatalf("rename to the same alias succeeded: %s", out.String())
+	}
+	msg := out.String()
+	if !strings.Contains(msg, "already named") {
+		t.Fatalf("message = %q, want a distinct already-named message", msg)
+	}
+	if strings.Contains(msg, "already exists") {
+		t.Fatalf("message = %q, reused the taken-alias wording (reads as colliding with a different project)", msg)
+	}
+}
