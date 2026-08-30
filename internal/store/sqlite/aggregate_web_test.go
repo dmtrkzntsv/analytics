@@ -20,7 +20,8 @@ import (
 func seedWebDay(t *testing.T, db *DB) {
 	t.Helper()
 	mk := func(id, vis, path, tsS, source, country, device, browser, osN, us, um, uc string) store.WebHit {
-		return store.WebHit{ID: id, Project: "app", TS: ts(tsS), ActorID: vis, Path: path,
+		return store.WebHit{ID: id, Project: "app", TS: ts(tsS), ActorID: vis,
+			Host: "shop.example.com", Path: path,
 			ReferrerSource: source, Country: country, Device: device, Browser: browser, OS: osN,
 			UTMSource: us, UTMMedium: um, UTMCampaign: uc}
 	}
@@ -143,3 +144,75 @@ func TestWebDaysBefore(t *testing.T) {
 }
 
 var _ = time.Now
+
+// Two hosts in one project must stay apart: the whole point of storing
+// host is that a marketing site and an app do not collapse into one row.
+func TestAggregateWebDayHosts(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	seedWebDay(t, db)
+	// v2 visits a second host on the same day.
+	if err := db.WriteWebHits(ctx, []store.WebHit{{
+		ID: "5", Project: "app", TS: ts("2026-08-10T13:00:00Z"),
+		ActorID: "v2", Host: "app.example.com", Path: "/dashboard",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AggregateWebDay(ctx, "app", day("2026-08-10")); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.db.Query(`SELECT host, visitors, pageviews FROM agg_web_hosts
+		WHERE project='app' AND day='2026-08-10' ORDER BY host`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	type row struct {
+		host            string
+		visitors, views int
+	}
+	var got []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.host, &r.visitors, &r.views); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, r)
+	}
+	want := []row{
+		{"app.example.com", 1, 1},
+		{"shop.example.com", 2, 4},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d rows (%v), want %d", len(got), got, len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("row %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+// Rows predating migration 008 have host=” and must still aggregate --
+// dropping them would lose the pageview counts entirely, not just the host.
+func TestAggregateWebDayEmptyHostBucket(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	if err := db.WriteWebHits(ctx, []store.WebHit{{
+		ID: "h0", Project: "app", TS: ts("2026-08-10T10:00:00Z"),
+		ActorID: "v1", Path: "/legacy",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AggregateWebDay(ctx, "app", day("2026-08-10")); err != nil {
+		t.Fatal(err)
+	}
+	var views int
+	if err := db.db.QueryRow(`SELECT pageviews FROM agg_web_hosts
+		WHERE project='app' AND day='2026-08-10' AND host=''`).Scan(&views); err != nil {
+		t.Fatal(err)
+	}
+	if views != 1 {
+		t.Errorf("empty-host pageviews = %d, want 1", views)
+	}
+}
