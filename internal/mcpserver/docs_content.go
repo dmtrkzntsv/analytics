@@ -29,11 +29,20 @@ $-attribute key is DROPPED, with a warning in the response body.
 ## Web ($pageview)
 
 Usually automatic: the JS snippet sends pageviews on load and on SPA
-navigations (history.pushState / popstate). Only send $pageview manually
-from a non-browser client rendering web-like content. Web pageviews carry
-$url (parsed into path + UTM allowlist, then discarded) and $referrer
-(reduced to a source name). Bots are filtered on User-Agent for pageviews
-only.
+navigations (history.pushState / popstate, and hashchange in hash-routing
+mode). Only send $pageview manually from a non-browser client rendering
+web-like content.
+
+A pageview carries its location already split: $path (REQUIRED) and $host,
+stored verbatim -- the server does no URL parsing, no normalization, no
+case folding. The client owns normalization, which is what lets a site
+report /account/[id]/edit and keep the raw identifier in the browser.
+$path may contain a '#' (hash routing) or a '?' (opt-in query routing).
+
+Campaign parameters travel explicitly as $utm_source, $utm_medium and
+$utm_campaign. $referrer is reduced to a source name, and is suppressed as
+a self-referral when its host matches $host. Bots are filtered on
+User-Agent for pageviews only.
 
 ## App ($screen_view)
 
@@ -80,8 +89,8 @@ setting. $group_id/$group_name are stored raw in both modes.
 ## Reserved attribute keys (complete list)
 
 $install_id, $user_id, $user_name, $group_id, $group_name, $session_id,
-$platform, $app_version, $os_version, $device_model, $locale, $url,
-$referrer, $screen.
+$platform, $app_version, $os_version, $device_model, $locale, $host,
+$path, $utm_source, $utm_medium, $utm_campaign, $referrer, $screen.
 
 Wire-format details (batching, retries, offline replay, timestamps,
 idempotency): read docs://ingest-api.`

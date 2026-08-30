@@ -78,14 +78,17 @@ type resolved struct {
 	GroupID, GroupName, SessionID  string
 	Platform, AppVersion           string
 	OSVersion, DeviceModel, Locale string
-	URL, Referrer, Screen          string
+	Host, Path, Referrer, Screen   string
+	UTMSource, UTMMedium           string
+	UTMCampaign                    string
 	Custom                         map[string]string
 }
 
 // reservedKeys maps every system-defined attribute key to its destination.
-// For reserved event names some of these are typed input to enrichment
-// rather than stored data: $url is parsed into path and utm_* and then
-// discarded, and $screen populates its own column.
+// Location attributes are stored verbatim: the client owns normalization
+// (masking, routing mode), so the server does no URL parsing at all. That
+// is what lets a site report /account/[id]/edit without the raw path ever
+// leaving the browser. $screen populates its own column.
 var reservedKeys = map[string]func(*resolved, string){
 	"$install_id":   func(r *resolved, v string) { r.InstallID = v },
 	"$user_id":      func(r *resolved, v string) { r.UserID = v },
@@ -98,7 +101,11 @@ var reservedKeys = map[string]func(*resolved, string){
 	"$os_version":   func(r *resolved, v string) { r.OSVersion = v },
 	"$device_model": func(r *resolved, v string) { r.DeviceModel = v },
 	"$locale":       func(r *resolved, v string) { r.Locale = v },
-	"$url":          func(r *resolved, v string) { r.URL = v },
+	"$host":         func(r *resolved, v string) { r.Host = v },
+	"$path":         func(r *resolved, v string) { r.Path = v },
+	"$utm_source":   func(r *resolved, v string) { r.UTMSource = v },
+	"$utm_medium":   func(r *resolved, v string) { r.UTMMedium = v },
+	"$utm_campaign": func(r *resolved, v string) { r.UTMCampaign = v },
 	"$referrer":     func(r *resolved, v string) { r.Referrer = v },
 	"$screen":       func(r *resolved, v string) { r.Screen = v },
 }

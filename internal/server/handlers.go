@@ -110,13 +110,8 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 
 		switch ev.Name {
 		case namePageview:
-			if rv.URL == "" {
-				res.reject(i, "$pageview requires $url")
-				continue
-			}
-			page, err := enrich.ParsePageURL(rv.URL)
-			if err != nil {
-				res.reject(i, "invalid $url")
+			if rv.Path == "" {
+				res.reject(i, "$pageview requires $path")
 				continue
 			}
 			if botUA {
@@ -125,17 +120,17 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 				res.Accepted++
 				continue
 			}
-			source := enrich.CleanReferrer(rv.Referrer, page.Host)
-			if source == "" && page.Ref != "" {
-				source = page.Ref
-			}
+			// An empty host leaves nothing to compare against, so
+			// CleanReferrer cannot detect a self-referral and takes the
+			// referrer at face value.
+			source := enrich.CleanReferrer(rv.Referrer, rv.Host)
 			device, browser, osName := enrich.ParseUserAgent(ua)
 			s.queue.EnqueueHit(store.WebHit{
 				ID: id, Project: p.Alias, TS: ts, ReceivedAt: received,
 				ActorID: actor, UserID: user, GroupID: group,
-				Path: page.Path, ReferrerSource: source,
-				UTMSource: page.UTMSource, UTMMedium: page.UTMMedium,
-				UTMCampaign: page.UTMCampaign,
+				Host: rv.Host, Path: rv.Path, ReferrerSource: source,
+				UTMSource: rv.UTMSource, UTMMedium: rv.UTMMedium,
+				UTMCampaign: rv.UTMCampaign,
 				Country:     country, Device: device, Browser: browser, OS: osName,
 			})
 			res.Accepted++
