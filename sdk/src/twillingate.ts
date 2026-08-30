@@ -491,6 +491,12 @@ export class Twillingate {
       this.page();
     };
     addEventListener("popstate", () => this.page());
+    // Hash mode only. In history mode a hash change is an in-page anchor
+    // jump (#pricing), and treating those as pageviews would flood the
+    // pages breakdown with duplicates of one route.
+    if (this.routing === "hash") {
+      addEventListener("hashchange", () => this.page());
+    }
   }
 }
 

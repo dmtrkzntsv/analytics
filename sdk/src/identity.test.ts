@@ -304,3 +304,52 @@ describe("location attributes", () => {
     expect(warn).toHaveBeenCalled();
   });
 });
+
+describe("hash routing", () => {
+  // Hash routing was broken outright: lastPage was pathname+search, which
+  // never changes in a hash SPA, so every route after the first was
+  // deduped away.
+  it("records consecutive hash routes", async () => {
+    history.replaceState(null, "", "/app/#/one");
+    const t = tg({ routing: "hash", autoPageviews: true });
+    await vi.advanceTimersByTimeAsync(0);
+    history.replaceState(null, "", "/app/#/two");
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+    t.flush();
+    await drain();
+    const paths = sent.flatMap((s) =>
+      s.body.events.map((e) => (e.attributes as Record<string, string>).$path));
+    expect(paths).toEqual(["/app/#/one", "/app/#/two"]);
+  });
+
+  it("puts pathname and hash in $path, without the hash query", async () => {
+    history.replaceState(null, "", "/app/?utm_source=news#/account/1?tab=billing");
+    const t = tg({ routing: "hash" });
+    t.page();
+    t.flush();
+    await drain();
+    const attrs = sent[0].body.events[0].attributes as Record<string, unknown>;
+    expect(attrs.$path).toBe("/app/#/account/1");
+    expect(attrs.$utm_source).toBe("news");
+  });
+
+  // In history mode #pricing is an in-page anchor, not a route. A pageview
+  // per anchor click would flood the pages breakdown.
+  //
+  // Asserts on this tracker's own batches, keyed by its ingest key: jsdom's
+  // window is shared across tests and a hash-mode tracker from an earlier
+  // test leaves its hashchange listener attached, so the global `sent`
+  // array is not this tracker's output alone.
+  it("ignores hashchange in history mode", async () => {
+    history.replaceState(null, "", "/x");
+    const t = tg({ key: "ak_history" , autoPageviews: true });
+    await vi.advanceTimersByTimeAsync(0);
+    history.replaceState(null, "", "/x#pricing");
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+    t.flush();
+    await drain();
+    const mine = sent.filter((s) => s.body.key === "ak_history").flatMap((s) => s.body.events);
+    expect(mine).toHaveLength(1);
+    expect((mine[0].attributes as Record<string, string>).$path).toBe("/x");
+  });
+});
