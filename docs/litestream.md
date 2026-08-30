@@ -125,8 +125,7 @@ docker compose -f docker-compose.evidence.yml up -d
 ```
 
 The default is `/data/twillingate.db`, which is right when the volume is shared
-with a collector on the same machine; a reporting-only host reads the restored
-replica instead, so it has to be told.
+with a collector; reading a restored replica instead has to be asked for.
 
 `dashboards` notices the replica has been replaced by comparing size and
 modification time, so it rebuilds within a minute of a successful restore
@@ -136,8 +135,8 @@ If you would rather not have cron on the host, `docker-compose.evidence.yml`
 carries a commented `restore` service that runs the same script on a loop
 inside a container, already pointed at the right paths and running as uid 10001
 so the replica is owned by the user the dashboards run as. Use that or host
-cron, never both — and never either on a machine that also runs the collector,
-where a restore would overwrite the live database.
+cron, never both, and neither alongside the collector — a restore would
+overwrite the live database.
 
 ## 5. Verifying
 

@@ -24,9 +24,9 @@ that is a second compose file, and skipping it costs you nothing else.
 
 ## Run it
 
-Tracking is one file. It serves ingestion, the tracker script and — once
-`MCP_AUTH_DSN` is set, see [docs/mcp-auth.md](docs/mcp-auth.md) — the MCP
-endpoint, all on `:8080`:
+Tracking is one file: ingestion, the tracker script and — once `MCP_AUTH_DSN`
+is set, see [docs/mcp-auth.md](docs/mcp-auth.md) — the MCP endpoint, all on
+`:8080`:
 
 ```bash
 mkdir twillingate && cd twillingate
@@ -37,9 +37,9 @@ docker compose exec twillingate twillingate project create -alias myapp
 docker compose exec twillingate twillingate key issue -project myapp -label web
 ```
 
-That prints a snippet to paste. Put Caddy, nginx or a Cloudflare tunnel in
-front of `:8080` for TLS — or let your agent do the two commands above over
-MCP instead.
+That prints a snippet to paste; an agent with MCP access can do the same two
+steps for you. Put Caddy, nginx or a Cloudflare tunnel in front of `:8080` for
+TLS.
 
 Dashboards are a second file, whenever you want them:
 
@@ -50,10 +50,10 @@ docker compose up -d          # dashboards on :3000, 503 for a minute while Evid
 ```
 
 The `COMPOSE_FILE` line saves repeating `-f` on every later command. Beyond a
-hobby install, run those two files on **two machines** — tracking on a small
-public host, reporting at home off a Litestream replica — so reporting outages
-cannot cost you events. Each file ships the litestream service it needs,
-commented out. [docs/deployment.md](docs/deployment.md) is the runbook.
+hobby install, keep tracking and reporting apart: reporting reads a Litestream
+replica rather than the live database, so a reporting outage cannot cost you
+events. Each file ships the litestream service it needs, commented out.
+[docs/deployment.md](docs/deployment.md) is the runbook.
 
 ## Track something
 

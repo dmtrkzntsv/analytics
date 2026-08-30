@@ -1,28 +1,18 @@
-# Tracking: ingestion and the MCP endpoint, on one machine.
+# Tracking: ingestion, the tracker script and — once MCP_AUTH_DSN is set in
+# `.env` — the MCP endpoint, all on :8080. See docs/mcp-auth.md.
 #
-# The image's default CMD is `serve`, which puts three things on :8080 — the
-# /api/events ingestion endpoint, the twillingate.js tracker script, and, once
-# MCP_AUTH_DSN is set in `.env`, the authenticated MCP endpoint at /mcp.
-# Without that variable MCP is skipped with a logged warning; everything else
-# runs regardless. See docs/mcp-auth.md.
-#
-# Dashboards are a separate file. On one machine, bring both up as a single
-# project so they share the volume and read and write the same database:
-#   docker compose -f docker-compose.yml -f docker-compose.evidence.yml up -d
-# Putting this in `.env` saves repeating the flags on every later command:
+# Dashboards are docker-compose.evidence.yml. To run both, put this in `.env`:
 #   COMPOSE_FILE=docker-compose.yml:docker-compose.evidence.yml
 #
-# Any other defaults can be overridden in that same `.env`.
-# Projects live in the database: after `up -d`, create one with
+# Once it is up, create a project and issue a key:
 #   docker compose exec twillingate twillingate project create -alias myapp
-# then issue a key with
 #   docker compose exec twillingate twillingate key issue -project myapp -label web
 services:
   twillingate:
     image: ghcr.io/dmtrkzntsv/twillingate:${TWILLINGATE_VERSION:-latest}
     restart: unless-stopped
     ports:
-      - "8080:8080"          # ingestion, tracker script and /mcp — put Caddy/nginx/Cloudflare in front for TLS
+      - "8080:8080"          # put Caddy/nginx/Cloudflare in front for TLS
     volumes:
       - data:/var/lib/twillingate
     env_file:
@@ -31,12 +21,10 @@ services:
     environment:
       - GOMEMLIMIT=128MiB
 
-  # Continuous backup, the writer half: streams this database to object
-  # storage. The application never talks to a bucket itself. Uncommenting it
-  # needs a `.env` carrying LITESTREAM_ACCESS_KEY_ID, LITESTREAM_SECRET_ACCESS_KEY,
-  # R2_BUCKET and R2_ENDPOINT, and a copy of deploy/litestream/litestream.yml
-  # next to this file. Exactly one machine replicates: if this is on, leave the
-  # `restore` service in docker-compose.evidence.yml off. See docs/litestream.md.
+  # Continuous backup: streams this database to object storage. Needs the R2
+  # credentials in `.env` and deploy/litestream/litestream.yml next to this
+  # file. Never on at the same time as the `restore` service in
+  # docker-compose.evidence.yml. See docs/litestream.md.
   # litestream:
   #   image: litestream/litestream:0.5
   #   restart: unless-stopped

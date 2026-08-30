@@ -127,9 +127,9 @@ docker compose -f docker-compose.evidence.yml up -d
 Set `DASHBOARDS_DB_PATH=/data/replica.db` in `.env`: the file defaults to
 `/data/twillingate.db`, which is the shared-volume case, not this one. In place
 of host cron it also carries a commented `restore` service — use one or the
-other, never both. A fresh named volume belongs to root and both containers run
-as uid 10001, so chown it once before the first `up`; the file's header has the
-command.
+other, never both. A fresh named volume belongs to root while both containers
+run as uid 10001, so chown it once before the first `up`; the file's header has
+the command.
 
 `dashboards` rebuilds within a minute of a successful restore: it compares
 the replica's size and modification time and does not need to be told.
