@@ -346,19 +346,27 @@ token keeps aggregate rows tight.
 
 ### 4.9 First auto-pageview timing
 
-In snippet mode `init()` currently calls `this.page()` synchronously, so a
-`page()` listener registered from an inline `<script type="module">` after
-the tag arrives too late for the first pageview.
+**Decided during implementation: the entry pageview stays synchronous.**
 
-The initial auto-pageview is scheduled on `setTimeout(0)` instead. Module
-scripts share the deferred queue with `defer` scripts and execute in
-document order, so a listener registered there lands first. If a listener
-is registered after the first pageview has already gone out, the SDK
-`console.warn`s.
+The original plan was to schedule it on `setTimeout(0)` so a listener
+registered from an inline `<script type="module">` after the tag would
+still apply to it. Implementing that surfaced a worse failure than the one
+it fixed: an app that navigates during hydration calls `pushState` before
+the deferred tick, so the entry pageview fires *after* it, reads the
+already-changed `location`, and is deduped against the route that just
+emitted. The entry page is lost and one pageview becomes zero. The existing
+`autoPageviews hooks pushState and popstate` test caught it — three
+expected pageviews became two.
 
-With `data-mask-url` covering the entry page, this is a consistency fix
-rather than a leak fix, but `page()` should behave the same on the first
-pageview as on every later one.
+Masking the entry page is `data-mask-url`'s job, and it already does it:
+the mask is resolved inside `init()` on the line above the first `page()`
+call, so the entry page is covered with no timing rules at all. That was
+the point of putting masking on the attribute (§4.4).
+
+The residual gap — a site that masks *only* via a `page()` listener leaks
+its entry path — is made loud instead of silent: registering a listener
+after the first pageview has gone out emits a `console.warn` naming the
+problem and the fix.
 
 ### 4.10 `script.js` is gone
 
