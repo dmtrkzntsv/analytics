@@ -90,7 +90,6 @@ Native apps and backends skip the SDK and POST batches straight to
 | [docs/ingest-api.md](docs/ingest-api.md) | The normative wire format for `/api/events` |
 | [docs/mcp-auth.md](docs/mcp-auth.md) | MCP auth modes: static token, Cloudflare Access, generic OAuth IdP |
 | [docs/litestream.md](docs/litestream.md) | Backup and replication: bucket setup, writer, reader, recovery |
-| [docs/migration.md](docs/migration.md) | One-time migration from the old `analytics` binary |
 
 ## Development
 

@@ -279,10 +279,3 @@ application. Access then serves the OAuth discovery
 documents and the `401` challenge at the edge; the binary only validates the
 `Cf-Access-Jwt-Assertion` header Access forwards, and requests that reach the
 origin without having passed Access are rejected.
-
----
-
-## 8. Migrating from the old `analytics` binary
-
-The one-time analytics → twillingate migration (paths, env vars, units,
-logrotate, images) is a separate runbook: [migration.md](migration.md).
