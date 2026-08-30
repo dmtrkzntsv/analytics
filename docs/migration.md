@@ -77,8 +77,12 @@ sudo userdel analytics                            # optional; keeps uid tidy
 ## Docker compose host
 
 ```bash
-# 1. Fetch the new compose file (image names and volume paths changed).
-curl -fsSLO https://raw.githubusercontent.com/dmtrkzntsv/twillingate/main/deploy/compose/docker-compose.yml
+# 1. Fetch the new compose files (image names and volume paths changed, and
+#    dashboards moved into their own file).
+base=https://raw.githubusercontent.com/dmtrkzntsv/twillingate/main/deploy/compose
+curl -fsSLO $base/docker-compose.yml            # tracking + MCP
+curl -fsSLO $base/docker-compose.evidence.yml   # reporting
+echo COMPOSE_FILE=docker-compose.yml:docker-compose.evidence.yml >> .env
 
 # 2. Rename the database inside the data volume, then start.
 docker compose down
@@ -94,7 +98,9 @@ docker compose up -d
 ```
 
 The volume is still named `data`; only the paths inside it and the image
-names changed. Never `docker compose down -v`.
+names changed. Dashboards are now a second file rather than a second service
+in the same one — `COMPOSE_FILE` keeps every later `docker compose` command
+seeing both. Never `docker compose down -v`.
 
 ## Afterwards
 

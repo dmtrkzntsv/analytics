@@ -1,5 +1,8 @@
 # Refresh the local replica every five minutes. Install with:
 #   sudo cp restore.cron /etc/cron.d/twillingate-restore
 # Adjust the paths and the user, and keep the trailing newline: cron ignores
-# a last line without one.
+# a last line without one. SOURCE_DB is the writer's path — the key litestream
+# filed the replica under — while REPLICA_PATH is where the copy lands here,
+# and must match what the dashboards read. Only ever run this on a machine that
+# does not write the database.
 */5 * * * * twillingate SOURCE_DB=/var/lib/twillingate/twillingate.db REPLICA_PATH=/var/lib/twillingate/replica.db /usr/local/bin/restore.sh >> /var/log/twillingate-restore.log 2>&1

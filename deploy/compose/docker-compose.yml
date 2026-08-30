@@ -1,23 +1,28 @@
-# The whole application on one machine: ingestion and dashboards.
+# Tracking: ingestion and the MCP endpoint, on one machine.
 #
-# No credentials, no object storage — backup is opt-in and separate:
-#   docker compose -f docker-compose.yml -f docker-compose.litestream.yml up -d
+# The image's default CMD is `serve`, which puts three things on :8080 — the
+# /api/events ingestion endpoint, the twillingate.js tracker script, and, once
+# MCP_AUTH_DSN is set in `.env`, the authenticated MCP endpoint at /mcp.
+# Without that variable MCP is skipped with a logged warning; everything else
+# runs regardless. See docs/mcp-auth.md.
 #
-# If you want to override any defaults, put a `.env` next to this file.
-# Projects live in the database now: after `up -d`, create one with
+# Dashboards are a separate file. On one machine, bring both up as a single
+# project so they share the volume and read and write the same database:
+#   docker compose -f docker-compose.yml -f docker-compose.evidence.yml up -d
+# Putting this in `.env` saves repeating the flags on every later command:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.evidence.yml
+#
+# Any other defaults can be overridden in that same `.env`.
+# Projects live in the database: after `up -d`, create one with
 #   docker compose exec twillingate twillingate project create -alias myapp
 # then issue a key with
 #   docker compose exec twillingate twillingate key issue -project myapp -label web
-#
-# The image's default CMD is `serve`, which runs ingestion and — once
-# MCP_AUTH_DSN is set in `.env` — the MCP endpoint too; unconfigured, MCP
-# is skipped with a logged warning. See docs/mcp-auth.md.
 services:
   twillingate:
     image: ghcr.io/dmtrkzntsv/twillingate:${TWILLINGATE_VERSION:-latest}
     restart: unless-stopped
     ports:
-      - "8080:8080"          # put Caddy/nginx/Cloudflare in front for TLS
+      - "8080:8080"          # ingestion, tracker script and /mcp — put Caddy/nginx/Cloudflare in front for TLS
     volumes:
       - data:/var/lib/twillingate
     env_file:
@@ -26,21 +31,20 @@ services:
     environment:
       - GOMEMLIMIT=128MiB
 
-  dashboards:
-    image: ghcr.io/dmtrkzntsv/twillingate-evidence:${TWILLINGATE_VERSION:-latest}
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
-    # Read-write on purpose: a SQLite reader in WAL mode needs to write the
-    # -shm file, so a :ro mount can fail to open a live database. The process
-    # only ever reads, and it renders a private snapshot rather than this file.
-    volumes:
-      - data:/var/lib/twillingate
-    env_file:
-      - path: .env
-        required: false
-    environment:
-      - DASHBOARDS_DB_PATH=/var/lib/twillingate/twillingate.db
+  # Continuous backup, the writer half: streams this database to object
+  # storage. The application never talks to a bucket itself. Uncommenting it
+  # needs a `.env` carrying LITESTREAM_ACCESS_KEY_ID, LITESTREAM_SECRET_ACCESS_KEY,
+  # R2_BUCKET and R2_ENDPOINT, and a copy of deploy/litestream/litestream.yml
+  # next to this file. Exactly one machine replicates: if this is on, leave the
+  # `restore` service in docker-compose.evidence.yml off. See docs/litestream.md.
+  # litestream:
+  #   image: litestream/litestream:0.5
+  #   restart: unless-stopped
+  #   command: ["replicate", "-config", "/etc/litestream.yml"]
+  #   volumes:
+  #     - ./litestream.yml:/etc/litestream.yml:ro
+  #     - data:/var/lib/twillingate
+  #   env_file: .env
 
 volumes:
   data:

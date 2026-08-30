@@ -1,37 +1,71 @@
-# Dashboards on a machine that only reads a replica — no ingestion here.
+# Reporting: the Evidence dashboards, and nothing else.
 #
-# Something has to put a database at /data/replica.db in the `data` volume.
-# That is deliberately not this application's job: use host cron with
-# deploy/litestream/restore.sh, or uncomment the `restore` service below.
-# See docs/litestream.md.
+# The `data` volume is mounted at /data here. Which file in it to read depends
+# on where the database came from:
+#
+#   Same machine as tracking. The collector mounts the same volume at
+#   /var/lib/twillingate, so its database shows up here as /data/twillingate.db
+#   — the default below. Bring both files up as one project and leave the
+#   `restore` service commented out:
+#     docker compose -f docker-compose.yml -f docker-compose.evidence.yml up -d
+#   or set COMPOSE_FILE=docker-compose.yml:docker-compose.evidence.yml in `.env`.
+#
+#   Reporting on its own machine. The bucket is the only channel between the
+#   two: something restores a replica here, either host cron running
+#   deploy/litestream/restore.sh or the `restore` service below. Point the
+#   dashboards at it with DASHBOARDS_DB_PATH=/data/replica.db in `.env`.
+#   See docs/litestream.md.
+#
+# On a reporting-only machine, a brand-new named volume belongs to root, and
+# both containers run as uid 10001 — so nothing can write to it. Once, before
+# the first `up`:
+#   docker volume create <project>_data
+#   docker run --rm -v <project>_data:/data alpine chown 10001:10001 /data
+# Sharing the volume with the collector needs none of this: that image creates
+# /var/lib/twillingate owned by 10001, and the volume inherits it.
 services:
   dashboards:
     image: ghcr.io/dmtrkzntsv/twillingate-evidence:${TWILLINGATE_VERSION:-latest}
     restart: unless-stopped
     ports:
       - "3000:3000"
+    # Read-write on purpose: a SQLite reader in WAL mode needs to write the
+    # -shm file, so a :ro mount can fail to open a live database. The process
+    # only ever reads, and it renders a private snapshot rather than this file.
     volumes:
       - data:/data
     env_file:
       - path: .env
         required: false
     environment:
-      - DASHBOARDS_DB_PATH=/data/replica.db
+      - DASHBOARDS_DB_PATH=${DASHBOARDS_DB_PATH:-/data/twillingate.db}
 
-  # In-container alternative to host cron. Needs .env with the R2 credentials
-  # and a litestream.yml next to this file. The 0.5 image ships sqlite3 and
-  # flock, which restore.sh needs — no extra packages required.
+  # Continuous backup, the reader half: an in-container alternative to host
+  # cron, running the same script on a loop. Do NOT uncomment this on a machine
+  # that also runs the collector — it would restore over the live database.
+  # Needs a `.env` with the R2 credentials and a litestream.yml next to this
+  # file; the 0.5 image ships the sqlite3 and flock restore.sh needs, so the
+  # host needs neither.
+  #
+  # SOURCE_DB is the path on the *writer*, which is the key litestream filed
+  # the replica under — it must match `path:` in litestream.yml exactly, and
+  # has nothing to do with where the file lands here. REPLICA_PATH is that
+  # local landing place, and is what DASHBOARDS_DB_PATH above must point at.
+  #
+  # `user` is required: restore.sh runs as root otherwise and leaves a
+  # root-owned replica the dashboards process cannot open in WAL mode.
   # restore:
   #   image: litestream/litestream:0.5
   #   restart: unless-stopped
   #   entrypoint: ["/bin/sh", "/restore.sh"]
+  #   user: "10001:10001"
   #   volumes:
   #     - ./restore.sh:/restore.sh:ro
   #     - ./litestream.yml:/etc/litestream.yml:ro
   #     - data:/data
   #   env_file: .env
   #   environment:
-  #     - SOURCE_DB=/var/lib/twillingate/twillingate.db   # the path on the writer
+  #     - SOURCE_DB=/var/lib/twillingate/twillingate.db
   #     - REPLICA_PATH=/data/replica.db
   #     - LOOP_INTERVAL=300
 

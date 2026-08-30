@@ -89,25 +89,29 @@ curl -i -X POST http://localhost:8080/api/hit \
 
 ### One server
 
-Ingestion and dashboards in one compose stack, no credentials needed:
+Tracking (`docker-compose.yml` — ingestion, the tracker script and, once
+`MCP_AUTH_DSN` is set, `/mcp`) and reporting (`docker-compose.evidence.yml`)
+as one project sharing one database. No credentials needed:
 
 ```bash
 mkdir twillingate && cd twillingate
 base=https://raw.githubusercontent.com/dmtrkzntsv/twillingate/main
 curl -fsSLO $base/deploy/compose/docker-compose.yml
+curl -fsSLO $base/deploy/compose/docker-compose.evidence.yml
+echo COMPOSE_FILE=docker-compose.yml:docker-compose.evidence.yml > .env
 docker compose up -d
 docker compose exec twillingate twillingate project create -alias myapp
 docker compose exec twillingate twillingate key issue -project myapp -label web
 ```
 
-`:3000` answers `503` until Evidence finishes its first build — roughly a
-minute — then serves the site. To add continuous backup, fetch
-`docker-compose.litestream.yml` and `litestream.yml`, put the R2 credentials
-in `.env`, and bring the stack up with both files:
+`COMPOSE_FILE` is what lets every later `docker compose` command see both
+files; without it, pass `-f` twice each time. `:3000` answers `503` until
+Evidence finishes its first build — roughly a minute — then serves the site.
 
-```bash
-docker compose -f docker-compose.yml -f docker-compose.litestream.yml up -d
-```
+To add continuous backup, copy `deploy/litestream/litestream.yml` next to the
+compose files, put the R2 credentials in `.env`, and uncomment the
+`litestream` service in `docker-compose.yml` — the writer half is shipped
+commented out rather than as a separate overlay file.
 
 ### Two servers
 
@@ -119,6 +123,13 @@ The reader restores the database on cron and renders it. Install
 curl -fsSLO $base/deploy/compose/docker-compose.evidence.yml
 docker compose -f docker-compose.evidence.yml up -d
 ```
+
+Set `DASHBOARDS_DB_PATH=/data/replica.db` in `.env`: the file defaults to
+`/data/twillingate.db`, which is the shared-volume case, not this one. In place
+of host cron it also carries a commented `restore` service — use one or the
+other, never both. A fresh named volume belongs to root and both containers run
+as uid 10001, so chown it once before the first `up`; the file's header has the
+command.
 
 `dashboards` rebuilds within a minute of a successful restore: it compares
 the replica's size and modification time and does not need to be told.
@@ -166,9 +177,10 @@ major/minor version than the writer — see
 3. Install `restore.sh` on cron per [docs/litestream.md](litestream.md) §4,
    with `SOURCE_DB` set to the database path **on the VPS** — it must match
    `path:` in `litestream.yml`, not wherever the file lands locally.
-4. Switch to `docker-compose.evidence.yml`, which points
-   `DASHBOARDS_DB_PATH` at `/data/replica.db`, and confirm the first restore
-   lands before the next rebuild.
+4. Drop `docker-compose.yml` from this machine and run
+   `docker-compose.evidence.yml` alone, with `DASHBOARDS_DB_PATH` and the
+   restore's `REPLICA_PATH` both set to `/data/replica.db`, and confirm the
+   first restore lands before the next rebuild.
 5. Repoint the tracking snippet's `src` at the VPS hostname.
 
 ---

@@ -69,15 +69,10 @@ how much data a sudden host failure can lose.
 
 ## 3. On the machine that writes
 
-**Docker.** Add the overlay to whatever you already run:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.litestream.yml up -d
-```
-
-It adds one `litestream/litestream` container against the same volume. Copy
-`deploy/litestream/litestream.yml` next to the compose files and put the four
-variables in `.env`.
+**Docker.** `docker-compose.yml` ships a commented `litestream` service —
+uncomment it and bring the stack up again. It runs one `litestream/litestream`
+container against the same volume. Copy `deploy/litestream/litestream.yml` next
+to the compose files and put the four variables in `.env`.
 
 **systemd.** `install.sh` installs `litestream.service` and
 `/etc/litestream.yml`, but not the binary — take it from
@@ -118,15 +113,20 @@ It needs `litestream`, `sqlite3` and (optionally, for the overlap guard)
 | Variable | Meaning |
 | --- | --- |
 | `SOURCE_DB` | The database path **on the writer** — must equal `path:` in `litestream.yml`. Default `/var/lib/twillingate/twillingate.db`. |
-| `REPLICA_PATH` | Where the verified copy lands locally. Default `/var/lib/twillingate/replica.db`. |
+| `REPLICA_PATH` | Where the verified copy lands locally. Default `/var/lib/twillingate/replica.db`. Unrelated to `SOURCE_DB`, and must match the dashboards' `DASHBOARDS_DB_PATH`. |
 | `LITESTREAM_CONFIG` | Default `/etc/litestream.yml`. |
 | `LOOP_INTERVAL` | Seconds between cycles. Unset means run once and exit, which is what cron wants. |
 
 Then run dashboards against that file:
 
 ```bash
-docker compose -f docker-compose.evidence.yml up -d   # DASHBOARDS_DB_PATH=/data/replica.db
+echo DASHBOARDS_DB_PATH=/data/replica.db >> .env
+docker compose -f docker-compose.evidence.yml up -d
 ```
+
+The default is `/data/twillingate.db`, which is right when the volume is shared
+with a collector on the same machine; a reporting-only host reads the restored
+replica instead, so it has to be told.
 
 `dashboards` notices the replica has been replaced by comparing size and
 modification time, so it rebuilds within a minute of a successful restore
@@ -134,7 +134,10 @@ without any coordination between the two.
 
 If you would rather not have cron on the host, `docker-compose.evidence.yml`
 carries a commented `restore` service that runs the same script on a loop
-inside a container.
+inside a container, already pointed at the right paths and running as uid 10001
+so the replica is owned by the user the dashboards run as. Use that or host
+cron, never both — and never either on a machine that also runs the collector,
+where a restore would overwrite the live database.
 
 ## 5. Verifying
 
