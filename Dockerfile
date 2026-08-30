@@ -72,7 +72,10 @@ COPY --from=evidence-build --chown=twillingate:twillingate /opt/evidence /opt/ev
 # fails to install — leaving `evidence sources` to exit 0 having written no
 # tables at all, so the build fails later with "Table does not exist".
 ENV HOME=/opt/evidence/.home
-RUN install -d -o twillingate -g twillingate /var/lib/dashboards "$HOME"
+# /data is where deployments mount the volume holding the database. Creating
+# it here, owned by the runtime user, means a fresh named volume inherits that
+# ownership — otherwise it belongs to root and nothing can write to it.
+RUN install -d -o twillingate -g twillingate /var/lib/dashboards /data "$HOME"
 USER twillingate
 # Warm the extension cache against the real schema. This turns a runtime
 # dependency on extensions.duckdb.org into a build-time one, and fails the

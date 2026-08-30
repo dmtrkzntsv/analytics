@@ -1,45 +1,54 @@
 # twillingate
 
-Cookieless web, app and product analytics in a single Go binary backed by
-SQLite. One process handles ingestion, aggregation and retention; a static
-Evidence site renders the dashboards; an optional MCP endpoint answers the
-same questions in plain language.
+Web, app and product analytics as one Go binary and one SQLite file —
+cookieless and anonymous by default ([details](#privacy-and-gdpr)). It holds
+about 15 MB of memory, needs no database server and no cluster, and is happy on
+a Raspberry Pi from day one. An MCP endpoint means your coding agent can set it
+up and answer questions about it, so the dashboards are there when you want
+them rather than being the point.
 
-Every project is **anonymous** by default — identifiers are salted with a
-key that rotates every 24 hours and the old one is destroyed, and neither
-the IP address nor the full User-Agent is ever stored. Projects can opt into
-**identified** mode for retention cohorts and per-user reporting, which
-writes persistent `localStorage` state and so is consent-relevant under
-ePrivacy. See [Privacy and GDPR](#privacy-and-gdpr).
+**Ask your agent to integrate it.** With MCP enabled, "set up analytics for
+this app" is the whole task: the agent creates the project, issues an ingest
+key and asks `integration_guide` for paste-ready setup for your platform, then
+wires it into your code itself.
+
+**Then ask it for the numbers.** "How many visitors did myapp get last week, by
+country" beats clicking through a dashboard, and read tools plus a guarded SQL
+`query` tool answer it. Run the Evidence dashboards too if you like charts —
+that is a second compose file, and skipping it costs you nothing else.
 
 ## Run it
 
-Ingestion and dashboards on one machine (a Raspberry Pi is enough):
+Tracking is one file: ingestion, the tracker script and — once `MCP_AUTH_DSN`
+is set, see [docs/mcp-auth.md](docs/mcp-auth.md) — the MCP endpoint, all on
+`:8080`:
 
 ```bash
 mkdir twillingate && cd twillingate
-base=https://raw.githubusercontent.com/dmtrkzntsv/twillingate/main
-curl -fsSLO $base/deploy/compose/docker-compose.yml
+base=https://raw.githubusercontent.com/dmtrkzntsv/twillingate/main/deploy/compose
+curl -fsSLO $base/docker-compose.yml
 docker compose up -d
 docker compose exec twillingate twillingate project create -alias myapp
 docker compose exec twillingate twillingate key issue -project myapp -label web
-open http://localhost:3000        # dashboards; ingestion is on :8080
 ```
 
-Put Caddy, nginx or a Cloudflare tunnel in front of `:8080` for TLS.
-Dashboards answer `503` for about a minute while Evidence runs its first
-build. Updating is `docker compose pull && docker compose up -d`; never
-`down -v`, the database lives in the named volume. Images are
-`ghcr.io/dmtrkzntsv/twillingate` (collector, ~35 MB, amd64/arm64/arm32) and
-`ghcr.io/dmtrkzntsv/twillingate-evidence` (dashboards, carries Node).
+That prints a snippet to paste; an agent with MCP access can do the same two
+steps for you. Put Caddy, nginx or a Cloudflare tunnel in front of `:8080` for
+TLS.
 
-For anything beyond a hobby install, **split tracking from reporting**: run
-ingestion on a small public host and the dashboards elsewhere off a restored
-Litestream replica, so the bucket is the only channel between them. Reporting
-outages then cannot cost you events, and the collector needs no public
-dashboard. [docs/deployment.md](docs/deployment.md) is the runbook for that
-two-machine setup; [docs/litestream.md](docs/litestream.md) covers the
-replication and the backup drills.
+Dashboards are a second file, whenever you want them:
+
+```bash
+curl -fsSLO $base/docker-compose.evidence.yml
+echo COMPOSE_FILE=docker-compose.yml:docker-compose.evidence.yml > .env
+docker compose up -d          # dashboards on :3000, 503 for a minute while Evidence builds
+```
+
+The `COMPOSE_FILE` line saves repeating `-f` on every later command. Beyond a
+hobby install, keep tracking and reporting apart: reporting reads a Litestream
+replica rather than the live database, so a reporting outage cannot cost you
+events. Each file ships the litestream service it needs, commented out.
+[docs/deployment.md](docs/deployment.md) is the runbook.
 
 ## Track something
 
@@ -66,16 +75,6 @@ Native apps and backends skip the SDK and POST batches straight to
 `/api/events`. Details: [docs/sdk.md](docs/sdk.md) and
 [docs/ingest-api.md](docs/ingest-api.md).
 
-## Ask it questions (MCP)
-
-With `MCP_AUTH_DSN` set (`token://…`, `cloudflare://…?aud=…` or
-`oauth://…`), `serve` also exposes an authenticated MCP endpoint at `/mcp`:
-read tools, a guarded SQL `query` tool, management tools and an
-`integration_guide` that returns paste-ready setup per project and
-platform. Connect Claude (or any MCP client) and ask "how many visitors
-did myapp get last week, by country" instead of opening dashboards.
-Setup per auth mode: [docs/mcp-auth.md](docs/mcp-auth.md).
-
 ## Documentation
 
 | Doc | Covers |
@@ -86,8 +85,24 @@ Setup per auth mode: [docs/mcp-auth.md](docs/mcp-auth.md).
 | [docs/ingest-api.md](docs/ingest-api.md) | The normative wire format for `/api/events` |
 | [docs/mcp-auth.md](docs/mcp-auth.md) | MCP auth modes: static token, Cloudflare Access, generic OAuth IdP |
 | [docs/litestream.md](docs/litestream.md) | Backup and replication: bucket setup, writer, reader, recovery |
-| [docs/migration.md](docs/migration.md) | One-time migration from the old `analytics` binary |
-| [docs/plausible/](docs/plausible/) | Shim for Plausible tagged-event classes |
+
+## Development
+
+```bash
+make check       # what CI runs: vet + coverage gate + restore test
+make build       # single binary
+make run         # local server on 127.0.0.1:8080 with a dev project
+make smoke       # boot the real binary, POST a batch, verify rows land
+make seed-demo   # 180 days of demo traffic in local/twillingate.db
+make dashboards  # Evidence dev server against the local database
+cd sdk && npm ci && npm test   # the twillingate.js SDK suite
+```
+
+The SDK bundle is committed (`internal/server/twillingate.js`); after
+editing `sdk/src/`, run `npm run build` there and commit the result — CI
+fails on drift. Every push to `main` cuts a release tagged
+`vYY.MMDD.{build}`. Commit messages follow Conventional Commits and become
+the release notes.
 
 ## Privacy and GDPR
 
@@ -113,21 +128,3 @@ organization, not a person). Paths are stored verbatim — strip personal
 data from URL schemes before it reaches the tracker. Enabling MCP exposes
 identified projects' stored ids to every valid token holder; complete
 erasure is `twillingate project delete`, deliberately CLI-only.
-
-## Development
-
-```bash
-make check       # what CI runs: vet + coverage gate + restore test
-make build       # single binary
-make run         # local server on 127.0.0.1:8080 with a dev project
-make smoke       # boot the real binary, POST a batch, verify rows land
-make seed-demo   # 180 days of demo traffic in local/twillingate.db
-make dashboards  # Evidence dev server against the local database
-cd sdk && npm ci && npm test   # the twillingate.js SDK suite
-```
-
-The SDK bundle is committed (`internal/server/twillingate.js`); after
-editing `sdk/src/`, run `npm run build` there and commit the result — CI
-fails on drift. Every push to `main` cuts a release tagged
-`vYY.MMDD.{build}`. Commit messages follow Conventional Commits and become
-the release notes.

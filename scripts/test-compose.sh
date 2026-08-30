@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# End-to-end test of the published topology: build both images, run the
-# single-server compose stack, send a hit, and wait for the dashboards to
-# render it. This is the one test that exercises the real Evidence build, so
-# it is slow (a first build takes about a minute) and manual — `make check`
-# does not run it.
+# End-to-end test of the published topology: build both images, run tracking
+# and reporting together as one project, send a hit, and wait for the
+# dashboards to render it. This is the one test that exercises the real
+# Evidence build, so it is slow (a first build takes about a minute) and
+# manual — `make check` does not run it.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -11,8 +11,16 @@ command -v docker > /dev/null || { echo "docker is required"; exit 1; }
 
 dir="$(mktemp -d)"
 project="twillingate-composetest-$$"
+
+# Tracking and reporting are separate files; the single-machine topology is
+# both of them up as one project, sharing the `data` volume.
+compose() {
+  docker compose -p "$project" \
+    -f "$dir/docker-compose.yml" -f "$dir/docker-compose.evidence.yml" "$@"
+}
+
 cleanup() {
-  docker compose -p "$project" -f "$dir/docker-compose.yml" down -v > /dev/null 2>&1 || true
+  compose down -v > /dev/null 2>&1 || true
   rm -rf "$dir"
 }
 trap cleanup EXIT
@@ -23,16 +31,19 @@ echo "building images..."
 docker build --target runtime -t twillingate:composetest . > /dev/null
 docker build --target evidence -t twillingate-evidence:composetest . > /dev/null
 
-# The compose file names published images; the test substitutes the ones it
-# just built so it exercises this working tree rather than the registry.
-# shellcheck disable=SC2016  # the ${TWILLINGATE_VERSION} text is matched, not expanded
-sed -e 's|ghcr.io/dmtrkzntsv/twillingate:${TWILLINGATE_VERSION:-latest}|twillingate:composetest|' \
-    -e 's|ghcr.io/dmtrkzntsv/twillingate-evidence:${TWILLINGATE_VERSION:-latest}|twillingate-evidence:composetest|' \
-    -e 's|"8080:8080"|"18080:8080"|' \
-    -e 's|"3000:3000"|"13000:3000"|' \
-    deploy/compose/docker-compose.yml > "$dir/docker-compose.yml"
+# The compose files name published images; the test substitutes the ones it
+# just built so it exercises this working tree rather than the registry. The
+# same substitutions run over both files — each is a no-op in the other.
+for f in docker-compose.yml docker-compose.evidence.yml; do
+  # shellcheck disable=SC2016  # the ${TWILLINGATE_VERSION} text is matched, not expanded
+  sed -e 's|ghcr.io/dmtrkzntsv/twillingate:${TWILLINGATE_VERSION:-latest}|twillingate:composetest|' \
+      -e 's|ghcr.io/dmtrkzntsv/twillingate-evidence:${TWILLINGATE_VERSION:-latest}|twillingate-evidence:composetest|' \
+      -e 's|"8080:8080"|"18080:8080"|' \
+      -e 's|"3000:3000"|"13000:3000"|' \
+      "deploy/compose/$f" > "$dir/$f"
+done
 
-docker compose -p "$project" -f "$dir/docker-compose.yml" up -d > /dev/null
+compose up -d > /dev/null
 
 echo "waiting for ingestion..."
 for _ in $(seq 1 30); do
@@ -43,10 +54,10 @@ done
 # Projects live in the database now: seed one through the CLI inside the
 # running container instead of mounting a projects.json.
 echo "creating project via the CLI..."
-docker compose -p "$project" -f "$dir/docker-compose.yml" exec -T twillingate \
+compose exec -T twillingate \
   /usr/local/bin/twillingate project create -alias dev -name Dev -origin "http://localhost:18080" \
   || fail "project create failed"
-key="$(docker compose -p "$project" -f "$dir/docker-compose.yml" exec -T twillingate \
+key="$(compose exec -T twillingate \
   /usr/local/bin/twillingate key issue -project dev -label web | grep -o 'ak_[0-9a-f]*' | head -1)"
 [ -n "$key" ] || fail "key issue failed"
 
@@ -99,7 +110,7 @@ done
 
 # A rendered page is not enough: sources must have produced data. The parquet
 # extracts are what the browser queries, and an empty build still serves 200.
-docker compose -p "$project" -f "$dir/docker-compose.yml" exec -T dashboards \
+compose exec -T dashboards \
   sh -c 'find /opt/evidence/site.* -name "*.parquet" -size +1k | head -1' | grep -q parquet \
   || fail "no non-trivial parquet extracts in the served site"
 
