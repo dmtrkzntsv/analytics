@@ -36,6 +36,9 @@ with the raw path never leaving the device.
   and cannot be recovered.
 - **No change to the app surface.** `$screen_view` and the `app_*` tables
   are untouched.
+- **No removal of the legacy localStorage key aliases.** `analytics_*` →
+  `twillingate_*` migration stays; it is about returning visitors, not
+  about the deleted snippet (§4.9).
 
 ## 3. Wire contract
 
@@ -70,29 +73,56 @@ Values are stored **verbatim**. The server does no parsing, no
 normalization, no case folding. `$path` may contain a `#` (hash routing,
 §4.5) or a query string (§4.6) when the client chooses to send one.
 
-### 3.2 `$url` becomes a legacy input
+### 3.2 `$url` is removed, and so is `script.js`
 
-`internal/server/script.go` states that `script.js` is *"the frozen legacy
-snippet: deployed websites load it, so it is served byte-for-byte
-forever."* That snippet sends `$url` and only `$url`. The npm SDK can also
-be pinned at an older version against a newer collector, and up to 50
-batches may sit in `twillingate_queue` in localStorage across an upgrade.
+Every project has been migrated to `twillingate.js`, so the compatibility
+surface is cut in one release rather than carried.
 
-Therefore `$url` remains **accepted but undocumented as the contract**:
+`$url` leaves `reservedKeys` entirely. It therefore becomes an *unknown*
+reserved key, which the existing machinery already handles well: the
+attribute is dropped with `unknown reserved key $url, ignored` in the
+response `warnings`, and the event is then rejected with
+`$pageview requires $path` in `errors`. A stale client gets both halves of
+the diagnosis in one response body without any code written for it.
 
-- If `$path` is present, `$url` is ignored entirely.
-- If `$path` is absent and `$url` is present, the server runs today's
-  `enrich.ParsePageURL` and derives host, path and `utm_*` from it —
-  identical to current behaviour.
-- If neither is present, the event is rejected: `$pageview requires $path`.
+`script.js` is deleted outright — the embed, the route, the file and its
+tests. `GET /js/script.js` becomes a 404, which fails loudly rather than
+serving a snippet whose every pageview would be rejected.
 
-Explicit fields always win over anything parsed from `$url`, field by
-field, so a client may migrate one attribute at a time.
+Removal surface (live code only; historical plans and specs under
+`docs/superpowers/` are archival and stay as written):
 
-`docs/twillingate.md` documents `$url` under a "legacy" heading with the
-above precedence, and shows it in no example.
+| File | Change |
+| --- | --- |
+| `internal/server/script.js` | delete |
+| `internal/server/script_test.go` | delete |
+| `internal/server/script.go` | drop the embed, `trackingScript`, and the route |
+| `internal/server/twillingate_script_test.go` | drop the legacy-serving assertion |
+| `internal/app/app_test.go` | `/js/script.js` now expects 404 |
+| `internal/enrich/url.go` | delete `ParsePageURL` and `PageInfo` — last caller gone; `CleanReferrer` stays |
+| `internal/enrich/url_test.go` | delete `TestParsePageURL` |
+| `internal/manage/ops.go` | comment references `script.js` |
+| `sdk/README.md`, `sdk/src/twillingate.ts` | comments describing co-existence with the frozen snippet |
+| `docs/plausible/README.md` | migration example uses the old tag |
 
-### 3.3 Removed: the `?ref=` fallback
+### 3.3 Accepted cost: one cache window of rejections
+
+`script.go` serves both scripts with `Cache-Control: public,
+max-age=86400`. For up to 24 hours after the release, browsers run the
+*previous* `twillingate.js` build — which sends `$url` — against the new
+server, and those pageviews are rejected. Migrating the sites does not
+help: the tag is unchanged, only the bytes behind it are.
+
+A smaller, longer tail comes from `twillingate_queue`: up to 50 batches per
+browser written by the old SDK and replayed on a later `online` event.
+
+This is accepted deliberately. It is **loud** — rejections land in the
+ingest counters and in `ingestResult.Errors`, not in silence — and it buys
+a server with no compatibility branch in it. Operationally: watch the
+reject counter on release day and expect it to return to baseline within
+about 24 hours.
+
+### 3.4 Removed: the `?ref=` fallback
 
 Today, when `CleanReferrer` yields nothing, the server falls back to the
 `?ref=` query parameter parsed out of `$url`. That fallback exists only
@@ -290,10 +320,16 @@ With `data-mask-url` covering the entry page, this is a consistency fix
 rather than a leak fix, but `page()` should behave the same on the first
 pageview as on every later one.
 
-### 4.9 `script.js` is untouched
+### 4.9 `script.js` is gone
 
-The frozen legacy snippet is not modified. It keeps sending `$url` and is
-served by the legacy path of §3.2 forever.
+The frozen legacy snippet is deleted (§3.2). `twillingate.js` is the only
+served client.
+
+What does **not** go with it: the `analytics_*` → `twillingate_*`
+localStorage key aliases in `twillingate.ts`. Those serve returning
+visitors whose browsers still hold keys written by the old snippet, and
+removing them would reset those identities. Only the comments explaining
+that `script.js` may run alongside the SDK are updated.
 
 ## 5. Storage
 
@@ -336,19 +372,18 @@ documented, not hidden.
 
 ## 6. Server
 
-`resolved` gains `Host, Path, UTMSource, UTMMedium, UTMCampaign`; five new
-`reservedKeys` entries map to them. The `$pageview` branch of
-`handlers.go`:
+`resolved` gains `Host, Path, UTMSource, UTMMedium, UTMCampaign` and loses
+`URL`; five `reservedKeys` entries are added and `$url` is removed. The
+`$pageview` branch of `handlers.go`:
 
-1. If `$path` is set, use the explicit fields.
-2. Otherwise, if `$url` is set, derive them via `ParsePageURL` (§3.2).
-3. Otherwise reject.
-4. `CleanReferrer(rv.Referrer, host)` using the resolved host; skip the
-   self-referral check when host is empty.
+1. Reject when `$path` is empty: `$pageview requires $path`.
+2. `CleanReferrer(rv.Referrer, rv.Host)`; skip the self-referral check when
+   host is empty.
+3. Enqueue the `WebHit` with the values as given — no parsing.
 
-`enrich.ParsePageURL` is unchanged and serves only the legacy path. Bot
-filtering, identity resolution, timestamp clamping and the queue write are
-unchanged.
+`enrich.ParsePageURL` and `PageInfo` are deleted with their last caller
+(§3.2). `CleanReferrer` stays. Bot filtering, identity resolution,
+timestamp clamping and the queue write are unchanged.
 
 ## 7. Documentation
 
@@ -357,8 +392,8 @@ unchanged.
 The MCP doc surface is four pieces today, two of which are hand-written Go
 string constants in `docs_content.go` (`docsEvents`, `docsJSSDK`) bound to
 source files by `docs_sync_test.go`. `docsJSSDK` is derived from
-`script.js` — the frozen legacy snippet — so it already documents an API
-that is not the one being changed.
+`script.js` — the snippet §3.2 deletes — so it documents an API that will
+not exist.
 
 `docs/twillingate.md` becomes the single normative document, embedded
 through the `docs` package (the `//go:embed` pattern `docs.IngestAPI`
@@ -429,9 +464,9 @@ Identity is set after load via `twillingate.identify("u_123")`; there is no
 
 | Area | Cases |
 | --- | --- |
-| `resolveAttributes` | five new keys resolve; unknown `$` keys still warn |
-| `handlers` pageview | explicit fields win; `$url`-only falls back; neither rejects; per-field precedence |
-| Legacy | the exact payload `script.js` emits still ingests and stores the same row as today |
+| `resolveAttributes` | five new keys resolve; `$url` now warns as unknown |
+| `handlers` pageview | `$path` stored verbatim; missing `$path` rejects |
+| Hard cut | a `$url`-only payload yields both the `unknown reserved key $url` warning and the `$pageview requires $path` rejection; `GET /js/script.js` returns 404 |
 | `CleanReferrer` | self-referral suppressed with host; taken at face value without |
 | `aggregate_web` | `agg_web_hosts` rolls up; empty host bucket survives |
 | Migration | `006` applies to a populated database; existing rows read back with `host = ''` |
@@ -445,7 +480,8 @@ Identity is set after load via `twillingate.identify("u_123")`; there is no
 
 ## 9. Build order
 
-1. **Server wire** (§3, §6) — additive except the `?ref=` removal.
+1. **Server wire** (§3, §6) — breaking: new keys, `$url` and `?ref=`
+   removed, `script.js` and `ParsePageURL` deleted.
 2. **Storage** (§5) — independent of 1; may land first.
 3. **Read surfaces** (§5.2) — MCP dimension, Evidence source and tile.
 4. **SDK** (§4) — the largest unit; may warrant its own plan.
@@ -458,8 +494,9 @@ Identity is set after load via `twillingate.identify("u_123")`; there is no
 
 Per `CLAUDE.md`, only `feat`/`fix`/`perf` reach the release notes.
 
-- `feat(server)!` — the `$host`/`$path` wire contract and the `?ref=`
-  removal.
+- `feat(server)!` — the `$host`/`$path` wire contract, and the removal of
+  `$url`, the `?ref=` fallback and `GET /js/script.js`. The subject should
+  read as the release note for a breaking cut-over.
 - `feat(store)` — the host dimension.
 - `feat(sdk)` — masking, routing modes, `util`. Note `CLAUDE.md` does not
   list `sdk` among the scopes and the one prior commit in this area used
