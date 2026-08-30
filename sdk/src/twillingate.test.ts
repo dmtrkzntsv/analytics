@@ -275,7 +275,7 @@ describe("snippet auto-init", () => {
     expect(sent[0].body.key).toBe("ak_snippet");
     expect(sent[0].body.events[0].name).toBe("$pageview");
     const attrs = sent[0].body.events[0].attributes as Record<string, unknown>;
-    expect(attrs.$url).toContain("https://example.com");
+    expect(attrs.$host).toBe("example.com");
   });
 
   it("data-auto=off suppresses automatic pageviews", async () => {
