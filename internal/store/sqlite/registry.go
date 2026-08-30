@@ -184,7 +184,7 @@ func (d *DB) SetIngestKeyDisabled(ctx context.Context, project, label string, di
 // instead of silently orphaning rows on DeleteProjectData or RenameProject.
 var projectTables = []string{
 	"web_hits", "product_events", "app_views",
-	"agg_web_daily", "agg_web_pages", "agg_web_referrers", "agg_web_countries",
+	"agg_web_daily", "agg_web_pages", "agg_web_hosts", "agg_web_referrers", "agg_web_countries",
 	"agg_web_devices", "agg_web_browsers", "agg_web_os", "agg_web_utm",
 	"agg_product_daily", "agg_product_totals", "agg_product_attrs",
 	"agg_app_daily", "agg_app_screens", "agg_app_versions", "agg_app_os",
