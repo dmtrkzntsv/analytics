@@ -407,8 +407,8 @@ landed on main in `4cb5f71` after this spec was first written.
 | `store.WebHit` | `Host` field |
 | `sqlite/write.go` | `host` in the `web_hits` insert |
 | `sqlite/aggregate_web.go` | `{"agg_web_hosts", "host", "host", ""}` in the dimension table |
-| `sqlite/registry.go` | `agg_web_hosts` in the export/import table list |
-| `sqlite/retention.go` | aggregate pruning follows the same list |
+| `sqlite/registry.go` | `agg_web_hosts` in `projectTables` |
+| `sqlite/prune.go` | `agg_web_hosts` in `webAggTables` — a **separate** list from `projectTables`; omitting it means the table never honours retention and grows forever |
 | `mcpserver/tools_read.go` | `"hosts": {"v_web_hosts", "host"}` in `webDimensions`, plus the enum and tool description |
 | `mcpserver/resources.go` | `v_web_hosts` in `schemaViews` (which also gained `v_product_attrs` on main) |
 | `evidence/sources/twillingate/` | `v_web_hosts.sql` + a tile on `pages/web/[project].md` |
