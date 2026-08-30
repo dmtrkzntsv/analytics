@@ -7,11 +7,6 @@ a Raspberry Pi from day one. An MCP endpoint means your coding agent can set it
 up and answer questions about it, so the dashboards are there when you want
 them rather than being the point.
 
-**Tired of hosting a big analytics system?** There is one process to run and
-one file to back up. No Postgres, no ClickHouse, no Redis, no queue, no Node
-runtime unless you opt into the dashboards. `docker compose up -d`, or a single
-binary under systemd, and you are collecting.
-
 **Ask your agent to integrate it.** With MCP enabled, "set up analytics for
 this app" is the whole task: the agent creates the project, issues an ingest
 key and asks `integration_guide` for paste-ready setup for your platform, then
