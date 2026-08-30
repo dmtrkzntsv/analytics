@@ -174,7 +174,7 @@ func TestDashboardsReportsBadDurations(t *testing.T) {
 	}
 }
 
-// --- legacy projects.json format (used only by `analytics config import`) ---
+// --- legacy projects.json format (used only by `twillingate config import`) ---
 
 func TestParseProjectsIngestKeys(t *testing.T) {
 	ps, err := ParseProjects(strings.NewReader(`[

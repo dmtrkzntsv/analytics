@@ -3,7 +3,7 @@
 #
 # The application does not do this: how a database gets from the machine that
 # writes it to the machine that reads it is a deployment choice. This script
-# is the litestream answer, and it is what `analytics dashboards` expects to
+# is the litestream answer, and it is what `twillingate dashboards` expects to
 # find at REPLICA_PATH.
 #
 # The restore never writes to REPLICA_PATH directly. A failed download, a
@@ -13,8 +13,8 @@
 # Environment:
 #   SOURCE_DB     path of the database *on the writer* — litestream keys a
 #                 replica by it, so this must match the `path:` in
-#                 litestream.yml exactly (default /var/lib/analytics/analytics.db)
-#   REPLICA_PATH  where to put the local copy (default /var/lib/analytics/replica.db)
+#                 litestream.yml exactly (default /var/lib/twillingate/twillingate.db)
+#   REPLICA_PATH  where to put the local copy (default /var/lib/twillingate/replica.db)
 #   LITESTREAM_CONFIG  config file (default /etc/litestream.yml)
 #   LOOP_INTERVAL seconds between runs; unset means run once and exit, which
 #                 is what cron wants
@@ -22,8 +22,8 @@
 # Requires: litestream, sqlite3, flock.
 set -eu
 
-SOURCE_DB="${SOURCE_DB:-/var/lib/analytics/analytics.db}"
-REPLICA_PATH="${REPLICA_PATH:-/var/lib/analytics/replica.db}"
+SOURCE_DB="${SOURCE_DB:-/var/lib/twillingate/twillingate.db}"
+REPLICA_PATH="${REPLICA_PATH:-/var/lib/twillingate/replica.db}"
 LITESTREAM_CONFIG="${LITESTREAM_CONFIG:-/etc/litestream.yml}"
 
 # Loop mode calls this as `restore_once || …`, and POSIX turns set -e off

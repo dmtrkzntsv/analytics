@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dmitry/analytics/internal/civil"
-	"github.com/dmitry/analytics/internal/store"
+	"github.com/dmtrkzntsv/twillingate/internal/civil"
+	"github.com/dmtrkzntsv/twillingate/internal/store"
 )
 
 // attrPath builds a JSON path literal for a config-supplied attribute key.

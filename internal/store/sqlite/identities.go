@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/dmitry/analytics/internal/civil"
+	"github.com/dmtrkzntsv/twillingate/internal/civil"
 )
 
 // identityKinds are the two dimensions agg_identity_daily rolls up, paired

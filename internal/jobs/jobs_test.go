@@ -10,13 +10,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dmitry/analytics/internal/civil"
-	"github.com/dmitry/analytics/internal/config"
-	"github.com/dmitry/analytics/internal/config/configtest"
-	"github.com/dmitry/analytics/internal/identity"
-	"github.com/dmitry/analytics/internal/manage"
-	"github.com/dmitry/analytics/internal/store"
-	_ "github.com/dmitry/analytics/internal/store/sqlite"
+	"github.com/dmtrkzntsv/twillingate/internal/civil"
+	"github.com/dmtrkzntsv/twillingate/internal/config"
+	"github.com/dmtrkzntsv/twillingate/internal/config/configtest"
+	"github.com/dmtrkzntsv/twillingate/internal/identity"
+	"github.com/dmtrkzntsv/twillingate/internal/manage"
+	"github.com/dmtrkzntsv/twillingate/internal/store"
+	_ "github.com/dmtrkzntsv/twillingate/internal/store/sqlite"
 	_ "modernc.org/sqlite"
 )
 

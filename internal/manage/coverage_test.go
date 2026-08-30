@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dmitry/analytics/internal/config"
-	"github.com/dmitry/analytics/internal/store"
+	"github.com/dmtrkzntsv/twillingate/internal/config"
+	"github.com/dmtrkzntsv/twillingate/internal/store"
 )
 
 // rawExec reaches the underlying *sql.DB of the sqlite store for tests

@@ -12,7 +12,7 @@
 select day, actives, views, sessions,
        case when sessions > 0 then duration_sec * 1.0 / sessions else 0 end as avg_session_sec,
        case when actives > 0 then sessions * 1.0 / actives else 0 end as sessions_per_active
-from analytics.v_app_daily
+from twillingate.v_app_daily
 where project = '${params.project}'
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')
@@ -22,7 +22,7 @@ order by day
 ```sql app_totals
 select sum(actives) as actives, sum(views) as views, sum(sessions) as sessions,
        case when sum(sessions) > 0 then sum(duration_sec) * 1.0 / sum(sessions) else 0 end as avg_session_sec
-from analytics.v_app_daily
+from twillingate.v_app_daily
 where project = '${params.project}'
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')
@@ -44,7 +44,7 @@ where project = '${params.project}'
 
 ```sql app_versions
 select day, platform || ' ' || app_version as version, actives
-from analytics.v_app_versions
+from twillingate.v_app_versions
 where project = '${params.project}'
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')
@@ -62,7 +62,7 @@ and Android.
 
 ```sql app_screens
 select screen, sum(views) as views, sum(actives) as actives
-from analytics.v_app_screens
+from twillingate.v_app_screens
 where project = '${params.project}'
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')
@@ -72,7 +72,7 @@ group by screen order by views desc limit 20
 
 ```sql app_platforms
 select platform, sum(actives) as actives
-from analytics.v_app_versions
+from twillingate.v_app_versions
 where project = '${params.project}'
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')
@@ -93,7 +93,7 @@ group by platform order by actives desc
 
 ```sql app_oses
 select platform || ' ' || os_version as os, sum(actives) as actives
-from analytics.v_app_os
+from twillingate.v_app_os
 where project = '${params.project}'
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')
@@ -103,7 +103,7 @@ group by os order by actives desc limit 15
 
 ```sql app_devices
 select device_model, sum(actives) as actives
-from analytics.v_app_devices
+from twillingate.v_app_devices
 where project = '${params.project}'
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')
@@ -113,7 +113,7 @@ group by device_model order by actives desc limit 15
 
 ```sql app_countries
 select country, sum(actives) as actives
-from analytics.v_app_countries
+from twillingate.v_app_countries
 where project = '${params.project}'
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')

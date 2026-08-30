@@ -60,7 +60,7 @@ func (h *host) productAttributes(ctx context.Context, _ *mcp.CallToolRequest, in
 	}
 	if p.Aggregation == nil || !p.Aggregation.Enabled {
 		return nil, tableOut{}, fmt.Errorf(
-			"project %q has product_aggregation disabled; enable it with `update_project` or `analytics project update` (attribute breakdowns are opt-in per key)", in.Project)
+			"project %q has product_aggregation disabled; enable it with `update_project` or `twillingate project update` (attribute breakdowns are opt-in per key)", in.Project)
 	}
 	q := `SELECT day, event_name, attr_key, attr_value, count, unique_users
 		FROM agg_product_attrs WHERE project=? AND day BETWEEN ? AND ?`

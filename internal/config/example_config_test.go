@@ -8,7 +8,7 @@ import (
 )
 
 // The shipped .env.example must stay loadable; a typo here breaks every
-// fresh install, since install.sh copies it to /etc/analytics/. It is
+// fresh install, since install.sh copies it to /etc/twillingate/. It is
 // parsed the way systemd's EnvironmentFile= reads it: KEY=VALUE lines, with
 // commented lines documenting defaults — those are uncommented here so
 // every documented key round-trips through FromEnv.

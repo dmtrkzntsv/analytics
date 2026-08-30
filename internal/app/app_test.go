@@ -13,12 +13,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dmitry/analytics/internal/civil"
-	"github.com/dmitry/analytics/internal/config"
-	"github.com/dmitry/analytics/internal/config/configtest"
-	"github.com/dmitry/analytics/internal/manage"
-	"github.com/dmitry/analytics/internal/store"
-	_ "github.com/dmitry/analytics/internal/store/sqlite"
+	"github.com/dmtrkzntsv/twillingate/internal/civil"
+	"github.com/dmtrkzntsv/twillingate/internal/config"
+	"github.com/dmtrkzntsv/twillingate/internal/config/configtest"
+	"github.com/dmtrkzntsv/twillingate/internal/manage"
+	"github.com/dmtrkzntsv/twillingate/internal/store"
+	_ "github.com/dmtrkzntsv/twillingate/internal/store/sqlite"
 )
 
 const chromeUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
@@ -522,8 +522,8 @@ func TestServeWarnsAboutLegacyProjectsFile(t *testing.T) {
 	t.Setenv("PROJECTS_FILE", legacy)
 
 	logs := runServeAndCollectLogs(t, cfg)
-	if !strings.Contains(logs, "analytics config import") {
-		t.Errorf("logs = %q, want a warning naming `analytics config import`", logs)
+	if !strings.Contains(logs, "twillingate config import") {
+		t.Errorf("logs = %q, want a warning naming `twillingate config import`", logs)
 	}
 }
 
@@ -535,7 +535,7 @@ func TestServeDoesNotWarnWithoutLegacyProjectsFile(t *testing.T) {
 	t.Setenv("PROJECTS_FILE", "")
 
 	logs := runServeAndCollectLogs(t, cfg)
-	if strings.Contains(logs, "analytics config import") {
+	if strings.Contains(logs, "twillingate config import") {
 		t.Errorf("logs = %q, want no legacy-file warning", logs)
 	}
 }

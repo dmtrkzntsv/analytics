@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/dmitry/analytics/docs"
+	"github.com/dmtrkzntsv/twillingate/docs"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )

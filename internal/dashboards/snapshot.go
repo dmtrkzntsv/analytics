@@ -49,12 +49,12 @@ func snapshot(ctx context.Context, dbPath, dest string) error {
 }
 
 // sourceFilename is the value Evidence's sqlite datasource needs in
-// EVIDENCE_SOURCE__analytics__filename.
+// EVIDENCE_SOURCE__twillingate__filename.
 //
 // The plugin resolves it with path.join(<source dir>, filename): an absolute
 // path gets rewritten into the source directory, and a hand-written ../../..
 // silently breaks whenever the project directory changes depth. Computing it
 // keeps the knob out of the deployment files entirely.
 func sourceFilename(projectDir, snapshotPath string) (string, error) {
-	return filepath.Rel(filepath.Join(projectDir, "sources", "analytics"), snapshotPath)
+	return filepath.Rel(filepath.Join(projectDir, "sources", "twillingate"), snapshotPath)
 }

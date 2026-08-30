@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dmitry/analytics/internal/config"
-	"github.com/dmitry/analytics/internal/manage"
-	"github.com/dmitry/analytics/internal/store"
-	_ "github.com/dmitry/analytics/internal/store/sqlite"
+	"github.com/dmtrkzntsv/twillingate/internal/config"
+	"github.com/dmtrkzntsv/twillingate/internal/manage"
+	"github.com/dmtrkzntsv/twillingate/internal/store"
+	_ "github.com/dmtrkzntsv/twillingate/internal/store/sqlite"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -91,7 +91,7 @@ func TestMCPTokenAuthPasses(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("code = %d body = %s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "analytics") {
+	if !strings.Contains(rec.Body.String(), "twillingate") {
 		t.Errorf("no serverInfo in %s", rec.Body.String())
 	}
 }
@@ -190,7 +190,7 @@ func TestMCPOAuthModePasses(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("code = %d body = %s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "analytics") {
+	if !strings.Contains(rec.Body.String(), "twillingate") {
 		t.Errorf("no serverInfo in %s", rec.Body.String())
 	}
 

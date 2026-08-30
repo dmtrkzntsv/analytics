@@ -1,7 +1,7 @@
 # {params.project} — Users
 
 ```sql users_mode
-select identity from analytics.projects where alias = '${params.project}'
+select identity from twillingate.projects where alias = '${params.project}'
 ```
 
 {#if users_mode[0].identity === 'identified'}
@@ -16,7 +16,7 @@ select identity from analytics.projects where alias = '${params.project}'
 
 ```sql users_daily
 select day, count(distinct id) as active_users, sum(hits + views + events) as actions
-from analytics.v_identity_daily
+from twillingate.v_identity_daily
 where project = '${params.project}' and kind = 'user' and id != ''
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')
@@ -27,7 +27,7 @@ group by day order by day
 select count(distinct id) as users, sum(hits + views + events) as actions,
        case when count(distinct id) > 0
             then sum(hits + views + events) * 1.0 / count(distinct id) else 0 end as per_user
-from analytics.v_identity_daily
+from twillingate.v_identity_daily
 where project = '${params.project}' and kind = 'user' and id != ''
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')
@@ -38,8 +38,8 @@ select coalesce(i.name, d.id) as name,
        sum(d.hits + d.views + d.events) as actions,
        count(distinct d.day) as active_days,
        max(d.day) as last_seen
-from analytics.v_identity_daily d
-left join analytics.identities i
+from twillingate.v_identity_daily d
+left join twillingate.identities i
   on i.project = d.project and i.kind = 'user' and i.id = d.id
 where d.project = '${params.project}' and d.kind = 'user' and d.id != ''
   and d.day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
@@ -71,7 +71,7 @@ This project runs in **anonymous** identity mode: `user_id` is a hash that
 rotates at midnight, so a per-user report would be a list of hashes that means
 nothing tomorrow.
 
-Run `analytics project update -alias {params.project} -identity identified`
+Run `twillingate project update -alias {params.project} -identity identified`
 (or the `update_project` MCP tool) to enable per-user reporting. Note that
 identified mode stores a persistent `localStorage` id on the web, which is
 terminal-equipment storage under ePrivacy — the same legal category as a

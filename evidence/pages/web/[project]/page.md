@@ -25,7 +25,7 @@
 
 ```sql page_daily
 select day, visitors, pageviews
-from analytics.v_web_pages
+from twillingate.v_web_pages
 where project = '${params.project}'
   and path = '${browser ? ($page.url.searchParams.get('path') ?? '').replaceAll("'", "''") : ''}'
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
@@ -36,7 +36,7 @@ order by day
 ```sql page_totals
 select sum(visitors) as visitors, sum(pageviews) as pageviews,
        case when sum(visitors) > 0 then sum(pageviews) * 1.0 / sum(visitors) else 0 end as views_per_visitor
-from analytics.v_web_pages
+from twillingate.v_web_pages
 where project = '${params.project}'
   and path = '${browser ? ($page.url.searchParams.get('path') ?? '').replaceAll("'", "''") : ''}'
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')

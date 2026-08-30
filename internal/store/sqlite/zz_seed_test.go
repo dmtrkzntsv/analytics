@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dmitry/analytics/internal/civil"
-	"github.com/dmitry/analytics/internal/store"
+	"github.com/dmtrkzntsv/twillingate/internal/civil"
+	"github.com/dmtrkzntsv/twillingate/internal/store"
 )
 
 // TestSeedEvidenceFixture builds a populated database for the Evidence build

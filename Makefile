@@ -1,11 +1,11 @@
-BIN := analytics
+BIN := twillingate
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
 .PHONY: build test check vet build-all dist docker run smoke test-install test-compose test-restore dashboards seed-demo clean
 
 build:
-	CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o $(BIN) ./cmd/analytics
+	CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o $(BIN) ./cmd/twillingate
 
 # GOPKGS excludes node_modules: some npm packages ship Go source that
 # go list ./... would otherwise treat as part of this module.
@@ -26,7 +26,7 @@ check: vet
 build-all:
 	for target in linux/amd64 linux/arm64 linux/arm; do \
 		GOOS=$${target%/*} GOARCH=$${target#*/} CGO_ENABLED=0 \
-		go build -trimpath -ldflags '$(LDFLAGS)' -o dist/$(BIN)-$${target%/*}-$${target#*/} ./cmd/analytics || exit 1; \
+		go build -trimpath -ldflags '$(LDFLAGS)' -o dist/$(BIN)-$${target%/*}-$${target#*/} ./cmd/twillingate || exit 1; \
 	done
 
 # Release tarballs: binary + deploy/ (installer, units, configs) per arch,
@@ -36,7 +36,7 @@ dist: build-all
 		stage=dist/stage-$$arch; rm -rf $$stage; mkdir -p $$stage; \
 		cp dist/$(BIN)-linux-$$arch $$stage/$(BIN); \
 		cp -r deploy $$stage/deploy; \
-		cp install.sh .env.example $$stage/; \
+		cp .env.example $$stage/; \
 		tar -czf dist/$(BIN)-linux-$$arch.tar.gz -C $$stage .; \
 		rm -rf $$stage; \
 		echo "packaged dist/$(BIN)-linux-$$arch.tar.gz"; \
@@ -44,14 +44,14 @@ dist: build-all
 	cd dist && sha256sum $(BIN)-linux-*.tar.gz > SHA256SUMS
 
 docker:
-	docker build --target runtime -t analytics:$(VERSION) .
-	docker build --target evidence -t analytics-evidence:$(VERSION) .
+	docker build --target runtime -t twillingate:$(VERSION) .
+	docker build --target evidence -t twillingate-evidence:$(VERSION) .
 
 # ---- local development / testing ----
 
 define LOCAL_ENV
 LISTEN_ADDR=127.0.0.1:8080
-DATABASE_URL=sqlite://local/analytics.db
+DATABASE_URL=sqlite://local/twillingate.db
 GEO_URL=none://
 LOG_LEVEL=debug
 LOG_FORMAT=text
@@ -118,7 +118,7 @@ local/projects.json:
 # division of labour as systemd's EnvironmentFile= in production). Projects
 # live in the database now, not a file: make sure a `dev` project exists
 # (idempotent — a second run just fails quietly on the duplicate alias, hence
-# the 2>/dev/null). Issue a key for it with `./analytics key issue -project
+# the 2>/dev/null). Issue a key for it with `./twillingate key issue -project
 # dev -label local`.
 run: build local/.env
 	set -a; . ./local/.env; set +a; \
@@ -142,22 +142,22 @@ test-compose:
 test-restore:
 	./scripts/test-restore.sh
 
-# Fills local/analytics.db with 180 days of believable traffic so the dashboards
+# Fills local/twillingate.db with 180 days of believable traffic so the dashboards
 # have something to plot, one profile per project in local/projects.json. Needs
 # the server to have started once so those projects are registered. Re-running
 # replaces the seeded rows rather than stacking another copy on top.
 seed-demo: local/.env local/projects.json build
-	@DATABASE_URL="sqlite://$(PWD)/local/analytics.db" \
+	@DATABASE_URL="sqlite://$(PWD)/local/twillingate.db" \
 	 PROJECTS_FILE="$(PWD)/local/projects.json" ./$(BIN) migrate
-	python3 scripts/seed-demo.py local/analytics.db local/projects.json
+	python3 scripts/seed-demo.py local/twillingate.db local/projects.json
 	@echo
 	@echo "Cohorts are computed by the daily pass; run 'make run' once to"
 	@echo "trigger the boot catch-up so the retention page has data."
 
 dashboards:
 	cd evidence && npm install \
-		&& EVIDENCE_SOURCE__analytics__filename=../../../local/analytics.db npm run sources \
-		&& EVIDENCE_SOURCE__analytics__filename=../../../local/analytics.db npm run dev
+		&& EVIDENCE_SOURCE__twillingate__filename=../../../local/twillingate.db npm run sources \
+		&& EVIDENCE_SOURCE__twillingate__filename=../../../local/twillingate.db npm run dev
 
 clean:
 	rm -rf $(BIN) dist local coverage.out

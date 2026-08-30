@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/dmitry/analytics/internal/config"
-	"github.com/dmitry/analytics/internal/store"
+	"github.com/dmtrkzntsv/twillingate/internal/config"
+	"github.com/dmtrkzntsv/twillingate/internal/store"
 )
 
 // Export writes the full registry as one JSON document that round-trips

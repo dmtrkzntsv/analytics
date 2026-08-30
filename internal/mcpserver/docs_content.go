@@ -62,7 +62,7 @@ project via product_aggregation:
 - top_n caps distinct values kept per attribute (default 50); the rest
   collapse into an "(other)" row with a true unique-user count.
 - Set it with the update_project tool (product_aggregation field) or
-  ` + "`analytics project`" + ` CLI + config import. Without it,
+  ` + "`twillingate project`" + ` CLI + config import. Without it,
   product_attributes returns an error explaining the setting.
 
 ## Identity across all families

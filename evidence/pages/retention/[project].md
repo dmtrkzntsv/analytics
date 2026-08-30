@@ -1,7 +1,7 @@
 # {params.project} — Retention
 
 ```sql retention_mode
-select identity from analytics.projects where alias = '${params.project}'
+select identity from twillingate.projects where alias = '${params.project}'
 ```
 
 {#if retention_mode[0].identity === 'identified'}
@@ -15,7 +15,7 @@ select surface, day_offset,
        sum(actors) as actors, sum(cohort_size) as cohort_size,
        case when sum(cohort_size) > 0
             then sum(actors) * 1.0 / sum(cohort_size) else 0 end as retention
-from analytics.v_retention
+from twillingate.v_retention
 where project = '${params.project}' and day_offset between 0 and 30
 group by surface, day_offset
 order by surface, day_offset
@@ -30,7 +30,7 @@ from (
   select surface, day_offset,
          case when sum(cohort_size) > 0
               then sum(actors) * 1.0 / sum(cohort_size) else 0 end as retention
-  from analytics.v_retention
+  from twillingate.v_retention
   where project = '${params.project}' and day_offset in (1, 7, 30)
   group by surface, day_offset
 )
@@ -40,7 +40,7 @@ group by surface
 ```sql retention_cohorts
 select surface, cohort_day, day_offset, cohort_size, actors,
        case when cohort_size > 0 then actors * 1.0 / cohort_size else 0 end as retention
-from analytics.v_retention
+from twillingate.v_retention
 where project = '${params.project}' and day_offset between 0 and 30
 order by cohort_day desc, surface, day_offset
 ```
@@ -71,7 +71,7 @@ order by cohort_day desc, surface, day_offset
 Retention is undefined in **anonymous** identity mode: `actor_id` rotates at
 midnight, so every cohort would contain only its own first day.
 
-Run `analytics project update -alias {params.project} -identity identified`
+Run `twillingate project update -alias {params.project} -identity identified`
 (or the `update_project` MCP tool) to enable cohorts. Note that identified
 mode stores a persistent `localStorage` id on the web, which is
 terminal-equipment storage under ePrivacy — the same legal category as a

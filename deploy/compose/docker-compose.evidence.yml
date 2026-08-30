@@ -6,7 +6,7 @@
 # See docs/litestream.md.
 services:
   dashboards:
-    image: ghcr.io/dmtrkzntsv/analytics-evidence:${ANALYTICS_VERSION:-latest}
+    image: ghcr.io/dmtrkzntsv/twillingate-evidence:${TWILLINGATE_VERSION:-latest}
     restart: unless-stopped
     ports:
       - "3000:3000"
@@ -31,7 +31,7 @@ services:
   #     - data:/data
   #   env_file: .env
   #   environment:
-  #     - SOURCE_DB=/var/lib/analytics/analytics.db   # the path on the writer
+  #     - SOURCE_DB=/var/lib/twillingate/twillingate.db   # the path on the writer
   #     - REPLICA_PATH=/data/replica.db
   #     - LOOP_INTERVAL=300
 

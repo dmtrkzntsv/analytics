@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dmitry/analytics/internal/store"
+	"github.com/dmtrkzntsv/twillingate/internal/store"
 )
 
 func TestExportImportRoundTrip(t *testing.T) {
@@ -99,7 +99,7 @@ func TestImportLegacyProjectsJSON(t *testing.T) {
 
 // findKey looks up a RegistryKey by key value directly from the store,
 // bypassing the snapshot (which drops disabled keys — see the "list"
-// comment in cmd/analytics/key.go).
+// comment in cmd/twillingate/key.go).
 func findKey(t *testing.T, st store.Store, ctx context.Context, key string) store.RegistryKey {
 	t.Helper()
 	_, ks, err := st.LoadRegistry(ctx)

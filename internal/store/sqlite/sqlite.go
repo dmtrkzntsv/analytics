@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/dmitry/analytics/internal/store"
+	"github.com/dmtrkzntsv/twillingate/internal/store"
 	_ "modernc.org/sqlite"
 )
 

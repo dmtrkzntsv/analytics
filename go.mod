@@ -1,4 +1,4 @@
-module github.com/dmitry/analytics
+module github.com/dmtrkzntsv/twillingate
 
 go 1.25.0
 

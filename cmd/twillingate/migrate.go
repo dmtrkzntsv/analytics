@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/dmitry/analytics/internal/config"
-	"github.com/dmitry/analytics/internal/store"
-	_ "github.com/dmitry/analytics/internal/store/sqlite"
+	"github.com/dmtrkzntsv/twillingate/internal/config"
+	"github.com/dmtrkzntsv/twillingate/internal/store"
+	_ "github.com/dmtrkzntsv/twillingate/internal/store/sqlite"
 )
 
 func init() {

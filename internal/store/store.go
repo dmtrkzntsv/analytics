@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/dmitry/analytics/internal/civil"
+	"github.com/dmtrkzntsv/twillingate/internal/civil"
 )
 
 // WebHit represents a single web pageview ($pageview).

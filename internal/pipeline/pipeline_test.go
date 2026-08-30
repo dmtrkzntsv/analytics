@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dmitry/analytics/internal/config"
-	"github.com/dmitry/analytics/internal/store"
+	"github.com/dmtrkzntsv/twillingate/internal/config"
+	"github.com/dmtrkzntsv/twillingate/internal/store"
 )
 
 type fakeSink struct {

@@ -2,7 +2,7 @@
 # R2 credentials come from the environment: LITESTREAM_ACCESS_KEY_ID,
 # LITESTREAM_SECRET_ACCESS_KEY.
 dbs:
-  - path: /var/lib/analytics/analytics.db
+  - path: /var/lib/twillingate/twillingate.db
     replicas:
       - type: s3
         bucket: ${R2_BUCKET}

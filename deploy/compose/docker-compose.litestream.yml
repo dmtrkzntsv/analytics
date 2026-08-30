@@ -11,5 +11,5 @@ services:
     command: ["replicate", "-config", "/etc/litestream.yml"]
     volumes:
       - ./litestream.yml:/etc/litestream.yml:ro
-      - data:/var/lib/analytics
+      - data:/var/lib/twillingate
     env_file: .env

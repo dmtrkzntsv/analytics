@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/dmitry/analytics/internal/store"
+	"github.com/dmtrkzntsv/twillingate/internal/store"
 )
 
 // seedProductDay: project "app", day 2026-08-10:

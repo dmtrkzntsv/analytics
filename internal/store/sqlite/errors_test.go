@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dmitry/analytics/internal/store"
+	"github.com/dmtrkzntsv/twillingate/internal/store"
 )
 
 // This file drives the SQL error branches that the happy-path tests in the

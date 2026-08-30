@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/dmitry/analytics/internal/civil"
+	"github.com/dmtrkzntsv/twillingate/internal/civil"
 )
 
 // Surfaces recorded on actors. A web visitor id and an app install_id are

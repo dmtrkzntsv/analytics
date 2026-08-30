@@ -65,7 +65,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: analytics
+      - name: twillingate
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -74,14 +74,14 @@ jobs:
           push: true
           build-args: VERSION=${{ needs.release.outputs.tag }}
           tags: |
-            ghcr.io/${{ github.repository_owner }}/analytics:${{ needs.release.outputs.tag }}
-            ghcr.io/${{ github.repository_owner }}/analytics:latest
-          cache-from: type=gha,scope=analytics
-          cache-to: type=gha,mode=max,scope=analytics
+            ghcr.io/${{ github.repository_owner }}/twillingate:${{ needs.release.outputs.tag }}
+            ghcr.io/${{ github.repository_owner }}/twillingate:latest
+          cache-from: type=gha,scope=twillingate
+          cache-to: type=gha,mode=max,scope=twillingate
       # No linux/arm/v7: sqlite3 publishes no prebuilds for it, and building
       # it from source under QEMU is not worth the release time. A 32-bit
       # host runs the tarball, or renders dashboards elsewhere.
-      - name: analytics-evidence
+      - name: twillingate-evidence
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -90,7 +90,7 @@ jobs:
           push: true
           build-args: VERSION=${{ needs.release.outputs.tag }}
           tags: |
-            ghcr.io/${{ github.repository_owner }}/analytics-evidence:${{ needs.release.outputs.tag }}
-            ghcr.io/${{ github.repository_owner }}/analytics-evidence:latest
+            ghcr.io/${{ github.repository_owner }}/twillingate-evidence:${{ needs.release.outputs.tag }}
+            ghcr.io/${{ github.repository_owner }}/twillingate-evidence:latest
           cache-from: type=gha,scope=evidence
           cache-to: type=gha,mode=max,scope=evidence

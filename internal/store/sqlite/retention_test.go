@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dmitry/analytics/internal/civil"
-	"github.com/dmitry/analytics/internal/store"
+	"github.com/dmtrkzntsv/twillingate/internal/civil"
+	"github.com/dmtrkzntsv/twillingate/internal/store"
 )
 
 func onDay(y int, m time.Month, d int) civil.Date { return civil.Date{Year: y, Month: m, Day: d} }

@@ -8,7 +8,7 @@ package configtest
 import (
 	"testing"
 
-	"github.com/dmitry/analytics/internal/config"
+	"github.com/dmtrkzntsv/twillingate/internal/config"
 )
 
 // Load returns a validated config. vars may override any documented env

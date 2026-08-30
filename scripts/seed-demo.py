@@ -16,7 +16,7 @@ identities, which is what makes the users, groups and retention pages
 meaningful -- under anonymous mode those ids would rotate daily and the pages
 render their explanatory branch instead.
 
-    python3 scripts/seed-demo.py local/analytics.db [local/projects.json]
+    python3 scripts/seed-demo.py local/twillingate.db [local/projects.json]
 """
 
 import datetime

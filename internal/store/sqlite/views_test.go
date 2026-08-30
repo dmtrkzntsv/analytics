@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dmitry/analytics/internal/store"
+	"github.com/dmtrkzntsv/twillingate/internal/store"
 )
 
 // The invariant that makes Evidence dashboards boundary-free (spec §8.1):

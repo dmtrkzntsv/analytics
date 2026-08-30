@@ -13,10 +13,10 @@ import (
 
 	"log/slog"
 
-	"github.com/dmitry/analytics/internal/config/configtest"
-	"github.com/dmitry/analytics/internal/manage"
-	"github.com/dmitry/analytics/internal/store"
-	_ "github.com/dmitry/analytics/internal/store/sqlite"
+	"github.com/dmtrkzntsv/twillingate/internal/config/configtest"
+	"github.com/dmtrkzntsv/twillingate/internal/manage"
+	"github.com/dmtrkzntsv/twillingate/internal/store"
+	_ "github.com/dmtrkzntsv/twillingate/internal/store/sqlite"
 	_ "modernc.org/sqlite"
 )
 

@@ -9,8 +9,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/dmitry/analytics/internal/app"
-	"github.com/dmitry/analytics/internal/config"
+	"github.com/dmtrkzntsv/twillingate/internal/app"
+	"github.com/dmtrkzntsv/twillingate/internal/config"
 )
 
 func init() {

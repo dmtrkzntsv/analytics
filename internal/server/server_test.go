@@ -12,12 +12,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dmitry/analytics/internal/config"
-	"github.com/dmitry/analytics/internal/config/configtest"
-	"github.com/dmitry/analytics/internal/geo"
-	"github.com/dmitry/analytics/internal/manage"
-	"github.com/dmitry/analytics/internal/store"
-	_ "github.com/dmitry/analytics/internal/store/sqlite"
+	"github.com/dmtrkzntsv/twillingate/internal/config"
+	"github.com/dmtrkzntsv/twillingate/internal/config/configtest"
+	"github.com/dmtrkzntsv/twillingate/internal/geo"
+	"github.com/dmtrkzntsv/twillingate/internal/manage"
+	"github.com/dmtrkzntsv/twillingate/internal/store"
+	_ "github.com/dmtrkzntsv/twillingate/internal/store/sqlite"
 )
 
 type fakeQueue struct {

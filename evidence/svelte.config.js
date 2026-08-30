@@ -25,8 +25,8 @@ function projectRoot() {
 
 function databaseFile() {
 	const root = projectRoot();
-	const sourceDir = path.join(root, 'sources', 'analytics');
-	let filename = process.env.EVIDENCE_SOURCE__analytics__filename;
+	const sourceDir = path.join(root, 'sources', 'twillingate');
+	let filename = process.env.EVIDENCE_SOURCE__twillingate__filename;
 	if (!filename) {
 		// Minimal read of the one key we need out of connection.yaml.
 		const yaml = fs.readFileSync(path.join(sourceDir, 'connection.yaml'), 'utf8');

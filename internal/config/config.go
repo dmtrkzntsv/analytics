@@ -1,7 +1,7 @@
 // Package config loads infra settings from the process environment
 // (12-factor; systemd/compose/make load the env *file*, the process reads
 // real env vars). It no longer reads any file: the project list lives in
-// the registry (internal/manage), seeded once via `analytics config
+// the registry (internal/manage), seeded once via `twillingate config
 // import` from the legacy projects.json format.
 // stdlib only: encoding/json + net/url for DSN scheme checks.
 package config
@@ -69,7 +69,7 @@ type ProductAggregation struct {
 // rather than deleted: retirement is reversible during a botched rollout
 // without regenerating and redistributing.
 //
-// Legacy projects.json format, used only by `analytics config import`.
+// Legacy projects.json format, used only by `twillingate config import`.
 type IngestKey struct {
 	Key      string `json:"key"`
 	Label    string `json:"label"`
@@ -266,7 +266,7 @@ func parse(lookup func(string) (string, bool), dashboards bool) (*Config, error)
 
 // ParseProjects reads a projects.json: a bare JSON array of projects.
 //
-// Legacy projects.json format, used only by `analytics config import`.
+// Legacy projects.json format, used only by `twillingate config import`.
 func ParseProjects(r io.Reader) ([]Project, error) {
 	var ps []Project
 	dec := json.NewDecoder(r)
@@ -310,7 +310,7 @@ func (c *Config) ValidateMCP() error {
 	switch m.AuthMode {
 	case "token":
 		if m.Token == "" {
-			return fmt.Errorf("config: MCP_AUTH_MODE=token requires MCP_TOKEN (mint with `analytics keygen -mcp`)")
+			return fmt.Errorf("config: MCP_AUTH_MODE=token requires MCP_TOKEN (mint with `twillingate keygen -mcp`)")
 		}
 	case "oauth":
 		if m.Issuer == "" {

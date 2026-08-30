@@ -5,22 +5,22 @@
 #
 # If you want to override any defaults, put a `.env` next to this file.
 # Projects live in the database now: after `up -d`, create one with
-#   docker compose exec analytics analytics project create -alias myapp
+#   docker compose exec twillingate twillingate project create -alias myapp
 # then issue a key with
-#   docker compose exec analytics analytics key issue -project myapp -label web
+#   docker compose exec twillingate twillingate key issue -project myapp -label web
 #
 # The image's default CMD is `serve`, which runs ingestion and — once
 # MCP_AUTH_MODE (plus its mode's other variables) is set in `.env` — the
 # MCP endpoint too; unconfigured, MCP is skipped with a logged warning.
 # See the README's MCP section and docs/mcp-auth.md.
 services:
-  analytics:
-    image: ghcr.io/dmtrkzntsv/analytics:${ANALYTICS_VERSION:-latest}
+  twillingate:
+    image: ghcr.io/dmtrkzntsv/twillingate:${TWILLINGATE_VERSION:-latest}
     restart: unless-stopped
     ports:
       - "8080:8080"          # put Caddy/nginx/Cloudflare in front for TLS
     volumes:
-      - data:/var/lib/analytics
+      - data:/var/lib/twillingate
     env_file:
       - path: .env
         required: false
@@ -28,7 +28,7 @@ services:
       - GOMEMLIMIT=128MiB
 
   dashboards:
-    image: ghcr.io/dmtrkzntsv/analytics-evidence:${ANALYTICS_VERSION:-latest}
+    image: ghcr.io/dmtrkzntsv/twillingate-evidence:${TWILLINGATE_VERSION:-latest}
     restart: unless-stopped
     ports:
       - "3000:3000"
@@ -36,12 +36,12 @@ services:
     # -shm file, so a :ro mount can fail to open a live database. The process
     # only ever reads, and it renders a private snapshot rather than this file.
     volumes:
-      - data:/var/lib/analytics
+      - data:/var/lib/twillingate
     env_file:
       - path: .env
         required: false
     environment:
-      - DASHBOARDS_DB_PATH=/var/lib/analytics/analytics.db
+      - DASHBOARDS_DB_PATH=/var/lib/twillingate/twillingate.db
 
 volumes:
   data:

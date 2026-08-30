@@ -12,7 +12,7 @@
 select day, visitors, pageviews, sessions,
        case when sessions > 0 then bounces * 1.0 / sessions else 0 end as bounce_rate,
        case when sessions > 0 then duration_sec * 1.0 / sessions else 0 end as avg_session_sec
-from analytics.v_web_daily
+from twillingate.v_web_daily
 where project = '${params.project}'
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')
@@ -23,7 +23,7 @@ order by day
 select sum(visitors) as visitors, sum(pageviews) as pageviews, sum(sessions) as sessions,
        case when sum(sessions) > 0 then sum(bounces) * 1.0 / sum(sessions) else 0 end as bounce_rate,
        case when sum(sessions) > 0 then sum(duration_sec) * 1.0 / sum(sessions) else 0 end as avg_session_sec
-from analytics.v_web_daily
+from twillingate.v_web_daily
 where project = '${params.project}'
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')
@@ -46,7 +46,7 @@ where project = '${params.project}'
 ```sql pages
 select path, sum(visitors) as visitors, sum(pageviews) as pageviews,
        '/web/${params.project}/page?path=' || path as detail_url
-from analytics.v_web_pages
+from twillingate.v_web_pages
 where project = '${params.project}'
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')
@@ -55,7 +55,7 @@ group by path order by pageviews desc limit 20
 
 ```sql referrers
 select source, sum(visitors) as visitors, sum(pageviews) as pageviews
-from analytics.v_web_referrers
+from twillingate.v_web_referrers
 where project = '${params.project}'
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')
@@ -76,7 +76,7 @@ group by source order by visitors desc limit 20
 
 ```sql countries
 select country, sum(visitors) as visitors
-from analytics.v_web_countries
+from twillingate.v_web_countries
 where project = '${params.project}'
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')
@@ -85,7 +85,7 @@ group by country order by visitors desc limit 20
 ```
 
 ```sql devices
-select device, sum(visitors) as visitors from analytics.v_web_devices
+select device, sum(visitors) as visitors from twillingate.v_web_devices
 where project = '${params.project}'
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')
@@ -94,7 +94,7 @@ group by device order by visitors desc
 ```
 
 ```sql browsers
-select browser, sum(visitors) as visitors from analytics.v_web_browsers
+select browser, sum(visitors) as visitors from twillingate.v_web_browsers
 where project = '${params.project}'
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')
@@ -103,7 +103,7 @@ group by browser order by visitors desc limit 10
 ```
 
 ```sql oses
-select os, sum(visitors) as visitors from analytics.v_web_os
+select os, sum(visitors) as visitors from twillingate.v_web_os
 where project = '${params.project}'
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')
@@ -125,7 +125,7 @@ group by os order by visitors desc limit 10
 
 ```sql campaigns
 select utm_source, utm_medium, utm_campaign, sum(visitors) as visitors, sum(pageviews) as pageviews
-from analytics.v_web_utm
+from twillingate.v_web_utm
 where project = '${params.project}'
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')

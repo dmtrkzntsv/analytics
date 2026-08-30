@@ -9,9 +9,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/dmitry/analytics/internal/app"
-	"github.com/dmitry/analytics/internal/config"
-	"github.com/dmitry/analytics/internal/dashboards"
+	"github.com/dmtrkzntsv/twillingate/internal/app"
+	"github.com/dmtrkzntsv/twillingate/internal/config"
+	"github.com/dmtrkzntsv/twillingate/internal/dashboards"
 )
 
 func init() {

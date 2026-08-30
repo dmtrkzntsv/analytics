@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dmitry/analytics/internal/store"
+	"github.com/dmtrkzntsv/twillingate/internal/store"
 )
 
 func ts(s string) time.Time {

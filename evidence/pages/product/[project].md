@@ -10,7 +10,7 @@
 
 ```sql totals
 select day, total_events, active_users
-from analytics.v_product_totals
+from twillingate.v_product_totals
 where project = '${params.project}'
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')
@@ -20,7 +20,7 @@ order by day
 ```sql headline
 select sum(total_events) as total_events, max(active_users) as peak_dau,
        avg(active_users) as avg_dau
-from analytics.v_product_totals
+from twillingate.v_product_totals
 where project = '${params.project}'
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')
@@ -39,7 +39,7 @@ where project = '${params.project}'
 
 ```sql events
 select day, event_name, count, unique_users
-from analytics.v_product_daily
+from twillingate.v_product_daily
 where project = '${params.project}'
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')
@@ -48,7 +48,7 @@ order by day
 
 ```sql event_summary
 select event_name, sum(count) as total, max(unique_users) as peak_daily_uniques
-from analytics.v_product_daily
+from twillingate.v_product_daily
 where project = '${params.project}'
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')
@@ -70,7 +70,7 @@ group by event_name order by total desc
 
 ```sql attr_breakdowns
 select day, event_name, attr_key, attr_value, count, unique_users
-from analytics.agg_product_attrs
+from twillingate.agg_product_attrs
 where project = '${params.project}'
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')

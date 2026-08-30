@@ -1,5 +1,5 @@
 # Refresh the local replica every five minutes. Install with:
-#   sudo cp restore.cron /etc/cron.d/analytics-restore
+#   sudo cp restore.cron /etc/cron.d/twillingate-restore
 # Adjust the paths and the user, and keep the trailing newline: cron ignores
 # a last line without one.
-*/5 * * * * analytics SOURCE_DB=/var/lib/analytics/analytics.db REPLICA_PATH=/var/lib/analytics/replica.db /usr/local/bin/restore.sh >> /var/log/analytics-restore.log 2>&1
+*/5 * * * * twillingate SOURCE_DB=/var/lib/twillingate/twillingate.db REPLICA_PATH=/var/lib/twillingate/replica.db /usr/local/bin/restore.sh >> /var/log/twillingate-restore.log 2>&1

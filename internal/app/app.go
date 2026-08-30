@@ -11,16 +11,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dmitry/analytics/internal/config"
-	"github.com/dmitry/analytics/internal/geo"
-	"github.com/dmitry/analytics/internal/identity"
-	"github.com/dmitry/analytics/internal/jobs"
-	"github.com/dmitry/analytics/internal/manage"
-	"github.com/dmitry/analytics/internal/mcpserver"
-	"github.com/dmitry/analytics/internal/pipeline"
-	"github.com/dmitry/analytics/internal/server"
-	"github.com/dmitry/analytics/internal/store"
-	_ "github.com/dmitry/analytics/internal/store/sqlite"
+	"github.com/dmtrkzntsv/twillingate/internal/config"
+	"github.com/dmtrkzntsv/twillingate/internal/geo"
+	"github.com/dmtrkzntsv/twillingate/internal/identity"
+	"github.com/dmtrkzntsv/twillingate/internal/jobs"
+	"github.com/dmtrkzntsv/twillingate/internal/manage"
+	"github.com/dmtrkzntsv/twillingate/internal/mcpserver"
+	"github.com/dmtrkzntsv/twillingate/internal/pipeline"
+	"github.com/dmtrkzntsv/twillingate/internal/server"
+	"github.com/dmtrkzntsv/twillingate/internal/store"
+	_ "github.com/dmtrkzntsv/twillingate/internal/store/sqlite"
 )
 
 func NewLogger(cfg config.LogConfig) *slog.Logger {
@@ -59,7 +59,7 @@ type httpSurface struct {
 
 // Serve runs the requested surfaces (api: ingestion, mcpOn: the MCP
 // endpoint) until ctx is cancelled or a listener fails. At least one of
-// api/mcpOn must be true; the caller (cmd/analytics) enforces that as a
+// api/mcpOn must be true; the caller (cmd/twillingate) enforces that as a
 // usage error before reaching here.
 //
 // Store/registry/geo/pipeline/jobs setup runs regardless of which surfaces
@@ -86,7 +86,7 @@ func Serve(ctx context.Context, cfg *config.Config, logger *slog.Logger, api, mc
 		return err
 	}
 	if len(reg.Snapshot(ctx).Projects()) == 0 {
-		logger.Warn("no projects configured; create one with `analytics project create` or an MCP management tool")
+		logger.Warn("no projects configured; create one with `twillingate project create` or an MCP management tool")
 	}
 	warnLegacyProjectsFile(cfg, logger)
 
@@ -244,17 +244,17 @@ func databasePath(dsn string) string {
 // warnLegacyProjectsFile warns once at boot when a pre-upgrade PROJECTS_FILE
 // (or the installer's default projects.json path) is still present: the
 // registry is now the sole source of project config, so the file is no
-// longer read and needs a one-time `analytics config import`. cfg is
+// longer read and needs a one-time `twillingate config import`. cfg is
 // unused today but kept in the signature so a future per-install override
 // does not need to change every call site; split out from Serve so the
 // warning is unit-testable without booting a full server.
 func warnLegacyProjectsFile(cfg *config.Config, logger *slog.Logger) {
 	if legacy := os.Getenv("PROJECTS_FILE"); legacy != "" {
-		logger.Warn("PROJECTS_FILE is no longer read; import it once with `analytics config import`", "file", legacy)
+		logger.Warn("PROJECTS_FILE is no longer read; import it once with `twillingate config import`", "file", legacy)
 		return
 	}
 	if _, err := os.Stat("/etc/analytics/projects.json"); err == nil {
-		logger.Warn("projects.json found but no longer read; import it once with `analytics config import /etc/analytics/projects.json`")
+		logger.Warn("projects.json found but no longer read; import it once with `twillingate config import /etc/analytics/projects.json`")
 	}
 }
 

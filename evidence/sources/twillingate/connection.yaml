@@ -1,8 +1,8 @@
-name: analytics
+name: twillingate
 type: sqlite
 options:
   # The sqlite plugin resolves this with path.join(<source dir>, filename), so
-  # an absolute path would be rewritten to sources/analytics/data/... Keep it
+  # an absolute path would be rewritten to sources/twillingate/data/... Keep it
   # relative to this directory: ../../.. is the container's filesystem root
   # when the Evidence project lives at /app.
-  filename: ../../../data/analytics.db   # overridden by EVIDENCE_SOURCE__analytics__filename
+  filename: ../../../data/twillingate.db   # overridden by EVIDENCE_SOURCE__twillingate__filename

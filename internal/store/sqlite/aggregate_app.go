@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dmitry/analytics/internal/civil"
+	"github.com/dmtrkzntsv/twillingate/internal/civil"
 )
 
 // topNDimension caps client-supplied free-string dimensions per day; the

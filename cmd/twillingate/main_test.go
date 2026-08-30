@@ -12,8 +12,8 @@ func TestVersionSubcommand(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
-	if !strings.HasPrefix(out.String(), "analytics ") {
-		t.Fatalf("output = %q, want prefix 'analytics '", out.String())
+	if !strings.HasPrefix(out.String(), "twillingate ") {
+		t.Fatalf("output = %q, want prefix 'twillingate '", out.String())
 	}
 }
 

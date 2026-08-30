@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/dmitry/analytics/internal/manage"
+	"github.com/dmtrkzntsv/twillingate/internal/manage"
 )
 
 func init() { commands["key"] = cmdKey }
@@ -20,7 +20,7 @@ func cmdKey(args []string, stdout io.Writer) int {
 	}
 	rest := fs.Args()
 	if len(rest) == 0 {
-		fmt.Fprintln(stdout, "usage: analytics key <issue|list|disable|enable> [flags]")
+		fmt.Fprintln(stdout, "usage: twillingate key <issue|list|disable|enable> [flags]")
 		return 2
 	}
 	ops, cfg, closeStore, code := openOps(stdout, *envFile)
@@ -46,7 +46,7 @@ func cmdKey(args []string, stdout io.Writer) int {
 		}
 		p := ops.Reg.Snapshot(ctx).Project(*project)
 		if p == nil {
-			fmt.Fprintf(stdout, "issued %s (label %q) but project %q vanished before the snippet could be built; run `analytics key list` to confirm\n", key, *label, *project)
+			fmt.Fprintf(stdout, "issued %s (label %q) but project %q vanished before the snippet could be built; run `twillingate key list` to confirm\n", key, *label, *project)
 			return 1
 		}
 		fmt.Fprintf(stdout, "issued %s (label %q)\n\nWeb snippet:\n\n%s\n",
@@ -88,7 +88,7 @@ func cmdKey(args []string, stdout io.Writer) int {
 		fmt.Fprintf(stdout, "key %s/%s %sd\n", *project, *label, sub)
 		return 0
 	default:
-		fmt.Fprintf(stdout, "unknown subcommand %q\nusage: analytics key <issue|list|disable|enable> [flags]\n", sub)
+		fmt.Fprintf(stdout, "unknown subcommand %q\nusage: twillingate key <issue|list|disable|enable> [flags]\n", sub)
 		return 2
 	}
 }

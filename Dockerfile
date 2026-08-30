@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1
 #
 # Two published targets from one file:
-#   --target runtime  → analytics            (serve, migrate, version)
-#   --target evidence → analytics-evidence   (dashboards)
+#   --target runtime  → twillingate            (serve, migrate, version)
+#   --target evidence → twillingate-evidence   (dashboards)
 #
 # The ingestion image is the internet-facing one and carries nothing but the
 # binary. Evidence needs a Node toolchain at *runtime* — it is a static site
@@ -27,7 +27,7 @@ ARG TARGETVARIANT
 # GOARM takes the bare number ("7"), TARGETVARIANT the tag form ("v7").
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GOARM=${TARGETVARIANT#v} \
     go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
-    -o /out/analytics ./cmd/analytics
+    -o /out/twillingate ./cmd/twillingate
 
 # @evidence-dev/sqlite depends on node-gyp's sqlite3, which publishes no musl
 # prebuilds and therefore compiles here. Keyed on the lockfile so editing a
@@ -43,49 +43,49 @@ RUN npm ci
 COPY evidence/ ./
 
 FROM alpine:3.20 AS runtime
-RUN apk add --no-cache ca-certificates tzdata && adduser -D -H -u 10001 analytics
-COPY --from=go-build /out/analytics /usr/local/bin/analytics
+RUN apk add --no-cache ca-certificates tzdata && adduser -D -H -u 10001 twillingate
+COPY --from=go-build /out/twillingate /usr/local/bin/twillingate
 # Docker seeds a fresh named volume from the image directory, ownership
 # included. Without this the volume mounts root-owned and the non-root
 # process cannot create the database file on first boot.
-RUN mkdir -p /var/lib/analytics && chown analytics:analytics /var/lib/analytics
-VOLUME ["/var/lib/analytics"]
-USER analytics
+RUN mkdir -p /var/lib/twillingate && chown twillingate:twillingate /var/lib/twillingate
+VOLUME ["/var/lib/twillingate"]
+USER twillingate
 # Container defaults; override per-deployment via compose env_file/environment.
 # LISTEN_ADDR binds all interfaces here (unlike the bare-metal loopback
 # default) because published ports reach the container's own IP, not lo.
 ENV LISTEN_ADDR=0.0.0.0:8080 \
-    DATABASE_URL=sqlite:///var/lib/analytics/analytics.db
-ENTRYPOINT ["/usr/local/bin/analytics"]
+    DATABASE_URL=sqlite:///var/lib/twillingate/twillingate.db
+ENTRYPOINT ["/usr/local/bin/twillingate"]
 CMD ["serve"]
 
 FROM node:22-alpine AS evidence
-RUN apk add --no-cache ca-certificates tzdata && adduser -D -H -u 10001 analytics
-COPY --from=go-build /out/analytics /usr/local/bin/analytics
+RUN apk add --no-cache ca-certificates tzdata && adduser -D -H -u 10001 twillingate
+COPY --from=go-build /out/twillingate /usr/local/bin/twillingate
 # Evidence writes .evidence/ and build/ inside the project, and the snapshot
 # lands in the work directory; both must be writable by the non-root user.
 # Ownership is set by COPY: a `chown -R` afterwards would write a second,
 # full-size copy of the tree into its own layer and double the image.
-COPY --from=evidence-build --chown=analytics:analytics /opt/evidence /opt/evidence
+COPY --from=evidence-build --chown=twillingate:twillingate /opt/evidence /opt/evidence
 # DuckDB-wasm caches its autoloaded extensions under $HOME. The user has no
 # home directory of its own, and without a writable one the parquet extension
 # fails to install — leaving `evidence sources` to exit 0 having written no
 # tables at all, so the build fails later with "Table does not exist".
 ENV HOME=/opt/evidence/.home
-RUN install -d -o analytics -g analytics /var/lib/dashboards "$HOME"
-USER analytics
+RUN install -d -o twillingate -g twillingate /var/lib/dashboards "$HOME"
+USER twillingate
 # Warm the extension cache against the real schema. This turns a runtime
 # dependency on extensions.duckdb.org into a build-time one, and fails the
 # image build — rather than a deployment — if a source query does not match
 # the migrations.
 RUN set -eu; \
-    DATABASE_URL=sqlite:///tmp/warm.db analytics migrate; \
+    DATABASE_URL=sqlite:///tmp/warm.db twillingate migrate; \
     cd /opt/evidence; \
-    EVIDENCE_SOURCE__analytics__filename=../../../../tmp/warm.db npm run sources; \
+    EVIDENCE_SOURCE__twillingate__filename=../../../../tmp/warm.db npm run sources; \
     rm -f /tmp/warm.db
 ENV DASHBOARDS_ADDR=0.0.0.0:3000 \
     DASHBOARDS_PROJECT_DIR=/opt/evidence \
     DASHBOARDS_WORK_DIR=/var/lib/dashboards \
-    DATABASE_URL=sqlite:///var/lib/analytics/analytics.db
-ENTRYPOINT ["/usr/local/bin/analytics"]
+    DATABASE_URL=sqlite:///var/lib/twillingate/twillingate.db
+ENTRYPOINT ["/usr/local/bin/twillingate"]
 CMD ["dashboards"]

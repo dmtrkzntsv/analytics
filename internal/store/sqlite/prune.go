@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/dmitry/analytics/internal/civil"
+	"github.com/dmtrkzntsv/twillingate/internal/civil"
 )
 
 // webAggTables and productAggTables must list every agg_* table in the schema;

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/dmitry/analytics/internal/store"
+	"github.com/dmtrkzntsv/twillingate/internal/store"
 )
 
 // openRegistryDB creates a migrated store in t.TempDir. Mirrors the

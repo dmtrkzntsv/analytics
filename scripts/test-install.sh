@@ -6,7 +6,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-[ -x analytics ] || { echo "run 'make build' first"; exit 1; }
+[ -x twillingate ] || { echo "run 'make build' first"; exit 1; }
 command -v docker > /dev/null || { echo "docker is required"; exit 1; }
 
 docker run --rm -v "$PWD:/src:ro" debian:bookworm-slim \

@@ -10,7 +10,7 @@ cd "$(dirname "$0")/.."
 command -v docker > /dev/null || { echo "docker is required"; exit 1; }
 
 dir="$(mktemp -d)"
-project="analytics-composetest-$$"
+project="twillingate-composetest-$$"
 cleanup() {
   docker compose -p "$project" -f "$dir/docker-compose.yml" down -v > /dev/null 2>&1 || true
   rm -rf "$dir"
@@ -20,14 +20,14 @@ trap cleanup EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 echo "building images..."
-docker build --target runtime -t analytics:composetest . > /dev/null
-docker build --target evidence -t analytics-evidence:composetest . > /dev/null
+docker build --target runtime -t twillingate:composetest . > /dev/null
+docker build --target evidence -t twillingate-evidence:composetest . > /dev/null
 
 # The compose file names published images; the test substitutes the ones it
 # just built so it exercises this working tree rather than the registry.
-# shellcheck disable=SC2016  # the ${ANALYTICS_VERSION} text is matched, not expanded
-sed -e 's|ghcr.io/dmtrkzntsv/analytics:${ANALYTICS_VERSION:-latest}|analytics:composetest|' \
-    -e 's|ghcr.io/dmtrkzntsv/analytics-evidence:${ANALYTICS_VERSION:-latest}|analytics-evidence:composetest|' \
+# shellcheck disable=SC2016  # the ${TWILLINGATE_VERSION} text is matched, not expanded
+sed -e 's|ghcr.io/dmtrkzntsv/twillingate:${TWILLINGATE_VERSION:-latest}|twillingate:composetest|' \
+    -e 's|ghcr.io/dmtrkzntsv/twillingate-evidence:${TWILLINGATE_VERSION:-latest}|twillingate-evidence:composetest|' \
     -e 's|"8080:8080"|"18080:8080"|' \
     -e 's|"3000:3000"|"13000:3000"|' \
     deploy/compose/docker-compose.yml > "$dir/docker-compose.yml"
@@ -43,11 +43,11 @@ done
 # Projects live in the database now: seed one through the CLI inside the
 # running container instead of mounting a projects.json.
 echo "creating project via the CLI..."
-docker compose -p "$project" -f "$dir/docker-compose.yml" exec -T analytics \
-  /usr/local/bin/analytics project create -alias dev -name Dev -origin "http://localhost:18080" \
+docker compose -p "$project" -f "$dir/docker-compose.yml" exec -T twillingate \
+  /usr/local/bin/twillingate project create -alias dev -name Dev -origin "http://localhost:18080" \
   || fail "project create failed"
-key="$(docker compose -p "$project" -f "$dir/docker-compose.yml" exec -T analytics \
-  /usr/local/bin/analytics key issue -project dev -label web | grep -o 'ak_[0-9a-f]*' | head -1)"
+key="$(docker compose -p "$project" -f "$dir/docker-compose.yml" exec -T twillingate \
+  /usr/local/bin/twillingate key issue -project dev -label web | grep -o 'ak_[0-9a-f]*' | head -1)"
 [ -n "$key" ] || fail "key issue failed"
 
 # curl's default User-Agent is classified as a bot and the pageview would be

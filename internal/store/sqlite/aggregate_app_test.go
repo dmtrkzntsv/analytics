@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dmitry/analytics/internal/civil"
-	"github.com/dmitry/analytics/internal/store"
+	"github.com/dmtrkzntsv/twillingate/internal/civil"
+	"github.com/dmtrkzntsv/twillingate/internal/store"
 )
 
 func appDay() civil.Date { return civil.Date{Year: 2026, Month: time.August, Day: 23} }

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dmitry/analytics/internal/civil"
-	"github.com/dmitry/analytics/internal/store"
+	"github.com/dmtrkzntsv/twillingate/internal/civil"
+	"github.com/dmtrkzntsv/twillingate/internal/store"
 )
 
 // DaysBefore drives the aggregation scheduler: it decides which days still

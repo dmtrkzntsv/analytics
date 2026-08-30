@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 
-	"github.com/dmitry/analytics/internal/config"
+	"github.com/dmtrkzntsv/twillingate/internal/config"
 )
 
 // execCommand is a seam so tests can stand in for npm.
@@ -46,7 +46,7 @@ func (b *Builder) Build(ctx context.Context) error {
 	for _, script := range []string{"sources", "build"} {
 		cmd := execCommand(ctx, "npm", "run", script)
 		cmd.Dir = b.cfg.ProjectDir
-		cmd.Env = append(os.Environ(), "EVIDENCE_SOURCE__analytics__filename="+filename)
+		cmd.Env = append(os.Environ(), "EVIDENCE_SOURCE__twillingate__filename="+filename)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("dashboards: npm run %s: %w (%s)", script, err, out)
 		}

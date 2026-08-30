@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dmitry/analytics/internal/config"
+	"github.com/dmtrkzntsv/twillingate/internal/config"
 )
 
 // stubNPM replaces the npm exec. The success form writes the build directory
@@ -31,7 +31,7 @@ func stubNPM(t *testing.T, fail bool) *int {
 		if fail {
 			return exec.CommandContext(ctx, "false")
 		}
-		script := "mkdir -p build && printf '%s' \"$EVIDENCE_SOURCE__analytics__filename\" > build/index.html"
+		script := "mkdir -p build && printf '%s' \"$EVIDENCE_SOURCE__twillingate__filename\" > build/index.html"
 		return exec.CommandContext(ctx, "sh", "-c", script)
 	}
 	t.Cleanup(func() { execCommand = old })
@@ -117,7 +117,7 @@ func TestBuildPassesTheComputedSourcePathToEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	if string(body) != want {
-		t.Errorf("EVIDENCE_SOURCE__analytics__filename = %q, want %q", body, want)
+		t.Errorf("EVIDENCE_SOURCE__twillingate__filename = %q, want %q", body, want)
 	}
 }
 

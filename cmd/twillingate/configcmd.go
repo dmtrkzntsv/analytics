@@ -19,7 +19,7 @@ func cmdConfig(args []string, stdout io.Writer) int {
 	}
 	rest := fs.Args()
 	if len(rest) == 0 {
-		fmt.Fprintln(stdout, "usage: analytics config <import FILE|export>")
+		fmt.Fprintln(stdout, "usage: twillingate config <import FILE|export>")
 		return 2
 	}
 	ops, _, closeStore, code := openOps(stdout, *envFile)
@@ -37,7 +37,7 @@ func cmdConfig(args []string, stdout io.Writer) int {
 		return 0
 	case "import":
 		if len(rest) != 2 {
-			fmt.Fprintln(stdout, "usage: analytics config import FILE")
+			fmt.Fprintln(stdout, "usage: twillingate config import FILE")
 			return 2
 		}
 		f, err := os.Open(rest[1])
@@ -55,7 +55,7 @@ func cmdConfig(args []string, stdout io.Writer) int {
 			res.Created, res.Updated, res.KeysAdded)
 		return 0
 	default:
-		fmt.Fprintf(stdout, "unknown subcommand %q\nusage: analytics config <import FILE|export>\n", rest[0])
+		fmt.Fprintf(stdout, "unknown subcommand %q\nusage: twillingate config <import FILE|export>\n", rest[0])
 		return 2
 	}
 }

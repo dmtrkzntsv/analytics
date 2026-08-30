@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/dmitry/analytics/internal/config"
-	"github.com/dmitry/analytics/internal/manage"
+	"github.com/dmtrkzntsv/twillingate/internal/config"
+	"github.com/dmtrkzntsv/twillingate/internal/manage"
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
@@ -28,7 +28,7 @@ func Build(ctx context.Context, cfg *config.Config, reg *manage.Registry, ops *m
 	h := &host{db: db, reg: reg, ops: ops,
 		timeout: cfg.MCP.QueryTimeout, maxRows: cfg.MCP.QueryMaxRows,
 		publicURL: cfg.PublicURL, logger: logger}
-	srv := mcp.NewServer(&mcp.Implementation{Name: "analytics", Version: "1.0.0"}, nil)
+	srv := mcp.NewServer(&mcp.Implementation{Name: "twillingate", Version: "1.0.0"}, nil)
 	h.register(srv)
 	h.registerResources(srv)
 	streamable := mcp.NewStreamableHTTPHandler(

@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dmitry/analytics/internal/store"
+	"github.com/dmtrkzntsv/twillingate/internal/store"
 )
 
 const tsFormat = "2006-01-02T15:04:05Z"

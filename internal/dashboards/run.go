@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dmitry/analytics/internal/config"
+	"github.com/dmtrkzntsv/twillingate/internal/config"
 )
 
 // pollInterval is how often the database is stat-ed. It is deliberately not

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/dmitry/analytics/internal/manage"
+	"github.com/dmtrkzntsv/twillingate/internal/manage"
 )
 
 func init() {
@@ -56,7 +56,7 @@ func runKeygen(args []string, stdout io.Writer) int {
 		keys[i] = "ak_" + hex.EncodeToString(buf)
 	}
 
-	fmt.Fprintln(stdout, "note: prefer 'analytics key issue', which registers the key as it mints it")
+	fmt.Fprintln(stdout, "note: prefer 'twillingate key issue', which registers the key as it mints it")
 	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, "Add to projects.json:")
 	fmt.Fprintln(stdout)

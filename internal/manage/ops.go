@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/dmitry/analytics/internal/config"
-	"github.com/dmitry/analytics/internal/store"
+	"github.com/dmtrkzntsv/twillingate/internal/config"
+	"github.com/dmtrkzntsv/twillingate/internal/store"
 )
 
 // Ops are the audited registry operations. Every mutation writes its
@@ -202,7 +202,7 @@ func mint(prefix string, n int) (string, error) {
 const SnippetPlaceholderBase = "https://analytics.example.com"
 
 // Snippet renders the paste-ready embed tag returned by create_project,
-// issue_ingest_key and `analytics key issue`. base is the COLLECTOR's
+// issue_ingest_key and `twillingate key issue`. base is the COLLECTOR's
 // public URL (script.js and /api/events live there) — never the
 // customer's site origin.
 func Snippet(base, key, identity string) string {

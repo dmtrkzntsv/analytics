@@ -14,7 +14,7 @@ identifiers are salted.
 
 ```sql groups_daily
 select day, count(distinct id) as active_groups
-from analytics.v_identity_daily
+from twillingate.v_identity_daily
 where project = '${params.project}' and kind = 'group' and id != ''
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')
@@ -23,7 +23,7 @@ group by day order by day
 
 ```sql groups_totals
 select count(distinct id) as groups, sum(hits + views + events) as actions
-from analytics.v_identity_daily
+from twillingate.v_identity_daily
 where project = '${params.project}' and kind = 'group' and id != ''
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')
@@ -35,8 +35,8 @@ select coalesce(i.name, d.id) as name,
        sum(d.hits + d.views + d.events) as actions,
        count(distinct d.day) as active_days,
        max(d.day) as last_seen
-from analytics.v_identity_daily d
-left join analytics.identities i
+from twillingate.v_identity_daily d
+left join twillingate.identities i
   on i.project = d.project and i.kind = 'group' and i.id = d.id
 where d.project = '${params.project}' and d.kind = 'group' and d.id != ''
   and d.day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')

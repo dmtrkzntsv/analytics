@@ -9,11 +9,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/dmitry/analytics/internal/app"
-	"github.com/dmitry/analytics/internal/config"
-	"github.com/dmitry/analytics/internal/manage"
-	"github.com/dmitry/analytics/internal/store"
-	_ "github.com/dmitry/analytics/internal/store/sqlite"
+	"github.com/dmtrkzntsv/twillingate/internal/app"
+	"github.com/dmtrkzntsv/twillingate/internal/config"
+	"github.com/dmtrkzntsv/twillingate/internal/manage"
+	"github.com/dmtrkzntsv/twillingate/internal/store"
+	_ "github.com/dmtrkzntsv/twillingate/internal/store/sqlite"
 )
 
 func init() { commands["project"] = cmdProject }
@@ -94,7 +94,7 @@ func cmdProject(args []string, stdout io.Writer) int {
 	}
 	rest := fs.Args()
 	if len(rest) == 0 {
-		fmt.Fprintln(stdout, "usage: analytics project <create|update|list|archive|restore|delete> [flags]")
+		fmt.Fprintln(stdout, "usage: twillingate project <create|update|list|archive|restore|delete> [flags]")
 		return 2
 	}
 	ops, _, closeStore, code := openOps(stdout, *envFile)
@@ -165,7 +165,7 @@ func cmdProject(args []string, stdout io.Writer) int {
 			return 1
 		}
 		fmt.Fprintf(stdout, "project %q %sd\n", p.Alias, sub)
-		fmt.Fprintln(stdout, "next: analytics key issue -project", p.Alias, "-label web")
+		fmt.Fprintln(stdout, "next: twillingate key issue -project", p.Alias, "-label web")
 		return 0
 	case "list":
 		s := ops.Reg.Snapshot(ctx)
@@ -216,7 +216,7 @@ func cmdProject(args []string, stdout io.Writer) int {
 		fmt.Fprintf(stdout, "project %q deleted\n", *alias)
 		return 0
 	default:
-		fmt.Fprintf(stdout, "unknown subcommand %q\nusage: analytics project <create|update|list|archive|restore|delete> [flags]\n", sub)
+		fmt.Fprintf(stdout, "unknown subcommand %q\nusage: twillingate project <create|update|list|archive|restore|delete> [flags]\n", sub)
 		return 2
 	}
 }

@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dmitry/analytics/internal/config"
-	"github.com/dmitry/analytics/internal/enrich"
-	"github.com/dmitry/analytics/internal/identity"
-	"github.com/dmitry/analytics/internal/manage"
-	"github.com/dmitry/analytics/internal/store"
+	"github.com/dmtrkzntsv/twillingate/internal/config"
+	"github.com/dmtrkzntsv/twillingate/internal/enrich"
+	"github.com/dmtrkzntsv/twillingate/internal/identity"
+	"github.com/dmtrkzntsv/twillingate/internal/manage"
+	"github.com/dmtrkzntsv/twillingate/internal/store"
 	"github.com/google/uuid"
 )
 

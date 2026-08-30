@@ -6,8 +6,8 @@ Wants=network-online.target
 [Service]
 User=__USER__
 Group=__USER__
-ExecStart=/usr/local/bin/analytics serve
-EnvironmentFile=/etc/analytics/analytics.env
+ExecStart=/usr/local/bin/twillingate serve
+EnvironmentFile=/etc/twillingate/twillingate.env
 Restart=on-failure
 RestartSec=2
 TimeoutStopSec=30
@@ -16,7 +16,7 @@ Environment=GOMEMLIMIT=128MiB
 # Hardening (spec §11)
 NoNewPrivileges=yes
 ProtectSystem=strict
-ReadWritePaths=/var/lib/analytics
+ReadWritePaths=/var/lib/twillingate
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes

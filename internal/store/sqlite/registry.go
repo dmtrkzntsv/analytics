@@ -9,7 +9,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/dmitry/analytics/internal/store"
+	"github.com/dmtrkzntsv/twillingate/internal/store"
 	"github.com/google/uuid"
 )
 
