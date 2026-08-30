@@ -2,9 +2,13 @@
 dist/
 coverage.out
 *.db
+# docs/ is excluded, so every file docs/embed.go embeds needs an exception
+# here or the image build fails with "no matching files found" while `make
+# build` still passes — the local tree has the file, the build context does not.
 docs/
 !docs/embed.go
 !docs/ingest-api.md
+!docs/plausible/plausible-shim.js
 local/
 evidence/node_modules
 evidence/.evidence
