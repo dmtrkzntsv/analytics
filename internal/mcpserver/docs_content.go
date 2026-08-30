@@ -82,44 +82,57 @@ $referrer, $screen.
 Wire-format details (batching, retries, offline replay, timestamps,
 idempotency): read docs://ingest-api.`
 
-// docsJSSDK documents the shipped browser snippet (internal/server/script.js).
-const docsJSSDK = `# JS SDK (browser snippet)
+// docsJSSDK documents the shipped SDK (sdk/src/twillingate.ts, served as
+// /js/twillingate.js).
+const docsJSSDK = `# JS SDK (twillingate.js)
 
-The collector serves the tracking script itself at /js/script.js. Embed:
+The collector serves the SDK itself at /js/twillingate.js. Two modes:
 
-    <script defer src="https://YOUR-COLLECTOR/js/script.js"
+## Snippet mode (websites)
+
+    <script defer src="https://YOUR-COLLECTOR/js/twillingate.js"
             data-key="ak_..."
             data-identity="anonymous"></script>
 
 (create_project / issue_ingest_key return this snippet with the real key
 and collector URL filled in.)
 
-## Script tag attributes
-
 - data-key (required): the project's ingest key. Public by design.
 - data-identity: "anonymous" (default) or "identified". This mirrors the
   project's server-side setting for visibility; the SERVER enforces the
-  real mode regardless. "identified" additionally authorizes the snippet
+  real mode regardless. "identified" additionally authorizes the SDK
   to persist a visitor id in localStorage — which is consent-relevant
   (ePrivacy: same category as a cookie). Gate the tag on consent.
 - data-user, data-group: set when the page is rendered already knowing who
   is looking at it.
+- data-auto="off": disable automatic pageviews (drive them via page()).
 
-## Behaviour
+Pageviews are automatic on load AND on SPA navigations (history.pushState
+and popstate are hooked) — single-page apps need no extra code.
 
-- Pageviews are sent automatically on load AND on SPA navigations
-  (history.pushState and popstate are hooked) — single-page apps need no
-  extra code.
-- The snippet is silent on localhost, file:// URLs and automated browsers.
-- Opt out a device with: localStorage.analytics_ignore = "true"
-- Transport uses sendBeacon (survives page unload); the key travels in the
-  JSON body because beacons cannot set headers.
+## SDK-only mode (web, product and app analytics from code)
 
-## Runtime API (window.analytics)
+Load the file WITHOUT data-key (or bundle sdk/src/twillingate.ts) and
+initialise yourself:
 
-    analytics.track("signup", { plan: "pro" });   // custom product event
-    analytics.identify("user-123", "org-9");      // set user and group
-    analytics.reset();                            // on logout
+    twillingate.init({
+      url: "https://YOUR-COLLECTOR", key: "ak_...",
+      identity: "anonymous",          // or "identified"
+      autoPageviews: true,            // off by default in explicit init
+      platform: "web",                // app analytics batch context:
+      appVersion: "2.4.1",            // $platform / $app_version /
+      installId: "<stable-uuid>",     // $install_id
+    });
+
+## Runtime API (window.twillingate)
+
+    twillingate.page();                            // manual $pageview (deduped)
+    twillingate.screen("/settings");               // app $screen_view
+    twillingate.track("signup", { plan: "pro" });  // custom product event
+    twillingate.identify("user-123", "org-9");     // set user and group
+    twillingate.group("org-9");                    // set group alone
+    twillingate.reset();                           // on logout
+    twillingate.flush();                           // force-send the queue
 
 - track(name, attrs): sends a product event. Do not $-prefix your names.
 - identify(userId, groupId): attaches subsequent events to the user/group.
@@ -128,5 +141,23 @@ and collector URL filled in.)
 - reset(): call on logout, or the next person on a shared browser inherits
   the previous user's identity.
 
-Server-side and native clients skip the snippet entirely and POST to
+## Behaviour
+
+- Events batch briefly and flush on a short timer, on page unload
+  (sendBeacon; the key travels in the JSON body because beacons cannot set
+  headers) and on flush(). Failed batches persist to a bounded
+  localStorage queue and replay on the next load or when the browser comes
+  back online; ids and client timestamps make replays dedupe server-side.
+- The SDK is silent on localhost, file:// URLs and automated browsers.
+- Opt out a device with: localStorage.twillingate_ignore = "true" (the
+  legacy analytics_ignore is honoured too).
+- Identified-mode identity persisted by the legacy snippet (analytics_*
+  localStorage keys) is migrated automatically.
+
+## Legacy snippet
+
+/js/script.js (window.analytics: track/identify/reset only) still serves
+for already-deployed websites. New integrations use twillingate.js.
+
+Server-side and native clients can skip the SDK entirely and POST to
 /api/events — read docs://ingest-api.`

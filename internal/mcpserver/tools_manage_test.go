@@ -18,7 +18,7 @@ func TestCreateProjectToolReturnsSnippet(t *testing.T) {
 		t.Fatalf("error: %s", textOf(res))
 	}
 	out := textOf(res)
-	for _, want := range []string{"script.js", "ak_", "data-identity"} {
+	for _, want := range []string{"twillingate.js", "ak_", "data-identity"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q: %s", want, out)
 		}

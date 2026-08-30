@@ -17,13 +17,13 @@ func TestIntegrationGuideWebUsesCollectorURLAndIdentity(t *testing.T) {
 		t.Fatalf("error: %s", textOf(res))
 	}
 	out := textOf(res)
-	if !strings.Contains(out, "https://collector.test/js/script.js") {
+	if !strings.Contains(out, "https://collector.test/js/twillingate.js") {
 		t.Errorf("snippet must point at the collector, got: %s", out)
 	}
-	if strings.Contains(out, "blog.example.com/js/script.js") {
+	if strings.Contains(out, "blog.example.com/js/twillingate.js") {
 		t.Error("snippet points at the customer origin (the old bug)")
 	}
-	for _, want := range []string{"IDENTIFIED", "consent", "analytics.reset"} {
+	for _, want := range []string{"IDENTIFIED", "consent", "twillingate.reset"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("identified-mode guidance missing %q", want)
 		}
@@ -69,7 +69,7 @@ func TestDocsResourcesReadable(t *testing.T) {
 	_, cs := newTestHost(t)
 	for uri, want := range map[string]string{
 		"docs://events":     "$screen_view",
-		"docs://js-sdk":     "analytics.track",
+		"docs://js-sdk":     "twillingate.track",
 		"docs://ingest-api": "POST /api/events",
 	} {
 		res, err := cs.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: uri})

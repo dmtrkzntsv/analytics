@@ -88,7 +88,7 @@ func TestMintersAndSnippet(t *testing.T) {
 		t.Fatalf("token = %q", tok)
 	}
 	snip := Snippet("https://blog.example.com", "ak_x", "anonymous")
-	for _, want := range []string{"script.js", `data-key="ak_x"`, `data-identity="anonymous"`} {
+	for _, want := range []string{"twillingate.js", `data-key="ak_x"`, `data-identity="anonymous"`} {
 		if !strings.Contains(snip, want) {
 			t.Errorf("snippet missing %q:\n%s", want, snip)
 		}

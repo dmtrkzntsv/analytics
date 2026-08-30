@@ -66,7 +66,7 @@ func (h *host) registerResources(s *mcp.Server) {
 		"The event model: $pageview (web), $screen_view (app) and custom product events — what each family feeds, reserved attributes, identity, and product_aggregation config. Read before instrumenting anything.",
 		docsEvents)
 	textResource(s, "docs://js-sdk", "js-sdk",
-		"The browser snippet: script-tag attributes, analytics.track/identify/reset, SPA auto-tracking, localhost silence, opt-out.",
+		"The JS SDK: snippet and SDK-only modes, twillingate page/screen/track/identify/reset, SPA auto-tracking, localhost silence, opt-out.",
 		docsJSSDK)
 	textResource(s, "docs://ingest-api", "ingest-api",
 		"Normative HTTP wire format for POST /api/events: envelope, batching, retries, timestamps, idempotency, offline replay. For server-side and native clients.",

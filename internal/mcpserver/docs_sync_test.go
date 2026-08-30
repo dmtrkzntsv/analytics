@@ -57,20 +57,27 @@ func TestDocsEventsMatchesReservedKeys(t *testing.T) {
 	}
 }
 
-// TestDocsJSSDKMatchesScript asserts every documented API symbol exists in
-// the shipped snippet.
-func TestDocsJSSDKMatchesScript(t *testing.T) {
-	script := readSource(t, "../../internal/server/script.js")
+// TestDocsJSSDKMatchesSDK asserts every documented API symbol exists in
+// the SDK source (sdk/src/twillingate.ts — the shipped bundle is compiled
+// from it and separately drift-checked in CI).
+func TestDocsJSSDKMatchesSDK(t *testing.T) {
+	src := readSource(t, "../../sdk/src/twillingate.ts")
 	for _, symbol := range []string{
-		"data-key", "data-identity", "data-user", "data-group",
-		"track", "identify", "reset",
-		"analytics_ignore", "pushState", "popstate", "sendBeacon",
+		"data-key", "data-identity", "data-user", "data-group", "data-auto",
+		"init", "page", "screen", "track", "identify", "reset", "flush",
+		"twillingate_ignore", "analytics_ignore",
+		"pushState", "popstate", "sendBeacon",
+		"$pageview", "$screen_view", "$install_id",
 	} {
-		if !strings.Contains(script, symbol) {
-			t.Errorf("docs://js-sdk documents %q but script.js does not contain it", symbol)
+		if !strings.Contains(src, symbol) {
+			t.Errorf("docs://js-sdk documents %q but the SDK source does not contain it", symbol)
 		}
 		if !strings.Contains(docsJSSDK, symbol) && symbol != "popstate" && symbol != "sendBeacon" {
 			t.Errorf("%q missing from docs://js-sdk text", symbol)
 		}
+	}
+	// The legacy snippet stays served; the doc must keep saying so.
+	if !strings.Contains(docsJSSDK, "script.js") {
+		t.Error("docs://js-sdk must mention the legacy /js/script.js")
 	}
 }
