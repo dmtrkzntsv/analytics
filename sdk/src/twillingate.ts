@@ -219,6 +219,13 @@ export class Twillingate {
     }
     if (opts.autoPageviews) {
       this.hookHistory();
+      // Synchronous, deliberately. Deferring this by a tick would let a
+      // listener registered from an inline module still affect it, but an
+      // app that navigates during hydration would then have the entry
+      // pageview fire AFTER its pushState -- reporting the wrong location
+      // and deduping against it. Masking the entry page is data-mask-url's
+      // job (resolved above, before this line); a listener registered too
+      // late gets a warning from page() instead.
       this.page();
     }
   }
@@ -235,6 +242,13 @@ export class Twillingate {
    */
   page(arg?: string | Record<string, unknown> | PageListener | null, attrs?: Record<string, unknown>): void {
     if (typeof arg === "function") {
+      if (this.firstPageviewSent) {
+        console.warn(
+          "twillingate: page() listener registered after the first pageview; " +
+            "it will not apply to that one. Register it from an inline " +
+            '<script type="module"> placed after the tag.',
+        );
+      }
       this.pageListeners.push(arg);
       return;
     }
@@ -578,5 +592,7 @@ export function autoInit(tg: Twillingate, script: HTMLScriptElement | null): voi
     user: script.getAttribute("data-user") || undefined,
     group: script.getAttribute("data-group") || undefined,
     autoPageviews: script.getAttribute("data-auto") !== "off",
+    maskUrl: script.getAttribute("data-mask-url") || undefined,
+    routing: script.getAttribute("data-routing") === "hash" ? "hash" : "history",
   });
 }
