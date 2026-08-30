@@ -54,10 +54,6 @@ order by day, version
 
 ## Version adoption
 
-Watch a release roll out here, and find the version a metric fell off at.
-Platform is part of the series because `2.4.1` means unrelated things on iOS
-and Android.
-
 <AreaChart data={app_versions} x=day y=actives series=version title="Active installs by version" yFmt=num0 />
 
 ```sql app_screens
