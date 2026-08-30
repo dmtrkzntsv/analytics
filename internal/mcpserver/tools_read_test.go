@@ -141,3 +141,21 @@ func TestUnknownProjectListsAliases(t *testing.T) {
 		t.Errorf("error must list valid aliases: %s", out)
 	}
 }
+
+// A project spanning two hosts must be able to tell them apart -- the
+// reason host is stored at all.
+func TestWebBreakdownHostsDimension(t *testing.T) {
+	_, cs := newTestHost(t)
+	res := callTool(t, cs, "web_breakdown", map[string]any{
+		"project": "blog", "from": "2026-08-01", "to": "2026-08-31",
+		"dimension": "hosts"})
+	if res.IsError {
+		t.Fatalf("error: %s", textOf(res))
+	}
+	out := textOf(res)
+	for _, want := range []string{"blog.example.com", "shop.example.com"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("hosts breakdown missing %q: %s", want, out)
+		}
+	}
+}

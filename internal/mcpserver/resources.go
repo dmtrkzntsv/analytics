@@ -28,6 +28,7 @@ Views (all carry a 'project' column — always filter on it):
 
   v_web_daily(project, day, visitors, pageviews, sessions, bounces, duration_sec)
   v_web_pages(project, day, path, visitors, pageviews)
+  v_web_hosts(project, day, host, visitors, pageviews)
   v_web_referrers(project, day, source, visitors, pageviews)
   v_web_countries(project, day, country, visitors, pageviews)
   v_web_devices(project, day, device, visitors, pageviews)
