@@ -51,6 +51,32 @@ func TestRebuildFlatViewIsNoOpWhenUnchanged(t *testing.T) {
 	}
 }
 
+// sanitizeAlias is lossy and many-to-one: "plan!" and "plan" both sanitize
+// to attr_plan. A no-op check that compares only column names would treat
+// fixing a typo'd declared key as unchanged and leave the view extracting
+// the stale JSON path forever. The check must compare the full CREATE VIEW
+// text, which embeds the json_extract path literal, so this rebuild is
+// correctly detected as a real change.
+func TestRebuildFlatViewDetectsRenameBehindAnUnchangedAlias(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	seedProductEvent(t, db, "app", "e", "2026-08-10T10:00:00Z",
+		map[string]string{"plan": "pro", "plan!": "stale"}, "", "")
+	if err := db.RebuildFlatView(ctx, []string{"plan!"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RebuildFlatView(ctx, []string{"plan"}); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := db.db.QueryRow(`SELECT attr_plan FROM v_events_flat`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != "pro" {
+		t.Fatalf("attr_plan = %q, want %q — view is still extracting the stale key", got, "pro")
+	}
+}
+
 func TestRebuildFlatView(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
