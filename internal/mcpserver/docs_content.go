@@ -167,6 +167,15 @@ initialise yourself:
 - Identified-mode identity persisted by the legacy snippet (analytics_*
   localStorage keys) is migrated automatically.
 
+## Helpers
+
+The collector serves optional helper scripts next to the SDK:
+
+- /js/plausible-shim.js — fires events from Plausible's plausible-event-*
+  CSS classes, so a site migrating off Plausible keeps its tagged CTAs
+  with no markup changes. Load it AFTER the tracking snippet. Works with
+  window.twillingate and the legacy window.analytics.
+
 ## Legacy snippet
 
 /js/script.js (window.analytics: track/identify/reset only) still serves

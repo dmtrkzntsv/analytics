@@ -5,6 +5,9 @@ must be set, and its scheme picks the mode. This page is the operator's
 guide to each. The variable lives in `/etc/twillingate/twillingate.env`
 (or the compose `.env`).
 
+For the client side of each mode — Claude Code, Claude Desktop,
+claude.ai — see [mcp-clients.md](mcp-clients.md).
+
 ```bash
 MCP_AUTH_DSN=token://<token>
 MCP_AUTH_DSN=cloudflare://<team>.cloudflareaccess.com?aud=<aud-tag>
@@ -33,7 +36,7 @@ twillingate keygen -mcp        # prints: MCP_AUTH_DSN=token://ar_…
 MCP_AUTH_DSN=token://ar_…
 ```
 
-Connect Claude Code:
+Connect Claude Code ([more clients](mcp-clients.md)):
 
 ```bash
 claude mcp add --transport http twillingate https://twillingate.example.com/mcp \
