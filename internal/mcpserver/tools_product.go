@@ -148,7 +148,7 @@ func (h *host) registerProduct(s *mcp.Server) {
 		Description: "Product events per day: count and unique users per event name, plus daily totals. Unconditional — no attribute declaration is required to see it."},
 		h.productEvents)
 	mcp.AddTool(s, &mcp.Tool{Name: "product_attributes", Annotations: ro,
-		Description: "Attribute breakdowns for product events. The system dimensions $platform and $app_version are always included; a custom key only appears once the project declares it in attributes (see update_project)."},
+		Description: "Attribute breakdowns for product events. The system dimensions $platform and $version are always included; a custom key only appears once the project declares it in attributes (see update_project)."},
 		h.productAttributes)
 	mcp.AddTool(s, &mcp.Tool{Name: "retention", Annotations: ro,
 		Description: "D1/D7/D30-style cohort curves for identified projects. Returns aggregated_through: cohorts after it are absent (refreshed 03:00 UTC), not zero. Anonymous projects have no retention by design."},

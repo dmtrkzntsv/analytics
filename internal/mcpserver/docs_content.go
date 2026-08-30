@@ -41,7 +41,7 @@ Sent by native/desktop apps over the HTTP API. Context travels as reserved
 attributes: $install_id (the app-install identifier — under anonymous
 identity it is salted+rotated daily, more accurate than IP hashing),
 $screen, $session_id (optional; without it sessions are inferred from
-30-minute gaps), $platform, $app_version, $os_version, $device_model,
+30-minute gaps), $platform, $version, $os_version, $device_model,
 $locale. No User-Agent parsing ever happens for apps — they declare their
 context.
 
@@ -65,8 +65,8 @@ worth reporting on:
   kept per key; the rest collapse into an "(other)" row with a true
   unique-user count.
 - Set attributes with the update_project tool or ` + "`twillingate project create/update -attr`" + `.
-  $platform and $app_version break down automatically without being
-  declared (and are plain platform / app_version columns in
+  $platform and $version break down automatically without being
+  declared (and are plain platform / version columns in
   v_events_flat) — do not add them to attributes, $-prefixed keys never
   reach the custom attribute blob.
 
@@ -81,7 +81,7 @@ setting. $group_id/$group_name are stored raw in both modes.
 ## Reserved attribute keys (complete list)
 
 $install_id, $user_id, $user_name, $group_id, $group_name, $session_id,
-$platform, $app_version, $os_version, $device_model, $locale, $url,
+$platform, $version, $os_version, $device_model, $locale, $url,
 $referrer, $screen.
 
 Wire-format details (batching, retries, offline replay, timestamps,
@@ -125,7 +125,7 @@ initialise yourself:
       identity: "anonymous",          // or "identified"
       autoPageviews: true,            // off by default in explicit init
       platform: "web",                // app analytics batch context:
-      appVersion: "2.4.1",            // $platform / $app_version /
+      version: "2.4.1",               // $platform / $version /
       installId: "<stable-uuid>",     // $install_id
     });
 

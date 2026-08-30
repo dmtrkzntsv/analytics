@@ -48,7 +48,7 @@ func (d *DB) WriteProductEvents(ctx context.Context, evs []store.ProductEvent) e
 	return d.tx(ctx, func(tx *sql.Tx) error {
 		stmt, err := tx.PrepareContext(ctx, `INSERT OR IGNORE INTO product_events
 			(id, project, event_name, ts, received_at, actor_id, user_id, group_id,
-			 platform, app_version, attributes)
+			 platform, version, attributes)
 			VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
 		if err != nil {
 			return err
@@ -65,7 +65,7 @@ func (d *DB) WriteProductEvents(ctx context.Context, evs []store.ProductEvent) e
 			}
 			if _, err := stmt.ExecContext(ctx, e.ID, e.Project, e.EventName,
 				e.TS.UTC().Format(tsFormat), e.ReceivedAt.UTC().Format(tsFormat),
-				e.ActorID, e.UserID, e.GroupID, e.Platform, e.AppVersion,
+				e.ActorID, e.UserID, e.GroupID, e.Platform, e.Version,
 				string(blob)); err != nil {
 				return fmt.Errorf("event %s: %w", e.ID, err)
 			}
@@ -81,7 +81,7 @@ func (d *DB) WriteAppViews(ctx context.Context, views []store.AppView) error {
 	return d.tx(ctx, func(tx *sql.Tx) error {
 		stmt, err := tx.PrepareContext(ctx, `INSERT OR IGNORE INTO app_views
 			(id, project, ts, received_at, actor_id, user_id, group_id, session_id,
-			 screen, platform, app_version, os_version, device_model, locale, country)
+			 screen, platform, version, os_version, device_model, locale, country)
 			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 		if err != nil {
 			return err
@@ -91,7 +91,7 @@ func (d *DB) WriteAppViews(ctx context.Context, views []store.AppView) error {
 			if _, err := stmt.ExecContext(ctx, v.ID, v.Project,
 				v.TS.UTC().Format(tsFormat), v.ReceivedAt.UTC().Format(tsFormat),
 				v.ActorID, v.UserID, v.GroupID, v.SessionID,
-				v.Screen, v.Platform, v.AppVersion, v.OSVersion,
+				v.Screen, v.Platform, v.Version, v.OSVersion,
 				v.DeviceModel, v.Locale, v.Country); err != nil {
 				return fmt.Errorf("app view %s: %w", v.ID, err)
 			}

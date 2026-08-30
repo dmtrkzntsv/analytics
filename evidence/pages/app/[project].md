@@ -43,12 +43,12 @@ where project = '${params.project}'
 </Grid>
 
 ```sql app_versions
-select day, platform || ' ' || app_version as version, actives
+select day, platform || ' ' || version as version, actives
 from twillingate.v_app_versions
 where project = '${params.project}'
   and day between strftime((now() at time zone 'UTC')::date - interval (${inputs.range.value} - 1) day, '%Y-%m-%d')
                and strftime((now() at time zone 'UTC')::date, '%Y-%m-%d')
-  and app_version != ''
+  and version != ''
 order by day, version
 ```
 

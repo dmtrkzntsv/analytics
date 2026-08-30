@@ -52,7 +52,7 @@ without deleting it.
     "$group_name": "Acme Corp",
     "$session_id": "018f1e5b-…",
     "$platform": "ios",
-    "$app_version": "2.4.1",
+    "$version": "2.4.1",
     "$os_version": "17.2",
     "$device_model": "iPhone15,2",
     "$locale": "en-US"
@@ -62,7 +62,7 @@ without deleting it.
       "name": "$screen_view", "attributes": { "$screen": "/settings" } },
     { "id": "018f1e5d-…", "ts": "2026-08-23T10:00:05Z",
       "name": "subscribed",
-      "attributes": { "plan": "pro", "$app_version": "2.5.0" } }
+      "attributes": { "plan": "pro", "$version": "2.5.0" } }
   ]
 }
 ```
@@ -76,7 +76,7 @@ Batch-level `attributes` are defaults. Per-event `attributes` override them
 and ordinary keys alike.
 
 The rule exists for offline queues. A queue flushed after a week may span an
-app self-update: per-event override lets a client stamp `$app_version` on
+app self-update: per-event override lets a client stamp `$version` on
 only the events that differ, instead of grouping its queue by context before
 flushing. It also lets a client stamp an ordinary attribute
 (`"experiment": "variant_b"`) across a whole flush without repeating it.
@@ -104,7 +104,7 @@ compatibility matters.
 | Group | Keys |
 |---|---|
 | Identity | `$install_id` `$user_id` `$user_name` `$group_id` `$group_name` `$session_id` |
-| Environment | `$platform` `$app_version` `$os_version` `$device_model` `$locale` |
+| Environment | `$platform` `$version` `$os_version` `$device_model` `$locale` |
 | Event payload | `$url` `$referrer` `$screen` |
 
 An **unrecognized `$` key is dropped** with a warning. It is not stored as an

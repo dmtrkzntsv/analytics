@@ -33,7 +33,7 @@ func TestFlatViewOnlyDeclaredKeys(t *testing.T) {
 	}
 }
 
-// The typed system columns platform and app_version are written on every
+// The typed system columns platform and version are written on every
 // product event, so the flat view must expose them as base columns — they
 // live outside the attributes JSON and would otherwise be unreachable from
 // the query surface entirely.
@@ -47,12 +47,12 @@ func TestFlatViewSystemColumns(t *testing.T) {
 	}
 	var platform, version string
 	if err := db.db.QueryRow(
-		`SELECT platform, app_version FROM v_events_flat WHERE event_name='signup'`).
+		`SELECT platform, version FROM v_events_flat WHERE event_name='signup'`).
 		Scan(&platform, &version); err != nil {
 		t.Fatal(err)
 	}
 	if platform != "ios" || version != "2.4.1" {
-		t.Fatalf("platform, app_version = %q, %q, want ios, 2.4.1", platform, version)
+		t.Fatalf("platform, version = %q, %q, want ios, 2.4.1", platform, version)
 	}
 }
 
@@ -180,7 +180,7 @@ func TestRebuildFlatViewHostileKeys(t *testing.T) {
 		t.Errorf("digit-leading key not prefixed into a valid identifier: %v", cols)
 	}
 	// 7 base columns (id, project, event_name, actor_id, ts, platform,
-	// app_version) + attributes + 4 attrs (漢字 skipped).
+	// version) + attributes + 4 attrs (漢字 skipped).
 	if len(cols) != 8+4 {
 		t.Errorf("cols = %v, want 8 base + 4 attrs (漢字 skipped)", cols)
 	}
@@ -235,7 +235,7 @@ func TestRebuildFlatViewDeterministicOrder(t *testing.T) {
 		}
 	}
 	want := []string{"id", "project", "event_name", "actor_id", "ts",
-		"platform", "app_version", "attributes",
+		"platform", "version", "attributes",
 		"attr_alpha", "attr_mu", "attr_zeta"}
 	for i := range want {
 		if first[i] != want[i] {

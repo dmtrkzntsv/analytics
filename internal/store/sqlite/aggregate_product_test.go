@@ -10,15 +10,15 @@ import (
 	"github.com/google/uuid"
 )
 
-// seedProductEvent writes one product event. platform and appVersion are
+// seedProductEvent writes one product event. platform and version are
 // the typed system columns; attrs is the custom JSON blob.
 func seedProductEvent(t *testing.T, db *DB, project, event, at string,
-	attrs map[string]string, platform, appVersion string) {
+	attrs map[string]string, platform, version string) {
 	t.Helper()
 	if err := db.WriteProductEvents(context.Background(), []store.ProductEvent{{
 		ID: uuid.NewString(), Project: project, EventName: event,
 		ActorID: "u1", TS: ts(at), Attributes: attrs,
-		Platform: platform, AppVersion: appVersion,
+		Platform: platform, Version: version,
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestRollupWritesSystemDimensions(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
 	seedProductEvent(t, db, "blog", "signup", "2026-08-01T10:00:00Z",
-		map[string]string{}, "ios", "1.2.0") // platform, app_version columns
+		map[string]string{}, "ios", "1.2.0") // platform, version columns
 	if err := db.AggregateProductDay(ctx, "blog",
 		civil.DateOf(ts("2026-08-01T00:00:00Z")), nil, 50); err != nil {
 		t.Fatal(err)
@@ -259,7 +259,7 @@ func TestRollupSystemDimensionsDoNotCollideWithCustomKeys(t *testing.T) {
 }
 
 // TestRollupSystemDimensionsSurviveRawDeletion checks the retention story
-// this task closes: $platform/$app_version rows must exist after the raw
+// this task closes: $platform/$version rows must exist after the raw
 // day is deleted, for a project declaring no custom attributes at all.
 func TestRollupSystemDimensionsSurviveRawDeletion(t *testing.T) {
 	db := newTestDB(t)
@@ -276,7 +276,7 @@ func TestRollupSystemDimensionsSurviveRawDeletion(t *testing.T) {
 		t.Fatalf("raw remaining %d", n)
 	}
 	db.db.QueryRow(`SELECT COUNT(*) FROM agg_product_attrs
-		WHERE attr_key IN ('$platform','$app_version')`).Scan(&n)
+		WHERE attr_key IN ('$platform','$version')`).Scan(&n)
 	if n != 2 {
 		t.Fatalf("system dimension rows = %d, want 2", n)
 	}

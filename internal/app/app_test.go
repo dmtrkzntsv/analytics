@@ -128,7 +128,7 @@ func TestServeEndToEnd(t *testing.T) {
 	}
 	// One envelope covering all three destinations.
 	if r := post("/api/events", "https://app.com",
-		`{"key":"ak_test","attributes":{"$platform":"ios","$app_version":"1.0"},
+		`{"key":"ak_test","attributes":{"$platform":"ios","$version":"1.0"},
 		  "events":[
 		    {"name":"$pageview","attributes":{"$url":"https://app.com/pricing"}},
 		    {"name":"$screen_view","attributes":{"$screen":"/settings"}},

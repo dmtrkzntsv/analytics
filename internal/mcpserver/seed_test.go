@@ -75,7 +75,7 @@ func newTestHost(t *testing.T) (*host, *mcp.ClientSession) {
 	      VALUES ('blog','2026-08-20',6,20,8,480), ('blog','2026-08-21',7,22,9,540)`)
 	seed(`INSERT INTO agg_app_screens (project, day, screen, actives, views)
 	      VALUES ('blog','2026-08-20','/settings',5,12), ('blog','2026-08-20','/home',3,8)`)
-	seed(`INSERT INTO agg_app_versions (project, day, platform, app_version, actives, views)
+	seed(`INSERT INTO agg_app_versions (project, day, platform, version, actives, views)
 	      VALUES ('blog','2026-08-20','ios','2.4.1',5,12)`)
 	seed(`INSERT INTO agg_app_os (project, day, platform, os_version, actives, views)
 	      VALUES ('blog','2026-08-20','ios','17.4',5,12)`)

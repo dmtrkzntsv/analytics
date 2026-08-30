@@ -218,7 +218,7 @@ func (h *host) webBreakdown(ctx context.Context, _ *mcp.CallToolRequest, in brea
 
 var appDimensions = map[string]struct{ view, col string }{
 	"screens":   {"v_app_screens", "screen"},
-	"versions":  {"v_app_versions", "app_version"},
+	"versions":  {"v_app_versions", "version"},
 	"os":        {"v_app_os", "os_version"},
 	"devices":   {"v_app_devices", "device_model"},
 	"countries": {"v_app_countries", "country"},

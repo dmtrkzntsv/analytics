@@ -195,7 +195,7 @@ func TestHeaderKeyBeatsBodyKey(t *testing.T) {
 
 func TestRoutesPageviewScreenViewAndCustom(t *testing.T) {
 	q, h := testServer(t)
-	body := `{"key":"` + testKey + `","attributes":{"$platform":"ios","$app_version":"2.4.1"},
+	body := `{"key":"` + testKey + `","attributes":{"$platform":"ios","$version":"2.4.1"},
 	  "events":[
 	    {"name":"$pageview","attributes":{"$url":"https://app.com/pricing?utm_source=hn"}},
 	    {"name":"$screen_view","attributes":{"$screen":"/settings","$os_version":"17.2","$device_model":"iPhone15,2","$locale":"en-US","$session_id":"s1"}},
@@ -218,27 +218,27 @@ func TestRoutesPageviewScreenViewAndCustom(t *testing.T) {
 		t.Fatalf("views = %+v", q.views)
 	}
 	v := q.views[0]
-	if v.Screen != "/settings" || v.AppVersion != "2.4.1" || v.Platform != "ios" ||
+	if v.Screen != "/settings" || v.Version != "2.4.1" || v.Platform != "ios" ||
 		v.OSVersion != "17.2" || v.DeviceModel != "iPhone15,2" || v.Locale != "en-US" ||
 		v.SessionID != "s1" || v.Country != "DE" {
 		t.Errorf("view = %+v", v)
 	}
-	if len(q.events) != 1 || q.events[0].Platform != "ios" || q.events[0].AppVersion != "2.4.1" {
+	if len(q.events) != 1 || q.events[0].Platform != "ios" || q.events[0].Version != "2.4.1" {
 		t.Errorf("events = %+v", q.events)
 	}
 }
 
 func TestPerEventContextOverridesBatch(t *testing.T) {
 	q, h := testServer(t)
-	body := `{"key":"` + testKey + `","attributes":{"$app_version":"2.4.1"},
-	  "events":[{"name":"a"},{"name":"b","attributes":{"$app_version":"2.5.0"}}]}`
+	body := `{"key":"` + testKey + `","attributes":{"$version":"2.4.1"},
+	  "events":[{"name":"a"},{"name":"b","attributes":{"$version":"2.5.0"}}]}`
 	post(h, body, nil)
 	if len(q.events) != 2 {
 		t.Fatalf("events = %+v", q.events)
 	}
-	if q.events[0].AppVersion != "2.4.1" || q.events[1].AppVersion != "2.5.0" {
+	if q.events[0].Version != "2.4.1" || q.events[1].Version != "2.5.0" {
 		t.Errorf("versions = %q %q; want 2.4.1 then 2.5.0",
-			q.events[0].AppVersion, q.events[1].AppVersion)
+			q.events[0].Version, q.events[1].Version)
 	}
 }
 

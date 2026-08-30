@@ -125,7 +125,7 @@ func TestMigration003Schema(t *testing.T) {
 		{"web_hits", "group_id"}, {"web_hits", "received_at"},
 		{"product_events", "actor_id"}, {"product_events", "user_id"},
 		{"product_events", "group_id"}, {"product_events", "platform"},
-		{"product_events", "app_version"}, {"product_events", "received_at"},
+		{"product_events", "version"}, {"product_events", "received_at"},
 		{"projects", "identity"},
 	} {
 		if !hasColumn(t, db, c.table, c.column) {

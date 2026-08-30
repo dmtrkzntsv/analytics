@@ -372,7 +372,7 @@ func seedAttrDay(t *testing.T, db *DB, project string) {
 				ActorID: fmt.Sprintf("a%d", (i+n)%4), TS: ts("2026-08-01T10:00:00Z"),
 				Attributes: map[string]string{"plan": fmt.Sprintf("p%02d", i)},
 				Platform:   []string{"ios", "android"}[i%2],
-				AppVersion: []string{"1.0", "2.0", "3.0"}[i%3],
+				Version:    []string{"1.0", "2.0", "3.0"}[i%3],
 			})
 		}
 	}
@@ -380,7 +380,7 @@ func seedAttrDay(t *testing.T, db *DB, project string) {
 	evs = append(evs, store.ProductEvent{
 		ID: "ping1", Project: project, EventName: "ping", ActorID: "a9",
 		TS: ts("2026-08-01T11:00:00Z"), Attributes: map[string]string{"plan": "pro"},
-		Platform: "web", AppVersion: "1.0",
+		Platform: "web", Version: "1.0",
 	})
 	if err := db.WriteProductEvents(context.Background(), evs); err != nil {
 		t.Fatal(err)
@@ -462,14 +462,14 @@ func TestProductAttrsViewSystemDimensionsWithoutDeclaredKeys(t *testing.T) {
 	var sys, custom int
 	for _, r := range before {
 		switch r.Key {
-		case "$platform", "$app_version":
+		case "$platform", "$version":
 			sys++
 		default:
 			custom++
 		}
 	}
 	if sys == 0 {
-		t.Fatal("no $platform/$app_version rows for an undeclared project")
+		t.Fatal("no $platform/$version rows for an undeclared project")
 	}
 	if custom != 0 {
 		t.Fatalf("%d rows for undeclared custom keys; only system dimensions were expected", custom)

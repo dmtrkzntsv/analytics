@@ -94,7 +94,7 @@ type appDimension struct {
 
 var appDimensions = []appDimension{
 	{"agg_app_screens", []string{"screen"}},
-	{"agg_app_versions", []string{"platform", "app_version"}},
+	{"agg_app_versions", []string{"platform", "version"}},
 	{"agg_app_os", []string{"platform", "os_version"}},
 	{"agg_app_devices", []string{"device_model"}},
 	{"agg_app_countries", []string{"country"}},

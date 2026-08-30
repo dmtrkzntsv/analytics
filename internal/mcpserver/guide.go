@@ -90,7 +90,7 @@ func (h *host) integrationGuide(ctx context.Context, _ *mcp.CallToolRequest, in 
 		fmt.Fprintf(&b, "Apps use the same HTTP API with app context as batch attributes:\n\n"+
 			"    POST %s/api/events\n    X-Analytics-Key: %s\n\n"+
 			"    {\"attributes\":{\"$install_id\":\"<stable-uuid-per-install>\",\n"+
-			"                   \"$platform\":\"ios\",\"$app_version\":\"2.4.1\",\n"+
+			"                   \"$platform\":\"ios\",\"$version\":\"2.4.1\",\n"+
 			"                   \"$os_version\":\"17.2\",\"$device_model\":\"iPhone15,2\"},\n"+
 			"     \"events\":[{\"id\":\"<uuidv7>\",\"ts\":\"<event-time-utc>\",\n"+
 			"                \"name\":\"$screen_view\",\"attributes\":{\"$screen\":\"/settings\"}}]}\n\n", base, key)

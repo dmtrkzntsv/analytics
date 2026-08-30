@@ -150,7 +150,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 				ActorID: actor, UserID: user, GroupID: group, SessionID: rv.SessionID,
 				Screen:      rv.Screen,
 				Platform:    rv.Platform,
-				AppVersion:  rv.AppVersion,
+				Version:     rv.Version,
 				OSVersion:   rv.OSVersion,
 				DeviceModel: rv.DeviceModel,
 				Locale:      rv.Locale,
@@ -166,7 +166,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 				ID: id, Project: p.Alias, EventName: ev.Name,
 				TS: ts, ReceivedAt: received,
 				ActorID: actor, UserID: user, GroupID: group,
-				Platform: rv.Platform, AppVersion: rv.AppVersion,
+				Platform: rv.Platform, Version: rv.Version,
 				Attributes: rv.Custom,
 			})
 			res.Accepted++

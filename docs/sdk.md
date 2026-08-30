@@ -43,7 +43,7 @@ twillingate.init({
   autoPageviews: true,         // default false in explicit init
   // app analytics context, sent as batch attributes:
   platform: "web",             // → $platform
-  appVersion: "2.4.1",         // → $app_version
+  version: "2.4.1",            // → $version
   installId: "018f…",          // → $install_id (stable per install)
   user: "u_123",               // optional page-render identity
   group: "org_9",
@@ -85,7 +85,7 @@ twillingate.flush();                           // force-send the queue
   browser inherits the previous user's identity. Clears user, group,
   names and the visitor id.
 - `screen(name, attrs?)` — app analytics; pair with `platform`,
-  `appVersion` and `installId` in `init` so actives, versions and screens
+  `version` and `installId` in `init` so actives, versions and screens
   aggregate properly.
 
 ## Transport

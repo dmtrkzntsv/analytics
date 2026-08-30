@@ -24,7 +24,7 @@ type ProductEvent struct {
 	ID, Project, EventName   string
 	TS, ReceivedAt           time.Time
 	ActorID, UserID, GroupID string
-	Platform, AppVersion     string
+	Platform, Version        string
 	Attributes               map[string]string
 }
 
@@ -38,7 +38,7 @@ type AppView struct {
 	TS, ReceivedAt                      time.Time
 	ActorID, UserID, GroupID, SessionID string
 	Screen                              string
-	Platform, AppVersion                string
+	Platform, Version                   string
 	OSVersion, DeviceModel, Locale      string
 	Country                             string
 }

@@ -37,13 +37,13 @@ func TestAggregateAppDayCounts(t *testing.T) {
 
 	seedViews(t, db,
 		store.AppView{ID: "1", TS: at(10, 0), ActorID: "a", SessionID: "s1",
-			Screen: "/home", Platform: "ios", AppVersion: "2.4.1",
+			Screen: "/home", Platform: "ios", Version: "2.4.1",
 			OSVersion: "17.2", DeviceModel: "iPhone15,2", Country: "DE"},
 		store.AppView{ID: "2", TS: at(10, 5), ActorID: "a", SessionID: "s1",
-			Screen: "/settings", Platform: "ios", AppVersion: "2.4.1",
+			Screen: "/settings", Platform: "ios", Version: "2.4.1",
 			OSVersion: "17.2", DeviceModel: "iPhone15,2", Country: "DE"},
 		store.AppView{ID: "3", TS: at(11, 0), ActorID: "b", SessionID: "s2",
-			Screen: "/home", Platform: "android", AppVersion: "2.4.1",
+			Screen: "/home", Platform: "android", Version: "2.4.1",
 			OSVersion: "14", DeviceModel: "Pixel 8", Country: "FR"},
 	)
 
@@ -75,7 +75,7 @@ func TestAggregateAppDayCounts(t *testing.T) {
 	// platform is part of the versions key, so one version string across two
 	// platforms must not merge into a single row.
 	if err := db.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM agg_app_versions WHERE project='p' AND day=? AND app_version='2.4.1'`,
+		`SELECT COUNT(*) FROM agg_app_versions WHERE project='p' AND day=? AND version='2.4.1'`,
 		appDay().String()).Scan(&n); err != nil {
 		t.Fatalf("read versions: %v", err)
 	}

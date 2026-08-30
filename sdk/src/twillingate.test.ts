@@ -88,13 +88,13 @@ describe("payload shape", () => {
   });
 
   it("carries app context as batch attributes", async () => {
-    const t = tg({ platform: "web", appVersion: "2.4.1", installId: "018f-install" });
+    const t = tg({ platform: "web", version: "2.4.1", installId: "018f-install" });
     t.screen("/settings");
     await drain();
     const { attributes, events } = sent[0].body;
     expect(attributes).toMatchObject({
       $platform: "web",
-      $app_version: "2.4.1",
+      $version: "2.4.1",
       $install_id: "018f-install",
     });
     expect(events[0].name).toBe("$screen_view");

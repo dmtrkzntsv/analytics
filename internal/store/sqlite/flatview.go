@@ -10,7 +10,7 @@ import (
 )
 
 // flatViewBaseColumns are the non-attribute columns of v_events_flat.
-// platform and app_version are the typed system columns ($-prefixed on the
+// platform and version are the typed system columns ($-prefixed on the
 // wire, so they can never reach the attributes JSON) and would be
 // unreachable from the view without their own columns; attributes carries
 // the raw JSON, so a key that isn't declared (and so gets no attr_ column)
@@ -18,7 +18,7 @@ import (
 // the base table. Every attribute column carries an attr_ prefix, so none
 // can collide with these.
 var flatViewBaseColumns = []string{"id", "project", "event_name", "actor_id", "ts",
-	"platform", "app_version", "attributes"}
+	"platform", "version", "attributes"}
 
 // sanitizeAlias strips everything outside [A-Za-z0-9_] from an attribute key.
 // The result is always safe to splice into DDL unquoted once prefixed, which

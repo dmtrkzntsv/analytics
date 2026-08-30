@@ -38,7 +38,7 @@ Views (all carry a 'project' column — always filter on it):
   v_product_totals(project, day, total_events, active_users)
   v_app_daily(project, day, actives, views, sessions, duration_sec)
   v_app_screens(project, day, screen, actives, views)
-  v_app_versions(project, day, platform, app_version, actives, views)
+  v_app_versions(project, day, platform, version, actives, views)
   v_app_os(project, day, platform, os_version, actives, views)
   v_app_devices(project, day, device_model, actives, views)
   v_app_countries(project, day, country, actives, views)

@@ -379,7 +379,7 @@ func seedAppDay(t *testing.T, st store.Store, actors ...string) {
 			TS:         mustTime("2026-08-10T10:00:00Z"),
 			ReceivedAt: mustTime("2026-08-10T10:00:00Z"),
 			ActorID:    a, UserID: "u-" + a, GroupID: "org9",
-			Screen: "/home", Platform: "ios", AppVersion: "2.4.1",
+			Screen: "/home", Platform: "ios", Version: "2.4.1",
 		})
 	}
 	if err := st.WriteAppViews(context.Background(), views); err != nil {

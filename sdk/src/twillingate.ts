@@ -27,9 +27,9 @@ export interface InitOptions {
   identity?: "anonymous" | "identified";
   user?: string;
   group?: string;
-  /** App analytics batch context ($platform / $app_version / $install_id). */
+  /** App analytics batch context ($platform / $version / $install_id). */
   platform?: string;
-  appVersion?: string;
+  version?: string;
   installId?: string;
   /**
    * Automatic pageviews incl. pushState/popstate. Snippet mode defaults to
@@ -136,7 +136,7 @@ export class Twillingate {
   private defaultAttrs: Record<string, unknown> = {};
   private pageListeners: PageListener[] = [];
   private platform: string | null = null;
-  private appVersion: string | null = null;
+  private version: string | null = null;
   private installId: string | null = null;
   private flushInterval = 1000;
 
@@ -163,7 +163,7 @@ export class Twillingate {
     this.groupId = opts.group ? String(opts.group) : migrated(GROUP);
     this.groupName = ls(GROUP_NAME);
     this.platform = opts.platform || null;
-    this.appVersion = opts.appVersion || null;
+    this.version = opts.version || null;
     this.installId = opts.installId || null;
     if (opts.flushInterval !== undefined) this.flushInterval = opts.flushInterval;
     this.ready = true;
@@ -348,7 +348,7 @@ export class Twillingate {
     const v = this.visitorId();
     if (v) a.$install_id = v;
     if (this.platform) a.$platform = this.platform;
-    if (this.appVersion) a.$app_version = this.appVersion;
+    if (this.version) a.$version = this.version;
     return a;
   }
 

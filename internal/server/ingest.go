@@ -76,7 +76,7 @@ func (res *ingestResult) warn(i int, format string, a ...any) {
 type resolved struct {
 	InstallID, UserID, UserName    string
 	GroupID, GroupName, SessionID  string
-	Platform, AppVersion           string
+	Platform, Version              string
 	OSVersion, DeviceModel, Locale string
 	URL, Referrer, Screen          string
 	Custom                         map[string]string
@@ -94,7 +94,7 @@ var reservedKeys = map[string]func(*resolved, string){
 	"$group_name":   func(r *resolved, v string) { r.GroupName = v },
 	"$session_id":   func(r *resolved, v string) { r.SessionID = v },
 	"$platform":     func(r *resolved, v string) { r.Platform = v },
-	"$app_version":  func(r *resolved, v string) { r.AppVersion = v },
+	"$version":      func(r *resolved, v string) { r.Version = v },
 	"$os_version":   func(r *resolved, v string) { r.OSVersion = v },
 	"$device_model": func(r *resolved, v string) { r.DeviceModel = v },
 	"$locale":       func(r *resolved, v string) { r.Locale = v },
@@ -106,7 +106,7 @@ var reservedKeys = map[string]func(*resolved, string){
 // mergeAttributes layers per-event attributes over batch defaults, key by
 // key. This is the only merge rule, and it applies to system and ordinary
 // keys alike — which is what lets an offline queue spanning an app
-// self-update stamp $app_version on just the events that differ, instead of
+// self-update stamp $version on just the events that differ, instead of
 // grouping the queue by context before flushing.
 //
 // Neither input is mutated: batch defaults are reused across every event.

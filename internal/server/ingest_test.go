@@ -8,13 +8,13 @@ import (
 )
 
 func TestMergeAttributesEventOverridesBatch(t *testing.T) {
-	batch := map[string]any{"$platform": "ios", "$app_version": "2.4.1", "team": "core"}
-	event := map[string]any{"$app_version": "2.5.0", "plan": "pro"}
+	batch := map[string]any{"$platform": "ios", "$version": "2.4.1", "team": "core"}
+	event := map[string]any{"$version": "2.5.0", "plan": "pro"}
 
 	got := mergeAttributes(batch, event)
 
 	want := map[string]string{
-		"$platform": "ios", "$app_version": "2.5.0", "team": "core", "plan": "pro",
+		"$platform": "ios", "$version": "2.5.0", "team": "core", "plan": "pro",
 	}
 	for k, v := range want {
 		if got[k] != v {
@@ -48,7 +48,7 @@ func TestResolveAttributesSplitsReservedFromCustom(t *testing.T) {
 	r, unknown := resolveAttributes(map[string]any{
 		"$install_id": "018f", "$user_id": "u1", "$user_name": "Ada",
 		"$group_id": "org9", "$group_name": "Acme", "$session_id": "s1",
-		"$platform": "ios", "$app_version": "2.4.1", "$os_version": "17.2",
+		"$platform": "ios", "$version": "2.4.1", "$os_version": "17.2",
 		"$device_model": "iPhone15,2", "$locale": "en-US",
 		"$url": "https://x/y", "$referrer": "https://z", "$screen": "/settings",
 		"plan": "pro", "count": float64(3), "ok": true, "nothing": nil,
@@ -63,7 +63,7 @@ func TestResolveAttributesSplitsReservedFromCustom(t *testing.T) {
 	if r.GroupID != "org9" || r.GroupName != "Acme" || r.SessionID != "s1" {
 		t.Errorf("group/session = %+v", r)
 	}
-	if r.Platform != "ios" || r.AppVersion != "2.4.1" || r.OSVersion != "17.2" {
+	if r.Platform != "ios" || r.Version != "2.4.1" || r.OSVersion != "17.2" {
 		t.Errorf("environment = %+v", r)
 	}
 	if r.DeviceModel != "iPhone15,2" || r.Locale != "en-US" {

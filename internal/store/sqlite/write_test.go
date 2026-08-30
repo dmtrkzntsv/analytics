@@ -118,7 +118,7 @@ func TestWriteAppViewsRoundTrip(t *testing.T) {
 	in := []store.AppView{{
 		ID: "018f-a", Project: "p", TS: ts, ReceivedAt: ts,
 		ActorID: "act1", UserID: "u1", GroupID: "org9", SessionID: "s1",
-		Screen: "/settings", Platform: "ios", AppVersion: "2.4.1",
+		Screen: "/settings", Platform: "ios", Version: "2.4.1",
 		OSVersion: "17.2", DeviceModel: "iPhone15,2", Locale: "en-US", Country: "DE",
 	}}
 	if err := db.WriteAppViews(ctx, in); err != nil {
@@ -190,7 +190,7 @@ func TestWriteCarriesIdentityAndAppContext(t *testing.T) {
 	}
 	if err := db.WriteProductEvents(ctx, []store.ProductEvent{{ID: "e", Project: "p",
 		EventName: "n", TS: ts, ReceivedAt: ts, ActorID: "a", UserID: "u1",
-		GroupID: "org9", Platform: "ios", AppVersion: "2.4.1"}}); err != nil {
+		GroupID: "org9", Platform: "ios", Version: "2.4.1"}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -205,7 +205,7 @@ func TestWriteCarriesIdentityAndAppContext(t *testing.T) {
 
 	var plat, ver string
 	if err := db.db.QueryRowContext(ctx,
-		`SELECT platform, app_version FROM product_events WHERE id='e'`).Scan(&plat, &ver); err != nil {
+		`SELECT platform, version FROM product_events WHERE id='e'`).Scan(&plat, &ver); err != nil {
 		t.Fatal(err)
 	}
 	if plat != "ios" || ver != "2.4.1" {
