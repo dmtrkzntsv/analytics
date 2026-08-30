@@ -51,8 +51,8 @@ docker:
 
 define LOCAL_ENV
 LISTEN_ADDR=127.0.0.1:8080
-DATABASE_URL=sqlite://local/twillingate.db
-GEO_URL=none://
+DATABASE_DSN=sqlite://local/twillingate.db
+GEO_DSN=none://
 LOG_LEVEL=debug
 LOG_FORMAT=text
 BUFFER_FLUSH_INTERVAL=1s
@@ -147,7 +147,7 @@ test-restore:
 # the server to have started once so those projects are registered. Re-running
 # replaces the seeded rows rather than stacking another copy on top.
 seed-demo: local/.env local/projects.json build
-	@DATABASE_URL="sqlite://$(PWD)/local/twillingate.db" \
+	@DATABASE_DSN="sqlite://$(PWD)/local/twillingate.db" \
 	 PROJECTS_FILE="$(PWD)/local/projects.json" ./$(BIN) migrate
 	python3 scripts/seed-demo.py local/twillingate.db local/projects.json
 	@echo

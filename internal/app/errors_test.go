@@ -39,7 +39,7 @@ func (s *syncLogBuffer) String() string {
 	return s.buf.String()
 }
 
-// A bad GEO_URL must surface as a boot error rather than a silent fallback.
+// A bad GEO_DSN must surface as a boot error rather than a silent fallback.
 func TestServeFailsOnGeoProviderError(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "geo-err.db")
 	seedProject(t, dbPath,
@@ -47,8 +47,8 @@ func TestServeFailsOnGeoProviderError(t *testing.T) {
 		"ak_test", "web")
 	cfg := configtest.Load(t, map[string]string{
 		"LISTEN_ADDR":  freePort(t),
-		"DATABASE_URL": "sqlite://" + dbPath,
-		"GEO_URL":      "unsupported-provider://x",
+		"DATABASE_DSN": "sqlite://" + dbPath,
+		"GEO_DSN":      "unsupported-provider://x",
 	})
 	err := Serve(context.Background(), cfg, slog.Default(), true, false)
 	if err == nil || !strings.Contains(err.Error(), "geo:") {
@@ -62,7 +62,7 @@ func TestServeWarnsWhenNoProjectsConfigured(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "empty.db")
 	cfg := configtest.Load(t, map[string]string{
 		"LISTEN_ADDR":  freePort(t),
-		"DATABASE_URL": "sqlite://" + dbPath,
+		"DATABASE_DSN": "sqlite://" + dbPath,
 	})
 	logs := runServeAndCollectLogs(t, cfg)
 	if !strings.Contains(logs, "no projects configured") {
@@ -96,7 +96,7 @@ func TestServeWarnsAboutKeylessProjects(t *testing.T) {
 
 	cfg := configtest.Load(t, map[string]string{
 		"LISTEN_ADDR":  freePort(t),
-		"DATABASE_URL": "sqlite://" + dbPath,
+		"DATABASE_DSN": "sqlite://" + dbPath,
 	})
 	logs := runServeAndCollectLogs(t, cfg)
 	if !strings.Contains(logs, "no active ingest keys") || !strings.Contains(logs, "nokey") {
@@ -122,7 +122,7 @@ func TestServeFailsOnMigrateError(t *testing.T) {
 
 	cfg := configtest.Load(t, map[string]string{
 		"LISTEN_ADDR":  freePort(t),
-		"DATABASE_URL": "sqlite://" + dbPath,
+		"DATABASE_DSN": "sqlite://" + dbPath,
 	})
 	if err := Serve(context.Background(), cfg, slog.Default(), true, false); err == nil {
 		t.Fatal("Serve = nil, want a migration error from the colliding schema")
@@ -139,7 +139,7 @@ func TestServeFailsOnMCPHandlerError(t *testing.T) {
 		"ak_test", "web")
 	cfg := configtest.Load(t, map[string]string{
 		"LISTEN_ADDR":      freePort(t),
-		"DATABASE_URL":     "sqlite://" + dbPath,
+		"DATABASE_DSN":     "sqlite://" + dbPath,
 		"MCP_AUTH_MODE":    "oauth",
 		"MCP_AUTH_ISSUER":  "http://127.0.0.1:1", // nothing listens on port 1: fails fast
 		"MCP_RESOURCE_URL": "https://mcp.example.com",
@@ -163,7 +163,7 @@ func TestServeFailsOnMCPBuildErrorSharedListener(t *testing.T) {
 	addr := freePort(t)
 	cfg := configtest.Load(t, map[string]string{
 		"LISTEN_ADDR":      addr,
-		"DATABASE_URL":     "sqlite://" + dbPath,
+		"DATABASE_DSN":     "sqlite://" + dbPath,
 		"MCP_ADDR":         addr, // same as LISTEN_ADDR: shared-listener path
 		"MCP_AUTH_MODE":    "oauth",
 		"MCP_AUTH_ISSUER":  "http://127.0.0.1:1",

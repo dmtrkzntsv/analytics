@@ -12,11 +12,11 @@ import (
 )
 
 // Load returns a validated config. vars may override any documented env
-// variable; DATABASE_URL defaults to an unused sqlite DSN so callers that
+// variable; DATABASE_DSN defaults to an unused sqlite DSN so callers that
 // never open the store can omit it.
 func Load(t testing.TB, vars map[string]string) *config.Config {
 	t.Helper()
-	m := map[string]string{"DATABASE_URL": "sqlite:///unused"}
+	m := map[string]string{"DATABASE_DSN": "sqlite:///unused"}
 	for k, v := range vars {
 		m[k] = v
 	}

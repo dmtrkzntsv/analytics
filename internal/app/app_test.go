@@ -75,7 +75,7 @@ func testConfig(t *testing.T, addr, dbPath string) *config.Config {
 		"ak_test", "web")
 	return configtest.Load(t, map[string]string{
 		"LISTEN_ADDR":             addr,
-		"DATABASE_URL":            "sqlite://" + dbPath,
+		"DATABASE_DSN":            "sqlite://" + dbPath,
 		"BUFFER_FLUSH_MAX_EVENTS": "2",
 		"BUFFER_FLUSH_INTERVAL":   "50ms",
 		"BUFFER_CAPACITY":         "100",
@@ -260,7 +260,7 @@ func mcpTestConfig(t *testing.T, addr, dbPath, mcpAddr string) *config.Config {
 		"ak_test", "web")
 	vars := map[string]string{
 		"LISTEN_ADDR":             addr,
-		"DATABASE_URL":            "sqlite://" + dbPath,
+		"DATABASE_DSN":            "sqlite://" + dbPath,
 		"BUFFER_FLUSH_MAX_EVENTS": "2",
 		"BUFFER_FLUSH_INTERVAL":   "50ms",
 		"BUFFER_CAPACITY":         "100",

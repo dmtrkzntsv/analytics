@@ -28,8 +28,8 @@ grep -q 'User=twillingate' /etc/systemd/system/litestream.service \
                                        && echo "ok: litestream.service templated"
 [ "$(stat -c '%a' /etc/twillingate/twillingate.env)" = 640 ] \
                                        && echo "ok: twillingate.env 0640"
-grep -q '^DATABASE_URL=' /etc/twillingate/twillingate.env \
-                                       && echo "ok: twillingate.env has DATABASE_URL"
+grep -q '^DATABASE_DSN=' /etc/twillingate/twillingate.env \
+                                       && echo "ok: twillingate.env has DATABASE_DSN"
 grep -q 'EnvironmentFile=/etc/twillingate/twillingate.env' /etc/systemd/system/twillingate.service \
                                        && echo "ok: unit loads twillingate.env"
 test -f /etc/litestream.yml            && echo "ok: litestream.yml installed"
@@ -40,12 +40,12 @@ test -f /etc/logrotate.d/twillingate     && echo "ok: logrotate installed"
 # one. No sudo in this minimal image, so drop privileges with su instead;
 # `sh -ac` (allexport), exactly like the hint install.sh prints, matters
 # here — a plain `. file` only sets shell variables, it does not export
-# them, so DATABASE_URL would never reach the twillingate process.
+# them, so DATABASE_DSN would never reach the twillingate process.
 out="$(su -s /bin/sh twillingate -c "sh -ac '. /etc/twillingate/twillingate.env; /usr/local/bin/twillingate project create -alias myapp'")"
 echo "$out" | grep -q '"myapp" created' && echo "ok: project create via installer hint works"
 
 # Re-running must not clobber an edited config file.
-echo 'DATABASE_URL=sqlite:///edited.db' > /etc/twillingate/twillingate.env
+echo 'DATABASE_DSN=sqlite:///edited.db' > /etc/twillingate/twillingate.env
 /tmp/deploy/systemd/install.sh --yes > /dev/null
 grep -q edited /etc/twillingate/twillingate.env \
   && echo "ok: rerun preserves config"

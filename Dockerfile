@@ -55,7 +55,7 @@ USER twillingate
 # LISTEN_ADDR binds all interfaces here (unlike the bare-metal loopback
 # default) because published ports reach the container's own IP, not lo.
 ENV LISTEN_ADDR=0.0.0.0:8080 \
-    DATABASE_URL=sqlite:///var/lib/twillingate/twillingate.db
+    DATABASE_DSN=sqlite:///var/lib/twillingate/twillingate.db
 ENTRYPOINT ["/usr/local/bin/twillingate"]
 CMD ["serve"]
 
@@ -79,13 +79,13 @@ USER twillingate
 # image build — rather than a deployment — if a source query does not match
 # the migrations.
 RUN set -eu; \
-    DATABASE_URL=sqlite:///tmp/warm.db twillingate migrate; \
+    DATABASE_DSN=sqlite:///tmp/warm.db twillingate migrate; \
     cd /opt/evidence; \
     EVIDENCE_SOURCE__twillingate__filename=../../../../tmp/warm.db npm run sources; \
     rm -f /tmp/warm.db
 ENV DASHBOARDS_ADDR=0.0.0.0:3000 \
     DASHBOARDS_PROJECT_DIR=/opt/evidence \
     DASHBOARDS_WORK_DIR=/var/lib/dashboards \
-    DATABASE_URL=sqlite:///var/lib/twillingate/twillingate.db
+    DATABASE_DSN=sqlite:///var/lib/twillingate/twillingate.db
 ENTRYPOINT ["/usr/local/bin/twillingate"]
 CMD ["dashboards"]

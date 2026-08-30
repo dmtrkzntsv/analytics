@@ -21,7 +21,7 @@ func newHandlerFixture(t *testing.T, over map[string]string) http.Handler {
 	t.Helper()
 	path := seedDB(t) // from readdb_test.go: migrated DB with project 'blog'
 	base := map[string]string{
-		"DATABASE_URL":  "sqlite://" + path,
+		"DATABASE_DSN":  "sqlite://" + path,
 		"MCP_AUTH_MODE": "token",
 		"MCP_TOKEN":     "ar_testtoken",
 	}
@@ -135,7 +135,7 @@ func TestTokenNeverLoggedAtInfo(t *testing.T) {
 	var buf strings.Builder
 	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	path := seedDB(t)
-	base := map[string]string{"DATABASE_URL": "sqlite://" + path,
+	base := map[string]string{"DATABASE_DSN": "sqlite://" + path,
 		"MCP_AUTH_MODE": "token", "MCP_TOKEN": "ar_secrettoken"}
 	cfg, _ := config.FromEnv(func(k string) (string, bool) { v, ok := base[k]; return v, ok })
 	st, _ := store.Open(cfg.Database)
@@ -284,7 +284,7 @@ func TestHealthzUnauthenticated(t *testing.T) {
 // mount the route at all.
 func TestRegisterOnWithoutHealthzOmitsRoute(t *testing.T) {
 	path := seedDB(t)
-	base := map[string]string{"DATABASE_URL": "sqlite://" + path,
+	base := map[string]string{"DATABASE_DSN": "sqlite://" + path,
 		"MCP_AUTH_MODE": "token", "MCP_TOKEN": "ar_testtoken"}
 	cfg, err := config.FromEnv(func(k string) (string, bool) { v, ok := base[k]; return v, ok })
 	if err != nil {
@@ -335,7 +335,7 @@ func TestWrapAuthUnknownMode(t *testing.T) {
 func TestBuildFailsWhenOAuthIssuerUnreachable(t *testing.T) {
 	path := seedDB(t)
 	base := map[string]string{
-		"DATABASE_URL":     "sqlite://" + path,
+		"DATABASE_DSN":     "sqlite://" + path,
 		"MCP_AUTH_MODE":    "oauth",
 		"MCP_AUTH_ISSUER":  "http://127.0.0.1:0",
 		"MCP_RESOURCE_URL": "https://analytics.example.com/mcp",

@@ -13,7 +13,7 @@ import (
 // registry (that database), not in an env-named file.
 func setEnv(t *testing.T, dbPath string) {
 	t.Helper()
-	t.Setenv("DATABASE_URL", "sqlite://"+dbPath)
+	t.Setenv("DATABASE_DSN", "sqlite://"+dbPath)
 }
 
 func TestMigrateSubcommand(t *testing.T) {
@@ -42,8 +42,8 @@ func TestMigrateSubcommand(t *testing.T) {
 func TestSubcommandsRejectBadConfig(t *testing.T) {
 	argsFor := map[string][]string{"serve": {"serve", "-api"}, "migrate": {"migrate"}}
 	for _, cmd := range []string{"serve", "migrate"} {
-		t.Run(cmd+" missing DATABASE_URL", func(t *testing.T) {
-			t.Setenv("DATABASE_URL", "")
+		t.Run(cmd+" missing DATABASE_DSN", func(t *testing.T) {
+			t.Setenv("DATABASE_DSN", "")
 			var out bytes.Buffer
 			if code := run(argsFor[cmd], &out); code != 1 {
 				t.Fatalf("exit code = %d, want 1", code)
@@ -96,7 +96,7 @@ func TestExplicitMCPWithoutConfigFails(t *testing.T) {
 
 func TestMigrateRejectsBadDSN(t *testing.T) {
 	setEnv(t, "unused.db")
-	t.Setenv("DATABASE_URL", "bogus://nope")
+	t.Setenv("DATABASE_DSN", "bogus://nope")
 	var out bytes.Buffer
 	if code := run([]string{"migrate"}, &out); code != 1 {
 		t.Fatalf("exit code = %d, want 1 (%s)", code, out.String())
@@ -106,7 +106,7 @@ func TestMigrateRejectsBadDSN(t *testing.T) {
 // dashboards renders whatever database it is pointed at; unlike serve and
 // migrate it must start without a project list.
 func TestDashboardsRejectsMissingDatabase(t *testing.T) {
-	t.Setenv("DATABASE_URL", "")
+	t.Setenv("DATABASE_DSN", "")
 	t.Setenv("DASHBOARDS_DB_PATH", "")
 	var out bytes.Buffer
 	if code := run([]string{"dashboards"}, &out); code != 1 {

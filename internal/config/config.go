@@ -101,7 +101,7 @@ type DashboardsConfig struct {
 
 type MCPConfig struct {
 	Addr         string        // MCP_ADDR, defaults to Listen
-	DBPath       string        // MCP_DB_PATH, defaults to DATABASE_URL path
+	DBPath       string        // MCP_DB_PATH, defaults to DATABASE_DSN path
 	AuthMode     string        // "oauth" | "cloudflare" | "token"; no default
 	ResourceURL  string        // MCP_RESOURCE_URL
 	Issuer       string        // MCP_AUTH_ISSUER
@@ -186,7 +186,7 @@ func FromEnv(lookup func(string) (string, bool)) (*Config, error) {
 }
 
 // FromEnvDashboards is FromEnv, plus the DASHBOARDS_DB_PATH fallback to
-// DATABASE_URL that only the dashboards renderer needs.
+// DATABASE_DSN that only the dashboards renderer needs.
 func FromEnvDashboards(lookup func(string) (string, bool)) (*Config, error) {
 	return parse(lookup, true)
 }
@@ -195,8 +195,8 @@ func parse(lookup func(string) (string, bool), dashboards bool) (*Config, error)
 	e := &env{lookup: lookup}
 	c := &Config{
 		Listen:   e.str("LISTEN_ADDR", "127.0.0.1:8080"),
-		Database: e.str("DATABASE_URL", ""),
-		Geo:      e.str("GEO_URL", "cloudflare://"),
+		Database: e.str("DATABASE_DSN", ""),
+		Geo:      e.str("GEO_DSN", "cloudflare://"),
 		// The collector's public base URL (https://analytics.example.com).
 		// Embed snippets and MCP integration guidance are built from it;
 		// unset, they carry a placeholder and tell the model to ask.
@@ -252,7 +252,7 @@ func parse(lookup func(string) (string, bool), dashboards bool) (*Config, error)
 	if dashboards {
 		if c.Dashboards.DBPath == "" {
 			if c.Database == "" {
-				return nil, fmt.Errorf("config: DASHBOARDS_DB_PATH or DATABASE_URL is required")
+				return nil, fmt.Errorf("config: DASHBOARDS_DB_PATH or DATABASE_DSN is required")
 			}
 			c.Dashboards.DBPath = strings.TrimPrefix(c.Database, "sqlite://")
 		}
@@ -279,7 +279,7 @@ func ParseProjects(r io.Reader) ([]Project, error) {
 
 func (c *Config) validate() error {
 	if c.Database == "" {
-		return fmt.Errorf("config: DATABASE_URL is required")
+		return fmt.Errorf("config: DATABASE_DSN is required")
 	}
 	for _, dsn := range []string{c.Database, c.Geo} {
 		u, err := url.Parse(dsn)

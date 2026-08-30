@@ -7,11 +7,11 @@ import (
 	"testing"
 )
 
-// withDB points DATABASE_URL at a fresh temp file for one test.
+// withDB points DATABASE_DSN at a fresh temp file for one test.
 func withDB(t *testing.T) string {
 	t.Helper()
 	dsn := "sqlite://" + t.TempDir() + "/cli.db"
-	t.Setenv("DATABASE_URL", dsn)
+	t.Setenv("DATABASE_DSN", dsn)
 	return dsn
 }
 
@@ -63,8 +63,8 @@ func TestProjectCreateUnknownSubcommand(t *testing.T) {
 func TestEnvFileFlag(t *testing.T) {
 	dir := t.TempDir()
 	envFile := dir + "/analytics.env"
-	os.WriteFile(envFile, []byte("DATABASE_URL=sqlite://"+dir+"/env.db\n"), 0o600)
-	os.Unsetenv("DATABASE_URL")
+	os.WriteFile(envFile, []byte("DATABASE_DSN=sqlite://"+dir+"/env.db\n"), 0o600)
+	os.Unsetenv("DATABASE_DSN")
 	var out bytes.Buffer
 	if code := run([]string{"project", "-env-file", envFile, "create", "-alias", "x"}, &out); code != 0 {
 		t.Fatalf("exit %d: %s", code, out.String())

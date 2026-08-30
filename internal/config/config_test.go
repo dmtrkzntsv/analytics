@@ -6,11 +6,11 @@ import (
 	"time"
 )
 
-// load runs FromEnv against a var map. DATABASE_URL defaults to an unused
+// load runs FromEnv against a var map. DATABASE_DSN defaults to an unused
 // sqlite DSN so callers that only care about other fields can omit it.
 func load(t *testing.T, vars map[string]string) (*Config, error) {
 	t.Helper()
-	m := map[string]string{"DATABASE_URL": "sqlite:///tmp/a.db"}
+	m := map[string]string{"DATABASE_DSN": "sqlite:///tmp/a.db"}
 	for k, v := range vars {
 		m[k] = v
 	}
@@ -48,9 +48,9 @@ func TestDefaultsApplied(t *testing.T) {
 
 func TestEnvOverrides(t *testing.T) {
 	c, err := load(t, map[string]string{
-		"DATABASE_URL":                     "sqlite:///tmp/a.db",
+		"DATABASE_DSN":                     "sqlite:///tmp/a.db",
 		"LISTEN_ADDR":                      "0.0.0.0:9999",
-		"GEO_URL":                          "none://",
+		"GEO_DSN":                          "none://",
 		"LOG_LEVEL":                        "debug",
 		"LOG_FORMAT":                       "text",
 		"LOG_FILE":                         "/tmp/a.log",
@@ -90,15 +90,15 @@ func TestEnvOverrides(t *testing.T) {
 
 func TestValidationErrors(t *testing.T) {
 	base := func(over map[string]string) map[string]string {
-		vars := map[string]string{"DATABASE_URL": "sqlite:///tmp/a.db"}
+		vars := map[string]string{"DATABASE_DSN": "sqlite:///tmp/a.db"}
 		for k, v := range over {
 			vars[k] = v
 		}
 		return vars
 	}
 	cases := map[string]map[string]string{
-		"no database":       {"DATABASE_URL": ""},
-		"bad geo scheme":    base(map[string]string{"GEO_URL": "???"}),
+		"no database":       {"DATABASE_DSN": ""},
+		"bad geo scheme":    base(map[string]string{"GEO_DSN": "???"}),
 		"negative raw_days": base(map[string]string{"RETENTION_WEB_RAW_DAYS": "-1"}),
 		"bad integer":       base(map[string]string{"BUFFER_CAPACITY": "many"}),
 		"invalid duration":  base(map[string]string{"BUFFER_FLUSH_INTERVAL": "fast"}),
@@ -112,7 +112,7 @@ func TestValidationErrors(t *testing.T) {
 
 // Load reads the real process environment; cover the wrapper itself.
 func TestLoadFromProcessEnv(t *testing.T) {
-	t.Setenv("DATABASE_URL", "sqlite:///tmp/a.db")
+	t.Setenv("DATABASE_DSN", "sqlite:///tmp/a.db")
 	t.Setenv("LOG_LEVEL", "warn")
 	c, err := Load()
 	if err != nil {
@@ -130,13 +130,13 @@ func mapLookup(vars map[string]string) func(string) (string, bool) {
 
 func TestDashboardsDefaults(t *testing.T) {
 	c, err := FromEnvDashboards(mapLookup(map[string]string{
-		"DATABASE_URL": "sqlite:///var/lib/analytics/analytics.db",
+		"DATABASE_DSN": "sqlite:///var/lib/twillingate/twillingate.db",
 	}))
 	if err != nil {
 		t.Fatalf("FromEnvDashboards: %v", err)
 	}
-	if c.Dashboards.DBPath != "/var/lib/analytics/analytics.db" {
-		t.Errorf("DBPath = %q, want the DATABASE_URL path", c.Dashboards.DBPath)
+	if c.Dashboards.DBPath != "/var/lib/twillingate/twillingate.db" {
+		t.Errorf("DBPath = %q, want the DATABASE_DSN path", c.Dashboards.DBPath)
 	}
 	if c.Dashboards.Addr != "0.0.0.0:3000" || c.Dashboards.Interval != 15*time.Minute {
 		t.Errorf("defaults = %+v", c.Dashboards)
@@ -148,7 +148,7 @@ func TestDashboardsDefaults(t *testing.T) {
 
 func TestDashboardsDBPathWins(t *testing.T) {
 	c, err := FromEnvDashboards(mapLookup(map[string]string{
-		"DATABASE_URL":       "sqlite:///var/lib/analytics/analytics.db",
+		"DATABASE_DSN":       "sqlite:///var/lib/twillingate/twillingate.db",
 		"DASHBOARDS_DB_PATH": "/data/replica.db",
 	}))
 	if err != nil {
@@ -161,7 +161,7 @@ func TestDashboardsDBPathWins(t *testing.T) {
 
 func TestDashboardsNeedsADatabase(t *testing.T) {
 	if _, err := FromEnvDashboards(mapLookup(map[string]string{})); err == nil {
-		t.Fatal("want an error with neither DASHBOARDS_DB_PATH nor DATABASE_URL")
+		t.Fatal("want an error with neither DASHBOARDS_DB_PATH nor DATABASE_DSN")
 	}
 }
 
@@ -241,7 +241,7 @@ func TestRejectsNegativeAppRetention(t *testing.T) {
 
 func TestLoadDoesNotRequireProjectsFile(t *testing.T) {
 	cfg, err := FromEnv(func(k string) (string, bool) {
-		if k == "DATABASE_URL" {
+		if k == "DATABASE_DSN" {
 			return "sqlite:///tmp/x.db", true
 		}
 		return "", false // PROJECTS_FILE unset, no file anywhere
@@ -256,7 +256,7 @@ func TestLoadDoesNotRequireProjectsFile(t *testing.T) {
 
 func mcpEnv(over map[string]string) func(string) (string, bool) {
 	base := map[string]string{
-		"DATABASE_URL":  "sqlite:///tmp/x.db",
+		"DATABASE_DSN":  "sqlite:///tmp/x.db",
 		"MCP_AUTH_MODE": "token", "MCP_TOKEN": "ar_x",
 	}
 	for k, v := range over {

@@ -17,10 +17,10 @@ trap cleanup EXIT
 
 fail() { echo "SMOKE FAIL: $*" >&2; sed 's/^/  server: /' "$dir/log" >&2 || true; exit 1; }
 
-export DATABASE_URL="sqlite://$dir/smoke.db"
+export DATABASE_DSN="sqlite://$dir/smoke.db"
 
 # Project configuration is registry-first now: create the project and issue
-# an ingest key via the CLI (against the same DATABASE_URL) before the
+# an ingest key via the CLI (against the same DATABASE_DSN) before the
 # server ever boots, instead of writing a local projects.json.
 ./twillingate project create -alias dev -name "Smoke" -identity anonymous \
     -origin "http://localhost" \
@@ -29,7 +29,7 @@ key=$(./twillingate key issue -project dev -label smoke | grep -o 'ak_[0-9a-f]*'
 [ -n "$key" ] || fail "key issue failed"
 
 env LISTEN_ADDR="127.0.0.1:$port" \
-    GEO_URL="none://" \
+    GEO_DSN="none://" \
     LOG_LEVEL=debug LOG_FORMAT=text \
     BUFFER_FLUSH_INTERVAL=200ms \
     ./twillingate serve > "$dir/log" 2>&1 &

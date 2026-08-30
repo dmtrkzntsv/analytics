@@ -51,7 +51,7 @@ func envFileLookup(path string) (func(string) (string, bool), error) {
 	}, nil
 }
 
-// openOps opens the store named by DATABASE_URL (optionally via
+// openOps opens the store named by DATABASE_DSN (optionally via
 // -env-file), migrates, and returns the management frontend. The CLI
 // talks to the database directly — break-glass by design (spec §7.1).
 func openOps(stdout io.Writer, envFile string) (*manage.Ops, *config.Config, func(), int) {
