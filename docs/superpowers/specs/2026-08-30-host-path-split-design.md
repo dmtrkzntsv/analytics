@@ -430,7 +430,7 @@ timestamp clamping and the queue write are unchanged.
 
 ## 7. Documentation
 
-### 7.1 Two documents, embedded
+### 7.1 One document, embedded
 
 The MCP doc surface is four pieces today, two of which are hand-written Go
 string constants in `docs_content.go` (`docsEvents`, `docsJSSDK`) bound to
@@ -438,61 +438,65 @@ source files by `docs_sync_test.go`. `docsJSSDK` was derived from
 `script.js` — the snippet §3.2 deletes — so it documents an API that no
 longer exists.
 
-The seven prose docs are consolidated into two, split on a single line:
-**`twillingate.md` is getting data in and keeping the service alive;
-`reporting.md` is getting data out.** Either one alone is enough for a
-person or an agent to do the job it covers.
+**Every prose doc collapses into one file, `docs/twillingate.md`**,
+embedded through the `docs` package (the `//go:embed` pattern
+`docs.IngestAPI` already uses) and exposed as `docs://twillingate`.
+Reading it end to end is enough for a person or an agent to install,
+configure, operate, instrument, and query a twillingate deployment.
 
-| new file | absorbs | covers |
-| --- | --- | --- |
-| `docs/twillingate.md` | `deployment.md`, `litestream.md`, `configuration.md`, `sdk.md`, `ingest-api.md`, `mcp-auth.md`, `mcp-clients.md` | install, upgrade, back up and restore, configure projects and keys, instrument a site or app, the wire format, enable and authenticate the MCP endpoint, connect a client — plus a short summary of what MCP then offers |
-| `docs/reporting.md` | `deployment.md` §3 (Dashboards) | Evidence dashboards, the MCP read tools in depth, how to query |
+| absorbed | contributes |
+| --- | --- |
+| `deployment.md` | install, VPS topology, backup drill, disaster recovery, routine ops |
+| `litestream.md` | replication: bucket, writer, reader, verification, recovery |
+| `configuration.md` | env vars, projects, ingest keys, low-resource hosts |
+| `sdk.md` | snippet and SDK modes, runtime API, masking, privacy behaviour |
+| `ingest-api.md` | the normative wire format |
+| `mcp-auth.md` | `token://`, `cloudflare://`, `oauth://` auth modes |
+| `mcp-clients.md` | connecting Claude Code, Desktop, claude.ai; what you get |
+| `docsEvents` | the event model: families, reserved names and keys |
+| `docsJSSDK` | deleted outright — superseded by the `sdk.md` material |
 
-Reading `twillingate.md` end to end should leave you with a running,
-backed-up, instrumented collector and a connected MCP client. `reporting.md`
-is what you read next to get answers out of it.
+Suggested top-level order, so the document reads as one path rather than a
+stapled bundle: **what it is → install → configure → instrument → connect
+a client → query → operate and recover.**
 
-Both embed through the `docs` package and are exposed as
-`docs://twillingate` and `docs://reporting`. The absorbed files are
-replaced by short pointers rather than deleted, so existing links resolve.
+The absorbed files are replaced by short pointers rather than deleted, so
+existing links and the `internal/server` source comments citing
+`docs/ingest-api.md` still resolve.
 
 `docsEvents` and `docsJSSDK` are deleted. `docs_sync_test.go` is repointed
 to bind `docs/twillingate.md` to `reservedKeys`: every reserved key
 documented, no documented key absent from the map. That is a stronger test
 than the one it replaces and catches the new keys going undocumented.
 
-**MCP setup belongs to `twillingate.md`.** Enabling the endpoint, choosing
-an auth mode and pointing a client at it are all part of standing the
-system up, so `mcp-auth.md` and `mcp-clients.md` go there together — auth
-and client setup are one task and must not be split across documents.
-
-`twillingate.md` closes that section with a **short** capability summary:
-the tool families (overview, breakdown, retention, product, management),
-the resources, and one worked question. Enough to know what the connection
-is worth without reproducing the tool reference. The depth — every tool,
-its arguments, and how to write queries — lives in `reporting.md`, which
-that summary links to.
-
 **`docs/plausible/README.md` stays where it is.** It documents the bytes
 served at `/js/plausible-shim.js` and `TestPlausibleShimServed` binds the
 two; folding it in would break that binding.
 
-Kept separate from both:
+Kept separate:
 
 - **`schema://views`** — a machine reference that must track migrations
-  (this change adds `v_web_hosts`). It is the hot path for any agent
-  writing SQL, and making that agent load the whole reporting document to
-  get a column list is a real regression. `reporting.md` describes how to
-  query and points at `schema://views` for the authoritative columns.
+  (this change adds `v_web_hosts`). With everything else in one file the
+  case is stronger, not weaker: an agent writing SQL would otherwise load
+  the entire manual to get a column list. `twillingate.md` explains how to
+  query and points here for the authoritative columns.
 - **The `integration_guide` tool** — it injects live registry state (active
   key, identity mode, `PUBLIC_URL`) that no static document can carry.
 
-Four resources become three, plus the unchanged tool.
+Four resources become two, plus the unchanged tool.
+
+**The cost, stated plainly.** One document is ~1,400 lines, and an MCP
+resource is fetched whole. An agent that only needs the SDK pays for the
+disaster-recovery runbook too. That is accepted in exchange for having no
+boundary to misplace content across and nothing to keep in agreement
+between files. If the read cost proves to matter, the split to revisit
+first is by audience — operate / instrument / query — which is where the
+seams already are.
 
 **Scope note.** This consolidation is the largest single unit of work in
 the spec and is independent of §3–§6. It should be its own implementation
-plan, executed after the code changes land so the new documents describe
-the finished contract rather than being written twice.
+plan, executed after the code changes land so the document describes the
+finished contract rather than being written twice.
 
 ### 7.2 Keeping it current
 
@@ -501,19 +505,15 @@ Two mechanisms, because neither alone is enough.
 **Enforced.** `docs_sync_test.go` binds `docs/twillingate.md` to
 `reservedKeys` (§7.1). Adding a reserved attribute without documenting it
 fails `make check`. This catches the wire contract — the part most likely
-to drift and most damaging when it does. Nothing comparable guards
-`reporting.md`, which is why the instructed half below names it too.
+to drift and most damaging when it does. Nothing guards the other 90% of
+the document, which is what the instructed half is for.
 
 **Instructed.** `CLAUDE.md` gains a `## Documentation` section, since no
 test can catch prose going stale:
 
-> `docs/twillingate.md` and `docs/reporting.md` are the two normative
-> documents and the only prose the MCP endpoint serves to agents. They are
-> not summaries of the code — they are the contract. Split: twillingate.md
-> is getting data in and keeping the service alive, reporting.md is getting
-> data out.
->
-> Update `twillingate.md` **in the same commit** as any change to:
+> `docs/twillingate.md` is the single normative document and the only prose
+> the MCP endpoint serves to agents. It is not a summary of the code — it
+> is the contract. Update it **in the same commit** as any change to:
 >
 > - reserved attribute keys or event names (`internal/server/ingest.go`)
 > - the ingest wire format or its responses (`internal/server/handlers.go`)
@@ -521,20 +521,18 @@ test can catch prose going stale:
 >   (`sdk/src/twillingate.ts`)
 > - config keys, env vars or project fields (`internal/config/`)
 > - install, upgrade or restore procedure (`deploy/`, `Makefile`)
-> - MCP auth modes or client setup (`internal/mcpserver/auth.go`)
-> - the set of MCP tools offered, which the capability summary names
->
-> Update `reporting.md` in the same commit as any change to the MCP read
-> tools' behaviour or arguments, or to the Evidence dashboards.
+> - MCP auth modes, client setup, or the set of tools offered
+>   (`internal/mcpserver/`)
+> - the Evidence dashboards (`internal/dashboards/`, `evidence/`)
 >
 > Update `schemaViews` in `internal/mcpserver/resources.go` in the same
 > commit as any migration that adds or changes a queryable view.
 >
-> Everything under `docs/` that these two absorbed is a pointer, not a
-> source — never add content there. `docs/plausible/README.md` is the
-> exception: it documents bytes the collector serves and a test binds it to
-> them. `docs_sync_test.go` enforces the reserved-key half of this; the
-> rest is on you.
+> Everything under `docs/` that it absorbed is a pointer, not a source —
+> never add content there. `docs/plausible/README.md` is the exception: it
+> documents bytes the collector serves and a test binds it to them.
+> `docs_sync_test.go` enforces the reserved-key half of this; the rest is
+> on you.
 
 A `docs`-only change publishes nothing (`paths-ignore` on `docs/**`), so
 same-commit updating costs no extra release and keeps the document honest
