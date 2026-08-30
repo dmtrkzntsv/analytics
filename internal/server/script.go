@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"net/http"
 
+	"github.com/dmtrkzntsv/twillingate/docs"
 	"github.com/dmtrkzntsv/twillingate/internal/version"
 )
 
@@ -34,6 +35,15 @@ func (s *Server) registerScript(mux *http.ServeMux) {
 	}
 	versioned := bytes.ReplaceAll(sdkScript,
 		[]byte(sdkVersionPlaceholder), []byte(version.Version))
-	mux.HandleFunc("GET /js/script.js", serve(trackingScript))
-	mux.HandleFunc("GET /js/twillingate.js", serve(versioned))
+	// Helpers are served from the same table so a site loads them rather
+	// than copying them into its own static assets. plausible-shim.js is
+	// embedded from docs/, where the README documenting it lives, so the
+	// hosted copy and the documented one are the same bytes.
+	for path, body := range map[string][]byte{
+		"GET /js/script.js":         trackingScript,
+		"GET /js/twillingate.js":    versioned,
+		"GET /js/plausible-shim.js": docs.PlausibleShim,
+	} {
+		mux.HandleFunc(path, serve(body))
+	}
 }
