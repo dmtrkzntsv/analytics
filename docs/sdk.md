@@ -118,6 +118,15 @@ bad payload) drops the batch instead — resending it forever helps nobody.
 changed: the legacy `analytics.identify(user, group)` is now
 `twillingate.identify(user, userName)` + `twillingate.group(group)`.
 Everything else (attributes, key, identity mode) is unchanged, and
-identified-mode visitors carry over via the storage migration. Sites using Plausible-style
-tagged-event classes: [docs/plausible/](plausible/) has a shim that works
-with both globals.
+identified-mode visitors carry over via the storage migration.
+
+## Helpers
+
+The collector serves helper scripts next to the SDK, under the same
+`/js/` prefix and the same day-long cache. They are optional: load one
+only if its problem is yours.
+
+| URL | What it does |
+| --- | --- |
+| `/js/plausible-shim.js` | Fires events from Plausible's `plausible-event-*` classes, so a site migrating off Plausible keeps its tagged CTAs without touching the markup. Works with both `twillingate` and the legacy `analytics` global. See [docs/plausible/](plausible/). |
+

@@ -94,7 +94,7 @@ func cmdProject(args []string, stdout io.Writer) int {
 	}
 	rest := fs.Args()
 	if len(rest) == 0 {
-		fmt.Fprintln(stdout, "usage: twillingate project <create|update|list|archive|restore|delete> [flags]")
+		fmt.Fprintln(stdout, "usage: twillingate project <create|update|list|archive|restore|rename|delete> [flags]")
 		return 2
 	}
 	ops, _, closeStore, code := openOps(stdout, *envFile)
@@ -113,6 +113,8 @@ func cmdProject(args []string, stdout io.Writer) int {
 		identity := sf.String("identity", "anonymous", "anonymous|identified")
 		var origins multiFlag
 		sf.Var(&origins, "origin", "allowed origin, `*` wildcards accepted (repeatable)")
+		var attrs multiFlag
+		sf.Var(&attrs, "attr", "attribute key to break down (repeatable)")
 		if err := sf.Parse(subArgs); err != nil {
 			return 2
 		}
@@ -124,12 +126,13 @@ func cmdProject(args []string, stdout io.Writer) int {
 			spec.Name = *name
 			spec.Identity = *identity
 			spec.AllowedOrigins = origins
+			spec.Attributes = attrs
 		} else {
 			// For update, start from current values and overlay only explicitly-set flags
 			snap := ops.Reg.Snapshot(ctx)
 			current := snap.Project(*alias)
 			if current == nil {
-				fmt.Fprintf(stdout, "project %q not found\n", *alias)
+				fmt.Fprintf(stdout, "no project %q; aliases are immutable — use `project rename` to change one, or `project create` to make a new one\n", *alias)
 				return 1
 			}
 			// Start from current values
@@ -137,7 +140,7 @@ func cmdProject(args []string, stdout io.Writer) int {
 			spec.Identity = current.Identity
 			spec.AllowedOrigins = current.AllowedOrigins
 			spec.Retention = current.Retention
-			spec.Aggregation = current.Aggregation
+			spec.Attributes = current.Attributes
 
 			// Overlay explicitly-set flags using sf.Visit
 			sf.Visit(func(f *flag.Flag) {
@@ -149,6 +152,9 @@ func cmdProject(args []string, stdout io.Writer) int {
 				case "origin":
 					// If -origin was passed at all, replace the whole list
 					spec.AllowedOrigins = origins
+				case "attr":
+					// If -attr was passed at all, replace the whole list
+					spec.Attributes = attrs
 				}
 			})
 		}
@@ -196,6 +202,24 @@ func cmdProject(args []string, stdout io.Writer) int {
 		}
 		fmt.Fprintf(stdout, "project %q %sd\n", *alias, sub)
 		return 0
+	case "rename":
+		sf := flag.NewFlagSet("project rename", flag.ContinueOnError)
+		sf.SetOutput(stdout)
+		alias := sf.String("alias", "", "current project alias (required)")
+		to := sf.String("to", "", "new project alias (required)")
+		if err := sf.Parse(subArgs); err != nil {
+			return 2
+		}
+		if *alias == "" || *to == "" {
+			fmt.Fprintln(stdout, "usage: twillingate project rename -alias <old> -to <new>")
+			return 2
+		}
+		if err := ops.RenameProject(ctx, "cli", *alias, *to); err != nil {
+			fmt.Fprintln(stdout, err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "project %q renamed to %q\n", *alias, *to)
+		return 0
 	case "delete":
 		sf := flag.NewFlagSet("project delete", flag.ContinueOnError)
 		sf.SetOutput(stdout)
@@ -216,7 +240,7 @@ func cmdProject(args []string, stdout io.Writer) int {
 		fmt.Fprintf(stdout, "project %q deleted\n", *alias)
 		return 0
 	default:
-		fmt.Fprintf(stdout, "unknown subcommand %q\nusage: twillingate project <create|update|list|archive|restore|delete> [flags]\n", sub)
+		fmt.Fprintf(stdout, "unknown subcommand %q\nusage: twillingate project <create|update|list|archive|restore|rename|delete> [flags]\n", sub)
 		return 2
 	}
 }

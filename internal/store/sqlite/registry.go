@@ -37,7 +37,7 @@ func (d *DB) ConfigVersion(ctx context.Context) (int64, error) {
 
 func (d *DB) LoadRegistry(ctx context.Context) ([]store.RegistryProject, []store.RegistryKey, error) {
 	rows, err := d.db.QueryContext(ctx, `SELECT alias, name, identity,
-		allowed_origins, COALESCE(retention,''), COALESCE(product_aggregation,''),
+		allowed_origins, COALESCE(retention,''), attributes,
 		archived_at IS NOT NULL FROM projects ORDER BY alias`)
 	if err != nil {
 		return nil, nil, err
@@ -47,7 +47,7 @@ func (d *DB) LoadRegistry(ctx context.Context) ([]store.RegistryProject, []store
 	for rows.Next() {
 		var p store.RegistryProject
 		if err := rows.Scan(&p.Alias, &p.Name, &p.Identity,
-			&p.AllowedOrigins, &p.Retention, &p.Aggregation, &p.Archived); err != nil {
+			&p.AllowedOrigins, &p.Retention, &p.Attributes, &p.Archived); err != nil {
 			return nil, nil, err
 		}
 		ps = append(ps, p)
@@ -87,10 +87,10 @@ func (d *DB) CreateProject(ctx context.Context, p store.RegistryProject, a store
 			return fmt.Errorf("create project: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO projects
-			(id, alias, name, identity, allowed_origins, retention, product_aggregation)
-			VALUES (?,?,?,?,?,NULLIF(?,''),NULLIF(?,''))`,
+			(id, alias, name, identity, allowed_origins, retention, attributes)
+			VALUES (?,?,?,?,?,NULLIF(?,''),?)`,
 			id.String(), p.Alias, p.Name, p.Identity, p.AllowedOrigins,
-			p.Retention, p.Aggregation); err != nil {
+			p.Retention, p.Attributes); err != nil {
 			return fmt.Errorf("create project %q: %w", p.Alias, err)
 		}
 		return auditAndBump(ctx, tx, a)
@@ -100,9 +100,9 @@ func (d *DB) CreateProject(ctx context.Context, p store.RegistryProject, a store
 func (d *DB) UpdateProject(ctx context.Context, p store.RegistryProject, a store.AuditEntry) error {
 	return d.tx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE projects SET name=?, identity=?,
-			allowed_origins=?, retention=NULLIF(?,''), product_aggregation=NULLIF(?,'')
+			allowed_origins=?, retention=NULLIF(?,''), attributes=?
 			WHERE alias=?`,
-			p.Name, p.Identity, p.AllowedOrigins, p.Retention, p.Aggregation, p.Alias)
+			p.Name, p.Identity, p.AllowedOrigins, p.Retention, p.Attributes, p.Alias)
 		if err != nil {
 			return err
 		}
@@ -178,7 +178,10 @@ func (d *DB) SetIngestKeyDisabled(ctx context.Context, project, label string, di
 
 // projectTables is every table carrying a per-project `project` column.
 // Kept in one place so a future migration adding a table has one list to
-// extend; the delete test cross-checks the count against sqlite_master.
+// extend; TestProjectTablesMatchesSchema (registry_test.go) cross-checks
+// this list against the live schema (sqlite_master + pragma_table_info) in
+// both directions, so a forgotten addition or a stale entry fails loudly
+// instead of silently orphaning rows on DeleteProjectData or RenameProject.
 var projectTables = []string{
 	"web_hits", "product_events", "app_views",
 	"agg_web_daily", "agg_web_pages", "agg_web_referrers", "agg_web_countries",
@@ -208,6 +211,52 @@ func (d *DB) DeleteProjectData(ctx context.Context, alias string, a store.AuditE
 			if _, err := tx.ExecContext(ctx,
 				`DELETE FROM `+table+` WHERE project=?`, alias); err != nil {
 				return fmt.Errorf("delete %s: %w", table, err)
+			}
+		}
+		return auditAndBump(ctx, tx, a)
+	})
+}
+
+// RenameProject rewrites the alias on the registry row and the `project`
+// column on every table in projectTables, in one transaction. ingest_keys
+// is one of those tables, so keys follow the rename and deployed clients
+// keep working without redeploying — that is what makes this command
+// usable rather than a data-loss trap. The already-taken check on the new
+// alias runs before any write. The unknown-source check is not a separate
+// pre-check: it is the RowsAffected()==0 result of the UPDATE projects
+// statement itself, and an error at that point aborts the transaction —
+// so either way a rejected rename leaves the source alias and all its rows
+// completely untouched, just via rollback rather than avoidance for the
+// unknown-source case.
+//
+// PRAGMA foreign_keys is never enabled in this codebase, so the
+// `REFERENCES projects(alias)` clause on ingest_keys does not constrain
+// statement order; projects is updated first regardless, to match the
+// design doc.
+func (d *DB) RenameProject(ctx context.Context, old, new string, a store.AuditEntry) error {
+	return d.tx(ctx, func(tx *sql.Tx) error {
+		if old == new {
+			return fmt.Errorf("rename: project %q is already named %q", old, new)
+		}
+		var taken int
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM projects WHERE alias=?`, new).Scan(&taken); err != nil {
+			return err
+		}
+		if taken > 0 {
+			return fmt.Errorf("rename: alias %q already exists", new)
+		}
+		res, err := tx.ExecContext(ctx, `UPDATE projects SET alias=? WHERE alias=?`, new, old)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return fmt.Errorf("rename: unknown alias %q", old)
+		}
+		for _, table := range projectTables {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE `+table+` SET project=? WHERE project=?`, new, old); err != nil {
+				return fmt.Errorf("rename %s: %w", table, err)
 			}
 		}
 		return auditAndBump(ctx, tx, a)

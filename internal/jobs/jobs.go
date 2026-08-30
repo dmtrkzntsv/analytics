@@ -33,10 +33,16 @@ type Runner struct {
 	// day however often the ticker lands inside its hour.
 	lastSaltDay string
 	lastAggDay  string
+
+	// topN caps distinct client-supplied values kept per declared product
+	// attribute (PRODUCT_ATTRIBUTES_TOP_N); the operator picks the key,
+	// clients pick the values.
+	topN int
 }
 
 func New(st store.Store, cfg *config.Config, reg *manage.Registry, salt Rotator, logger *slog.Logger, now func() time.Time) *Runner {
-	return &Runner{store: st, cfg: cfg, reg: reg, salt: salt, logger: logger, now: now}
+	return &Runner{store: st, cfg: cfg, reg: reg, salt: salt, logger: logger, now: now,
+		topN: cfg.ProductAttributesTopN}
 }
 
 // RunDailyPass rolls up every day that has aged out of the raw window,
@@ -105,9 +111,9 @@ func (r *Runner) RunDailyPass(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		settings := snap.AggregationFor(id)
+		attrs := snap.AttributesFor(id)
 		for _, day := range prodDays {
-			if err := r.store.AggregateProductDay(ctx, id, day, settings); err != nil {
+			if err := r.store.AggregateProductDay(ctx, id, day, attrs, r.topN); err != nil {
 				r.logger.Error("aggregate product failed", "project", id, "day", day.String(), "error", err)
 			}
 		}
@@ -136,9 +142,7 @@ func (r *Runner) RunDailyPass(ctx context.Context) error {
 		}
 	}
 
-	if keys, err := r.store.KnownAttributeKeys(ctx); err != nil {
-		r.logger.Error("attribute key scan failed", "error", err)
-	} else if err := r.store.RebuildFlatView(ctx, keys); err != nil {
+	if err := r.store.RebuildFlatView(ctx, snap.DeclaredAttributeKeys()); err != nil {
 		r.logger.Error("flat view rebuild failed", "error", err)
 	}
 	if err := r.store.IncrementalVacuum(ctx); err != nil {

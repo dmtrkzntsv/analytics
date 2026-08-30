@@ -83,11 +83,10 @@ func newTestHost(t *testing.T) (*host, *mcp.ClientSession) {
 	      VALUES ('blog','2026-08-20','iPhone15,3',5,12)`)
 	seed(`INSERT INTO agg_app_countries (project, day, country, actives, views)
 	      VALUES ('blog','2026-08-20','US',5,12)`)
-	// product_aggregation, enabled for blog only: docs stays at the
-	// default (aggregation off), which TestProductAttributesExplainsWhenOff
-	// depends on.
-	seed(`UPDATE projects SET product_aggregation =
-	      '{"enabled":true,"attributes":{"*":["plan"]},"top_n":50}' WHERE alias='blog'`)
+	// attributes declared for blog only: docs stays at the default (no
+	// attributes declared), which TestProductAttributesReturnsEmptyForUndeclared
+	// depends on. Rollups are unconditional now (no enabled flag).
+	seed(`UPDATE projects SET attributes = '["plan"]' WHERE alias='blog'`)
 	seed(`UPDATE projects SET allowed_origins = '["https://blog.example.com"]' WHERE alias='blog'`)
 	seed(`INSERT INTO agg_product_attrs (project, day, event_name, attr_key, attr_value, count, unique_users)
 	      VALUES ('blog','2026-08-20','signup','plan','pro',3,3)`)

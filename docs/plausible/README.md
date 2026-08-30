@@ -7,27 +7,34 @@ legacy snippet), nothing more.
 Swapping the script therefore silently stops every tagged CTA — the classes
 stay in the markup and simply nothing reads them.
 
-[`plausible-shim.js`](plausible-shim.js) reads them. It is a standalone
-file, ~80 lines, no build step and no markup changes: every existing
-`plausible-event-name` class keeps converting, under the same event name it
-had in Plausible, so historical goal names still line up.
+[`plausible-shim.js`](plausible-shim.js) reads them. The collector serves
+it, so installing it is one more `<script>` tag and no markup changes:
+every existing `plausible-event-name` class keeps converting, under the
+same event name it had in Plausible, so historical goal names still line
+up.
 
 ---
 
 ## 1. Install
 
-Copy the file into whatever the site serves as static assets
-(`public/scripts/` on most setups) and load it **after** the tracking
+The collector serves the shim at `/js/plausible-shim.js`, next to the
+tracker itself, so there is nothing to copy. Load it **after** the tracking
 snippet, which is what defines the tracker global:
 
 ```html
 <script defer src="https://a.example.com/js/twillingate.js" data-key="ak_9f3c…"></script>
-<script defer src="/scripts/plausible-shim.js"></script>
+<script defer src="https://a.example.com/js/plausible-shim.js"></script>
 ```
 
 Both are `defer`, so they execute in document order. The shim also tolerates
 a missing tracker — if the tracker global is absent (blocked, failed to
 load) clicks are ignored rather than throwing.
+
+A site that serves every script from its own origin — a strict CSP, or a
+bundler that wants the source — can still copy
+[`plausible-shim.js`](plausible-shim.js) into its static assets and point
+the `src` there. It is standalone, ~80 lines, no build step. The hosted
+copy is that same file, embedded in the binary, so the two never diverge.
 
 ---
 
@@ -72,10 +79,10 @@ click → twillingate.track("signup_cloud")
 ```
 
 Class props are stored in `product_events.attributes` and broken down per
-key and value by `agg_product_attrs` — but only when the product attribute
-rollup is enabled (`ProductAggSettings{Enabled: true, TopN: …}`). Without it
-the props are still stored and still queryable, just not pre-aggregated for
-the dashboard.
+key and value by `v_product_attrs` — but only for the keys the project
+declares in `attributes`. Undeclared props are still stored and still
+queryable through the raw `attributes` column, just not broken down for the
+dashboard.
 
 ---
 
@@ -93,7 +100,8 @@ discarded. A site-wide CTA would otherwise be indistinguishable from page to
 page, so the shim stamps `path: location.pathname` on every event it fires
 (pass an explicit `plausible-event-path--…` class to override it). Drop that
 line if a CTA appears on enough distinct URLs to make the breakdown noisy —
-`TopN` caps what reaches the dashboard, but the raw rows keep everything.
+the server-wide `PRODUCT_ATTRIBUTES_TOP_N` setting caps what reaches the
+dashboard, but the raw rows keep everything.
 
 **No navigation delay.** Plausible's script holds a link click for ~150 ms
 so the request escapes before unload. The tracker sends through

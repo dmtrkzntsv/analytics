@@ -1,10 +1,10 @@
 /* plausible-shim.js — keeps Plausible's class-based tagging working after the
- * tracker swap. Serve it from the site (Plausible's own script is gone) and
- * load it AFTER the tracking snippet (twillingate.js or the legacy
- * script.js), which is what defines the tracker global:
+ * tracker swap. The collector serves it at /js/plausible-shim.js; load it
+ * AFTER the tracking snippet (twillingate.js or the legacy script.js),
+ * which is what defines the tracker global:
  *
  *   <script defer src="https://a.example.com/js/script.js" data-key="ak_…"></script>
- *   <script defer src="/scripts/plausible-shim.js"></script>
+ *   <script defer src="https://a.example.com/js/plausible-shim.js"></script>
  *
  *   <a class="plausible-event-name--signup_cloud" href="/register">
  *   → twillingate.track("signup_cloud")
