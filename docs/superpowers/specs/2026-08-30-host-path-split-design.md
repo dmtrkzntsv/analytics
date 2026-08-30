@@ -38,7 +38,7 @@ with the raw path never leaving the device.
   are untouched.
 - **No removal of the legacy localStorage key aliases.** `analytics_*` →
   `twillingate_*` migration stays; it is about returning visitors, not
-  about the deleted snippet (§4.9).
+  about the deleted snippet (§4.10).
 
 ## 3. Wire contract
 
@@ -71,7 +71,7 @@ face value).
 
 Values are stored **verbatim**. The server does no parsing, no
 normalization, no case folding. `$path` may contain a `#` (hash routing,
-§4.5) or a query string (§4.6) when the client chooses to send one.
+§4.6) or a query string (§4.7) when the client chooses to send one.
 
 ### 3.2 `$url` is removed, and so is `script.js`
 
@@ -89,21 +89,26 @@ the diagnosis in one response body without any code written for it.
 tests. `GET /js/script.js` becomes a 404, which fails loudly rather than
 serving a snippet whose every pageview would be rejected.
 
+**Status: the `script.js` half of this landed in `79ea7bf`** — the file,
+its tests, the embed and the route are gone and `GET /js/script.js` 404s.
+`ParsePageURL` deliberately stayed behind, since `handlers.go` still calls
+it to parse `$url` until step 1 lands.
+
 Removal surface (live code only; historical plans and specs under
 `docs/superpowers/` are archival and stay as written):
 
 | File | Change |
 | --- | --- |
-| `internal/server/script.js` | delete |
-| `internal/server/script_test.go` | delete |
-| `internal/server/script.go` | drop the embed, `trackingScript`, and the route |
-| `internal/server/twillingate_script_test.go` | drop the legacy-serving assertion |
-| `internal/app/app_test.go` | `/js/script.js` now expects 404 |
-| `internal/enrich/url.go` | delete `ParsePageURL` and `PageInfo` — last caller gone; `CleanReferrer` stays |
+| `internal/server/script.js` | delete — **done (79ea7bf)** |
+| `internal/server/script_test.go` | delete — **done** |
+| `internal/server/script.go` | drop the embed, `trackingScript`, the route — **done** |
+| `internal/server/twillingate_script_test.go` | now asserts 404 — **done** |
+| `internal/app/app_test.go` | probes `/js/twillingate.js` instead — **done** |
+| `internal/enrich/url.go` | delete `ParsePageURL` and `PageInfo` once step 1 removes the last caller; `CleanReferrer` stays |
 | `internal/enrich/url_test.go` | delete `TestParsePageURL` |
-| `internal/manage/ops.go` | comment references `script.js` |
-| `sdk/README.md`, `sdk/src/twillingate.ts` | comments describing co-existence with the frozen snippet |
-| `docs/plausible/README.md` | migration example uses the old tag |
+| `internal/manage/ops.go` | comment — **done** |
+| `sdk/README.md`, `sdk/src/twillingate.ts` | comments — **done** |
+| `docs/plausible/README.md` | example tag — **done** |
 
 ### 3.3 Accepted cost: one cache window of rejections
 
@@ -138,8 +143,7 @@ the changelog under `feat(server)!`.
 ### 4.1 No new configuration API
 
 Masking reuses the existing `page(listener)` hook. There is no
-`init({ path })` option and no new top-level method. `init()` remains an
-alternative to the `<script>` tag and mirrors its parameters exactly.
+`init({ path })` option and no new top-level method.
 
 ```js
 twillingate.page(({ path }) => ({
@@ -147,7 +151,43 @@ twillingate.page(({ path }) => ({
 }));
 ```
 
-### 4.2 `PageviewInfo` and listener chaining
+### 4.2 `<script>` and `init()` parity
+
+The `<script>` tag is the preferred integration; `init()` is the
+alternative for bundled apps. **Every `data-*` attribute has an `init()`
+equivalent with identical semantics.** The reverse does not hold — some
+options have no attribute, because an attribute can only carry a string.
+
+| attribute | `InitOptions` | notes |
+| --- | --- | --- |
+| `data-key` | `key` | |
+| `data-identity` | `identity` | `"anonymous"` (default) \| `"identified"` |
+| `data-user` | `user` | |
+| `data-group` | `group` | |
+| `data-auto` | `autoPageviews` | attribute is `"off"` to disable; option is a boolean. Pre-existing name mismatch, kept |
+| `data-mask-url` | `maskUrl` | new (§4.4) |
+| `data-routing` | `routing` | new (§4.6) |
+| — | `url` | attribute form is implicit: the origin of `script.src` |
+| — | `platform`, `appVersion`, `installId`, `flushInterval` | code-only |
+
+`maskUrl` accepts everything the attribute does **plus** native JS values
+the attribute cannot express:
+
+```js
+twillingate.init({ key: "ak_…", maskUrl: "uuid" });                    // built-ins
+twillingate.init({ key: "ak_…", maskUrl: /\/account\/\d+/g });          // RegExp
+twillingate.init({ key: "ak_…", maskUrl: (href) => href.replace(…) }); // function
+```
+
+A string is resolved by exactly the rules in §4.4, so `maskUrl: "uuid"` and
+`data-mask-url="uuid"` are the same code path — not two implementations
+that must be kept in agreement.
+
+A test asserts the invariant directly: every `getAttribute("data-…")` call
+in the snippet bootstrap has a corresponding `InitOptions` field, so a new
+attribute added without an option fails the suite.
+
+### 4.3 `PageviewInfo` and listener chaining
 
 `PageviewInfo` becomes `{ url, host, path, referrer, attributes }` — `host`
 is new.
@@ -169,9 +209,9 @@ Rules:
 - Listeners run in registration order; each sees the previous one's output.
 - Returning `false` cancels the pageview; later listeners do not run.
 - Returning nothing observes without changing anything.
-- `url` is the **post-mask** URL (§4.3), not `location.href`.
+- `url` is the **post-mask** URL (§4.4), not `location.href`.
 
-### 4.3 `data-mask-url`
+### 4.4 `data-mask-url`
 
 The `<script>` tag is the preferred integration, and a function cannot be
 written into an attribute. `data-mask-url` names one, and is resolved
@@ -209,11 +249,11 @@ that strips or rewrites the query string cannot cost attribution.
 
 **`data-mask-url` does not conflict with `page()`.** It registers as the
 first listener, before any user listener can exist. Because listeners
-thread (§4.2), a `page()` listener receives the already-masked value and
+thread (§4.3), a `page()` listener receives the already-masked value and
 refines it. Order is fixed: attribute first, then `page()` listeners in
 registration order.
 
-### 4.4 Failing closed
+### 4.5 Failing closed
 
 The masking path fails closed, loudly. On any of:
 
@@ -227,7 +267,7 @@ the SDK emits one `console.warn` and **drops pageviews** rather than
 sending unmasked ones. A site that configured masking and got a typo must
 not silently ship `/account/8812`. Loud and empty beats quiet and leaky.
 
-### 4.5 `data-routing` and hash routing
+### 4.6 `data-routing` and hash routing
 
 Hash routing is currently **broken**, not merely unsupported: `lastPage` is
 `pathname + search`, which never changes in a hash SPA, so every route
@@ -258,7 +298,7 @@ pageviews would flood the pages breakdown with duplicates of one route.
 The rule "`$path` carries no query string by default" holds in both modes:
 a hash-internal `?tab=billing` is dropped exactly as `location.search` is.
 
-### 4.6 Query-based routing
+### 4.7 Query-based routing
 
 `?tab=billing` routing needs no mode. `pushState` is already hooked and the
 dedup key already includes `location.search`, so query-only navigations
@@ -282,7 +322,7 @@ reason it ships as a helper rather than a docs snippet.
 Docs warn: allowlist only low-cardinality parameters, never identifiers or
 free text.
 
-### 4.7 `twillingate.util`
+### 4.8 `twillingate.util`
 
 Helpers are namespaced so the top-level API does not grow.
 
@@ -304,7 +344,7 @@ Defaults replace only shapes that are never legitimate route names — UUIDs
 token; what matters downstream is "this segment is an identifier", and one
 token keeps aggregate rows tight.
 
-### 4.8 First auto-pageview timing
+### 4.9 First auto-pageview timing
 
 In snippet mode `init()` currently calls `this.page()` synchronously, so a
 `page()` listener registered from an inline `<script type="module">` after
@@ -320,7 +360,7 @@ With `data-mask-url` covering the entry page, this is a consistency fix
 rather than a leak fix, but `page()` should behave the same on the first
 pageview as on every later one.
 
-### 4.9 `script.js` is gone
+### 4.10 `script.js` is gone
 
 The frozen legacy snippet is deleted (§3.2). `twillingate.js` is the only
 served client.
@@ -470,8 +510,9 @@ Identity is set after load via `twillingate.identify("u_123")`; there is no
 | `CleanReferrer` | self-referral suppressed with host; taken at face value without |
 | `aggregate_web` | `agg_web_hosts` rolls up; empty host bucket survives |
 | Migration | `006` applies to a populated database; existing rows read back with `host = ''` |
-| SDK mask resolution | built-ins, comma-separated built-ins, regexp, global function, each failure mode in §4.4 |
+| SDK mask resolution | built-ins, comma-separated built-ins, regexp, global function, each failure mode in §4.5 |
 | SDK listeners | threading composes; `false` cancels; registration order |
+| `<script>`/`init()` parity | every `getAttribute("data-…")` in the bootstrap has an `InitOptions` field; `maskUrl` string and `data-mask-url` resolve identically; `maskUrl` also takes a RegExp and a function |
 | SDK routing | hash dedup registers consecutive routes; `hashchange` silent in history mode |
 | `util` | `maskIds` leaves host alone, masks hash; `withQuery` sorts |
 | Docs | `docs_sync_test` binds `twillingate.md` to `reservedKeys` |
