@@ -1,5 +1,5 @@
 [Unit]
-Description=Litestream replication for twillingate
+Description=Litestream replication for the twillingate collector
 After=network-online.target twillingate.service
 Wants=network-online.target
 

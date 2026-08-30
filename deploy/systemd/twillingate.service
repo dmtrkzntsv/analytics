@@ -1,5 +1,5 @@
 [Unit]
-Description=Ultra-lite analytics collector
+Description=Twillingate ultra-lite analytics collector
 After=network-online.target
 Wants=network-online.target
 
