@@ -89,14 +89,14 @@ func (h *host) table(ctx context.Context, q string, args ...any) (tableOut, erro
 // ---- list_projects ----
 
 type projectOut struct {
-	Alias              string                     `json:"alias"`
-	Name               string                     `json:"name"`
-	Identity           string                     `json:"identity"`
-	Archived           bool                       `json:"archived,omitempty"`
-	FirstWebDay        string                     `json:"first_web_day,omitempty"`
-	LastWebDay         string                     `json:"last_web_day,omitempty"`
-	FirstAppDay        string                     `json:"first_app_day,omitempty"`
-	LastAppDay         string                     `json:"last_app_day,omitempty"`
+	Alias          string                    `json:"alias"`
+	Name           string                    `json:"name"`
+	Identity       string                    `json:"identity"`
+	Archived       bool                      `json:"archived,omitempty"`
+	FirstWebDay    string                    `json:"first_web_day,omitempty"`
+	LastWebDay     string                    `json:"last_web_day,omitempty"`
+	FirstAppDay    string                    `json:"first_app_day,omitempty"`
+	LastAppDay     string                    `json:"last_app_day,omitempty"`
 	AllowedOrigins []string                  `json:"allowed_origins"`
 	Retention      *config.RetentionOverride `json:"retention,omitempty"`
 	Attributes     []string                  `json:"attributes,omitempty"`

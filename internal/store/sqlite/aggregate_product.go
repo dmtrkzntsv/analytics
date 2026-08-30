@@ -138,9 +138,10 @@ var systemDims = []struct{ column, key string }{
 // SQL expression yielding the value to group by (a json_extract path for
 // declared attributes, a bare column for system dimensions); present is
 // the filter identifying rows where that value counts as set (declared
-// attributes use IS NOT NULL on the JSON extract, system columns use
-// <> '' since they're NOT NULL DEFAULT ''). named must supply :p, :day,
-// :from, :to, :event, :key, :n, and whatever expr/present reference
+// attributes use IS NOT NULL on the JSON extract, system columns use a
+// not-empty-string check since they're NOT NULL DEFAULT empty-string).
+// named must supply :p, :day, :from, :to, :event, :key, :n, and whatever
+// expr/present reference
 // (:path for the JSON case).
 func (d *DB) rollupAttrValue(ctx context.Context, tx *sql.Tx, expr, present string, named []any) error {
 	// Top-N values by count.
