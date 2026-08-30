@@ -219,6 +219,30 @@ func (o *Ops) EnableIngestKey(ctx context.Context, actor, project, label string)
 	return o.Reg.Reload(ctx)
 }
 
+// RenameProject rewrites a project's alias — its physical identity, the
+// `project` column on every keyed table plus the projects row and its
+// ingest keys — leaving every row and key intact under the new alias.
+// validateNew runs against the PROPOSED alias (a throwaway spec carrying
+// just it), matching CreateProject's rule: a rename is choosing a new
+// alias, not editing an existing row, so the charset check applies here
+// too. CLI only, like DeleteProject (spec §7.3): it rewrites every table
+// keyed by the project, which does not belong on the agent-facing surface.
+func (o *Ops) RenameProject(ctx context.Context, actor, old, newAlias string) error {
+	spec := ProjectSpec{Alias: newAlias}
+	if err := spec.validateNew(); err != nil {
+		return err
+	}
+	if err := o.St.RenameProject(ctx, old, newAlias, store.AuditEntry{
+		Actor: actor, Action: "project.rename", Subject: old + "->" + newAlias}); err != nil {
+		return err
+	}
+	if err := o.Reg.Reload(ctx); err != nil {
+		return err
+	}
+	o.rebuildFlatView(ctx)
+	return nil
+}
+
 // DeleteProject is exposed by the CLI only — never as an MCP tool
 // (spec §7.3: irreversible operations require a shell). Reclaims pages
 // afterwards; the tx cannot (single connection).

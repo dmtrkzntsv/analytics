@@ -119,3 +119,88 @@ func TestProjectUpdateMergeSemantics(t *testing.T) {
 		t.Fatalf("old identity still present: %s", listing)
 	}
 }
+
+// TestProjectRenameMovesIngestKeys is the CLI-level guard for the whole
+// point of this command: a deployed site's ingest key must keep working
+// after the alias it was issued under is renamed, with no redeploy.
+func TestProjectRenameMovesIngestKeys(t *testing.T) {
+	withDB(t)
+	var out bytes.Buffer
+	if code := run([]string{"project", "create", "-alias", "blog", "-name", "Blog"}, &out); code != 0 {
+		t.Fatalf("create: exit %d: %s", code, out.String())
+	}
+	out.Reset()
+	if code := run([]string{"key", "issue", "-project", "blog", "-label", "web"}, &out); code != 0 {
+		t.Fatalf("key issue: exit %d: %s", code, out.String())
+	}
+
+	out.Reset()
+	if code := run([]string{"project", "rename", "-alias", "blog", "-to", "journal"}, &out); code != 0 {
+		t.Fatalf("rename: exit %d: %s", code, out.String())
+	}
+	if !strings.Contains(out.String(), `"blog"`) || !strings.Contains(out.String(), `"journal"`) {
+		t.Fatalf("rename output: %s", out.String())
+	}
+
+	out.Reset()
+	if code := run([]string{"project", "list"}, &out); code != 0 {
+		t.Fatalf("list: exit %d", code)
+	}
+	listing := out.String()
+	if strings.Contains(listing, "blog") {
+		t.Fatalf("old alias still listed: %s", listing)
+	}
+	if !strings.Contains(listing, "journal") {
+		t.Fatalf("new alias not listed: %s", listing)
+	}
+
+	out.Reset()
+	if code := run([]string{"key", "list", "-project", "journal"}, &out); code != 0 {
+		t.Fatalf("key list: exit %d: %s", code, out.String())
+	}
+	if !strings.Contains(out.String(), "web") {
+		t.Fatalf("ingest key did not follow the rename; deployed clients would break: %s", out.String())
+	}
+}
+
+func TestProjectRenameRequiresBothFlags(t *testing.T) {
+	withDB(t)
+	var out bytes.Buffer
+	if code := run([]string{"project", "create", "-alias", "blog"}, &out); code != 0 {
+		t.Fatalf("create: exit %d: %s", code, out.String())
+	}
+	out.Reset()
+	if code := run([]string{"project", "rename", "-alias", "blog"}, &out); code == 0 {
+		t.Fatalf("rename without -to succeeded: %s", out.String())
+	}
+	out.Reset()
+	if code := run([]string{"project", "rename", "-to", "journal"}, &out); code == 0 {
+		t.Fatalf("rename without -alias succeeded: %s", out.String())
+	}
+}
+
+// TestProjectRenameArchivedProjectWorks: archiving is reversible and keeps
+// data, so a rename must still succeed on an archived project.
+func TestProjectRenameArchivedProjectWorks(t *testing.T) {
+	withDB(t)
+	var out bytes.Buffer
+	if code := run([]string{"project", "create", "-alias", "blog"}, &out); code != 0 {
+		t.Fatalf("create: exit %d: %s", code, out.String())
+	}
+	out.Reset()
+	if code := run([]string{"project", "archive", "-alias", "blog"}, &out); code != 0 {
+		t.Fatalf("archive: exit %d: %s", code, out.String())
+	}
+	out.Reset()
+	if code := run([]string{"project", "rename", "-alias", "blog", "-to", "journal"}, &out); code != 0 {
+		t.Fatalf("rename of an archived project: exit %d: %s", code, out.String())
+	}
+	out.Reset()
+	if code := run([]string{"project", "list"}, &out); code != 0 {
+		t.Fatalf("list: exit %d", code)
+	}
+	listing := out.String()
+	if !strings.Contains(listing, "journal") || !strings.Contains(listing, "(archived)") {
+		t.Fatalf("renamed project lost its archived state: %s", listing)
+	}
+}

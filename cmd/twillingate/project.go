@@ -94,7 +94,7 @@ func cmdProject(args []string, stdout io.Writer) int {
 	}
 	rest := fs.Args()
 	if len(rest) == 0 {
-		fmt.Fprintln(stdout, "usage: twillingate project <create|update|list|archive|restore|delete> [flags]")
+		fmt.Fprintln(stdout, "usage: twillingate project <create|update|list|archive|restore|rename|delete> [flags]")
 		return 2
 	}
 	ops, _, closeStore, code := openOps(stdout, *envFile)
@@ -196,6 +196,24 @@ func cmdProject(args []string, stdout io.Writer) int {
 		}
 		fmt.Fprintf(stdout, "project %q %sd\n", *alias, sub)
 		return 0
+	case "rename":
+		sf := flag.NewFlagSet("project rename", flag.ContinueOnError)
+		sf.SetOutput(stdout)
+		alias := sf.String("alias", "", "current project alias (required)")
+		to := sf.String("to", "", "new project alias (required)")
+		if err := sf.Parse(subArgs); err != nil {
+			return 2
+		}
+		if *alias == "" || *to == "" {
+			fmt.Fprintln(stdout, "usage: twillingate project rename -alias <old> -to <new>")
+			return 2
+		}
+		if err := ops.RenameProject(ctx, "cli", *alias, *to); err != nil {
+			fmt.Fprintln(stdout, err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "project %q renamed to %q\n", *alias, *to)
+		return 0
 	case "delete":
 		sf := flag.NewFlagSet("project delete", flag.ContinueOnError)
 		sf.SetOutput(stdout)
@@ -216,7 +234,7 @@ func cmdProject(args []string, stdout io.Writer) int {
 		fmt.Fprintf(stdout, "project %q deleted\n", *alias)
 		return 0
 	default:
-		fmt.Fprintf(stdout, "unknown subcommand %q\nusage: twillingate project <create|update|list|archive|restore|delete> [flags]\n", sub)
+		fmt.Fprintf(stdout, "unknown subcommand %q\nusage: twillingate project <create|update|list|archive|restore|rename|delete> [flags]\n", sub)
 		return 2
 	}
 }

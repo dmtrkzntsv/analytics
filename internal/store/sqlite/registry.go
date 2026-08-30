@@ -213,3 +213,42 @@ func (d *DB) DeleteProjectData(ctx context.Context, alias string, a store.AuditE
 		return auditAndBump(ctx, tx, a)
 	})
 }
+
+// RenameProject rewrites the alias on the registry row and the `project`
+// column on every table in projectTables, in one transaction. ingest_keys
+// is one of those tables, so keys follow the rename and deployed clients
+// keep working without redeploying — that is what makes this command
+// usable rather than a data-loss trap. Both failure checks (unknown source,
+// already-taken target) happen before any write, so a rejected rename
+// leaves the source alias and all its rows completely untouched.
+//
+// PRAGMA foreign_keys is never enabled in this codebase, so the
+// `REFERENCES projects(alias)` clause on ingest_keys does not constrain
+// statement order; projects is updated first regardless, to match the
+// design doc.
+func (d *DB) RenameProject(ctx context.Context, old, new string, a store.AuditEntry) error {
+	return d.tx(ctx, func(tx *sql.Tx) error {
+		var taken int
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM projects WHERE alias=?`, new).Scan(&taken); err != nil {
+			return err
+		}
+		if taken > 0 {
+			return fmt.Errorf("rename: alias %q already exists", new)
+		}
+		res, err := tx.ExecContext(ctx, `UPDATE projects SET alias=? WHERE alias=?`, new, old)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return fmt.Errorf("rename: unknown alias %q", old)
+		}
+		for _, table := range projectTables {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE `+table+` SET project=? WHERE project=?`, new, old); err != nil {
+				return fmt.Errorf("rename %s: %w", table, err)
+			}
+		}
+		return auditAndBump(ctx, tx, a)
+	})
+}

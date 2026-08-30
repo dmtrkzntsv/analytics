@@ -506,6 +506,154 @@ func projectCol(table string) string {
 	return "project"
 }
 
+// TestRenameProjectMovesEveryTable is the core rename contract: the
+// registry row and every table in projectTables move to the new alias in
+// one transaction. ingest_keys is one of those tables, so a rename must
+// not orphan the keys a deployed site is already sending data with — that
+// is the difference between a usable rename and a data-loss trap.
+func TestRenameProjectMovesEveryTable(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	p := store.RegistryProject{Alias: "blog", Name: "Blog", Identity: "anonymous", AllowedOrigins: "[]"}
+	if err := db.CreateProject(ctx, p, store.AuditEntry{
+		Actor: "test", Action: "project.create", Subject: "blog"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InsertIngestKey(ctx, store.RegistryKey{Key: "ak_blog", Project: "blog", Label: "web"},
+		store.AuditEntry{Actor: "test", Action: "key.issue", Subject: "web"}); err != nil {
+		t.Fatal(err)
+	}
+	seedProductEvent(t, db, "blog", "signup", "2026-08-01T10:00:00Z", nil, "", "")
+
+	if err := db.RenameProject(ctx, "blog", "journal", store.AuditEntry{
+		Actor: "test", Action: "project.rename", Subject: "blog->journal"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"product_events", "ingest_keys"} {
+		var n int
+		if err := db.db.QueryRow(
+			`SELECT COUNT(*) FROM ` + table + ` WHERE project='blog'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 0 {
+			t.Errorf("%s still has %d rows under the old alias", table, n)
+		}
+	}
+	var keys int
+	if err := db.db.QueryRow(
+		`SELECT COUNT(*) FROM ingest_keys WHERE project='journal'`).Scan(&keys); err != nil {
+		t.Fatal(err)
+	}
+	if keys == 0 {
+		t.Fatal("ingest keys did not follow the rename; deployed clients would break")
+	}
+	var events int
+	if err := db.db.QueryRow(
+		`SELECT COUNT(*) FROM product_events WHERE project='journal'`).Scan(&events); err != nil {
+		t.Fatal(err)
+	}
+	if events != 1 {
+		t.Fatalf("product_events under journal = %d, want 1", events)
+	}
+	// the registry row itself must have moved, not just the data tables
+	var c int
+	if err := db.db.QueryRow(`SELECT COUNT(*) FROM projects WHERE alias='blog'`).Scan(&c); err != nil {
+		t.Fatal(err)
+	}
+	if c != 0 {
+		t.Fatal("old alias still present in projects")
+	}
+	if err := db.db.QueryRow(`SELECT COUNT(*) FROM projects WHERE alias='journal'`).Scan(&c); err != nil {
+		t.Fatal(err)
+	}
+	if c != 1 {
+		t.Fatal("new alias not present in projects")
+	}
+}
+
+func TestRenameProjectRejectsExistingTarget(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	for _, alias := range []string{"blog", "journal"} {
+		if err := db.CreateProject(ctx, store.RegistryProject{
+			Alias: alias, Name: alias, Identity: "anonymous", AllowedOrigins: "[]"},
+			store.AuditEntry{Actor: "test", Action: "project.create", Subject: alias}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.RenameProject(ctx, "blog", "journal", store.AuditEntry{
+		Actor: "test", Action: "project.rename", Subject: "blog->journal"}); err == nil {
+		t.Fatal("rename onto an already-taken alias did not fail")
+	}
+}
+
+func TestRenameProjectUnknownSource(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	if err := db.RenameProject(ctx, "ghost", "journal", store.AuditEntry{
+		Actor: "test", Action: "project.rename", Subject: "ghost->journal"}); err == nil {
+		t.Fatal("rename of an unknown source alias did not fail")
+	}
+}
+
+// TestRenameProjectRejectedTargetLeavesSourceUntouched guards against the
+// worst failure mode for this command: a half-applied rename that leaves
+// rows stranded under an alias with no registry row. It seeds a source
+// project with data and ingest keys, attempts a rename onto an alias that
+// is already taken, and asserts nothing moved and config_version did not
+// bump — the whole attempt must be a no-op.
+func TestRenameProjectRejectedTargetLeavesSourceUntouched(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	for _, alias := range []string{"blog", "journal"} {
+		if err := db.CreateProject(ctx, store.RegistryProject{
+			Alias: alias, Name: alias, Identity: "anonymous", AllowedOrigins: "[]"},
+			store.AuditEntry{Actor: "test", Action: "project.create", Subject: alias}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.InsertIngestKey(ctx, store.RegistryKey{Key: "ak_blog", Project: "blog", Label: "web"},
+		store.AuditEntry{Actor: "test", Action: "key.issue", Subject: "web"}); err != nil {
+		t.Fatal(err)
+	}
+	seedProductEvent(t, db, "blog", "signup", "2026-08-01T10:00:00Z", nil, "", "")
+	v0, err := db.ConfigVersion(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.RenameProject(ctx, "blog", "journal", store.AuditEntry{
+		Actor: "test", Action: "project.rename", Subject: "blog->journal"}); err == nil {
+		t.Fatal("rename onto an already-taken alias did not fail")
+	}
+
+	var alias string
+	if err := db.db.QueryRow(`SELECT alias FROM projects WHERE alias='blog'`).Scan(&alias); err != nil {
+		t.Fatalf("source project row disappeared after a rejected rename: %v", err)
+	}
+	var pe int
+	if err := db.db.QueryRow(`SELECT COUNT(*) FROM product_events WHERE project='blog'`).Scan(&pe); err != nil {
+		t.Fatal(err)
+	}
+	if pe != 1 {
+		t.Errorf("product_events under blog = %d, want 1 (untouched)", pe)
+	}
+	var ik int
+	if err := db.db.QueryRow(`SELECT COUNT(*) FROM ingest_keys WHERE project='blog'`).Scan(&ik); err != nil {
+		t.Fatal(err)
+	}
+	if ik != 1 {
+		t.Errorf("ingest_keys under blog = %d, want 1 (untouched)", ik)
+	}
+	v1, err := db.ConfigVersion(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v1 != v0 {
+		t.Errorf("config_version changed on a rejected rename: %d -> %d", v0, v1)
+	}
+}
+
 // parseVersion extracts the version number from a migration filename.
 func parseVersion(name string, version *int) (string, error) {
 	for i := 0; i < len(name); i++ {

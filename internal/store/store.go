@@ -108,6 +108,7 @@ type Store interface {
 	InsertIngestKey(ctx context.Context, k RegistryKey, a AuditEntry) error
 	SetIngestKeyDisabled(ctx context.Context, project, label string, disabled bool, a AuditEntry) error
 	DeleteProjectData(ctx context.Context, alias string, a AuditEntry) error
+	RenameProject(ctx context.Context, old, new string, a AuditEntry) error
 	Close() error
 }
 
