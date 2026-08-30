@@ -159,8 +159,7 @@ func TestStitchViewsInvariantProduct(t *testing.T) {
 	if c1 != 3 || u1 != 2 {
 		t.Fatalf("live v_product_daily subscribed = (%d,%d), want (3,2)", c1, u1)
 	}
-	agg := store.ProductAggSettings{Enabled: true, TopN: 50}
-	if err := db.AggregateProductDay(ctx, "app", day("2026-08-10"), agg); err != nil {
+	if err := db.AggregateProductDay(ctx, "app", day("2026-08-10"), nil, 50); err != nil {
 		t.Fatal(err)
 	}
 	c2, u2 := read()
@@ -195,8 +194,7 @@ func TestStitchViewProductTotalsIsTrueDAU(t *testing.T) {
 	if e1 != 4 || u1 != 2 {
 		t.Fatalf("live v_product_totals = (%d,%d), want (4,2)", e1, u1)
 	}
-	if err := db.AggregateProductDay(ctx, "app", day("2026-08-10"),
-		store.ProductAggSettings{Enabled: true, TopN: 50}); err != nil {
+	if err := db.AggregateProductDay(ctx, "app", day("2026-08-10"), nil, 50); err != nil {
 		t.Fatal(err)
 	}
 	if e2, u2 := read(); e1 != e2 || u1 != u2 {

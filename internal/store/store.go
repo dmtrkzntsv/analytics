@@ -61,7 +61,7 @@ type RegistryProject struct {
 	Alias, Name, Identity string
 	AllowedOrigins        string // JSON array, "[]" if none
 	Retention             string // JSON object or ""
-	Aggregation           string // JSON object or ""
+	Attributes            string // JSON array, "[]" if none declared
 	Archived              bool
 }
 
@@ -76,14 +76,6 @@ type AuditEntry struct {
 	Actor, Action, Subject, Detail string
 }
 
-// ProductAggSettings mirrors config.ProductAggregation; zero value =
-// aggregation disabled (raw rows deleted without rollup, spec §9).
-type ProductAggSettings struct {
-	Enabled    bool
-	Attributes map[string][]string // event name (or "*") -> attr keys
-	TopN       int
-}
-
 // Store defines the interface for analytics data storage.
 type Store interface {
 	Migrate(ctx context.Context) error
@@ -94,7 +86,7 @@ type Store interface {
 	WebDaysBefore(ctx context.Context, project string, before civil.Date) ([]civil.Date, error)
 	ProductDaysBefore(ctx context.Context, project string, before civil.Date) ([]civil.Date, error)
 	AggregateWebDay(ctx context.Context, project string, day civil.Date) error
-	AggregateProductDay(ctx context.Context, project string, day civil.Date, agg ProductAggSettings) error
+	AggregateProductDay(ctx context.Context, project string, day civil.Date, attrs []string, topN int) error
 	AppDaysBefore(ctx context.Context, project string, before civil.Date) ([]civil.Date, error)
 	AggregateAppDay(ctx context.Context, project string, day civil.Date) error
 	UpsertActors(ctx context.Context, project string, day civil.Date) error

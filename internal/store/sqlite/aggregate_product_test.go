@@ -28,11 +28,16 @@ func seedProductDay(t *testing.T, db *DB) {
 	}
 }
 
-func TestAggregateProductDisabledDeletesOnly(t *testing.T) {
+// TestAggregateProductRunsWithNoDeclaredAttributes replaces the old
+// "disabled" case: rollups are unconditional now (enabled is gone), so a
+// project with no declared attributes still gets agg_product_daily /
+// agg_product_totals rows and the raw day is still deleted, but no
+// agg_product_attrs rows are written since no keys were named.
+func TestAggregateProductRunsWithNoDeclaredAttributes(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
 	seedProductDay(t, db)
-	if err := db.AggregateProductDay(ctx, "app", day("2026-08-10"), store.ProductAggSettings{}); err != nil {
+	if err := db.AggregateProductDay(ctx, "app", day("2026-08-10"), nil, 50); err != nil {
 		t.Fatal(err)
 	}
 	var n int
@@ -41,21 +46,21 @@ func TestAggregateProductDisabledDeletesOnly(t *testing.T) {
 		t.Fatalf("raw remaining %d", n)
 	}
 	db.db.QueryRow(`SELECT COUNT(*) FROM agg_product_daily`).Scan(&n)
+	if n == 0 {
+		t.Fatal("rollups are unconditional now; agg_product_daily must be populated even with no declared attributes")
+	}
+	db.db.QueryRow(`SELECT COUNT(*) FROM agg_product_attrs`).Scan(&n)
 	if n != 0 {
-		t.Fatal("disabled aggregation must write nothing (spec §4)")
+		t.Fatal("no declared attributes must produce no attr rows")
 	}
 }
 
-func TestAggregateProductEnabled(t *testing.T) {
+func TestAggregateProductDeclaredAttributes(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
 	seedProductDay(t, db)
-	agg := store.ProductAggSettings{
-		Enabled:    true,
-		TopN:       50,
-		Attributes: map[string][]string{"subscribed": {"plan"}, "*": {"source"}},
-	}
-	if err := db.AggregateProductDay(ctx, "app", day("2026-08-10"), agg); err != nil {
+	attrs := []string{"plan", "source"}
+	if err := db.AggregateProductDay(ctx, "app", day("2026-08-10"), attrs, 50); err != nil {
 		t.Fatal(err)
 	}
 	var count, uniq int
@@ -73,7 +78,7 @@ func TestAggregateProductEnabled(t *testing.T) {
 	if count != 4 || uniq != 2 {
 		t.Fatalf("totals: e=%d dau=%d", count, uniq)
 	}
-	// plan breakdown for subscribed only
+	// plan breakdown for subscribed
 	if err := db.db.QueryRow(`SELECT count, unique_users FROM agg_product_attrs
 		WHERE project='app' AND day='2026-08-10' AND event_name='subscribed'
 		AND attr_key='plan' AND attr_value='free'`).Scan(&count, &uniq); err != nil {
@@ -82,7 +87,8 @@ func TestAggregateProductEnabled(t *testing.T) {
 	if count != 2 || uniq != 1 {
 		t.Fatalf("plan=free: c=%d u=%d", count, uniq)
 	}
-	// wildcard source applies to subscribed (2 with source=ads); ping has no source attr -> no row
+	// declared attributes apply across every event name; ping has neither
+	// plan nor source -> no rows for it.
 	var n int
 	db.db.QueryRow(`SELECT COUNT(*) FROM agg_product_attrs WHERE event_name='ping'`).Scan(&n)
 	if n != 0 {
@@ -122,9 +128,7 @@ func TestAggregateProductTopNCollapsesTail(t *testing.T) {
 	if err := db.WriteProductEvents(ctx, evs); err != nil {
 		t.Fatal(err)
 	}
-	agg := store.ProductAggSettings{Enabled: true, TopN: 2,
-		Attributes: map[string][]string{"clicked": {"button"}}}
-	if err := db.AggregateProductDay(ctx, "app", day("2026-08-10"), agg); err != nil {
+	if err := db.AggregateProductDay(ctx, "app", day("2026-08-10"), []string{"button"}, 2); err != nil {
 		t.Fatal(err)
 	}
 	var n int
@@ -146,14 +150,13 @@ func TestAggregateProductIdempotent(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
 	seedProductDay(t, db)
-	agg := store.ProductAggSettings{Enabled: true, TopN: 50}
 	must := func(err error) {
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
-	must(db.AggregateProductDay(ctx, "app", day("2026-08-10"), agg))
-	must(db.AggregateProductDay(ctx, "app", day("2026-08-10"), agg)) // no raw left: no-op
+	must(db.AggregateProductDay(ctx, "app", day("2026-08-10"), nil, 50))
+	must(db.AggregateProductDay(ctx, "app", day("2026-08-10"), nil, 50)) // no raw left: no-op
 	var c int
 	db.db.QueryRow(`SELECT count FROM agg_product_daily WHERE event_name='subscribed'`).Scan(&c)
 	if c != 3 {

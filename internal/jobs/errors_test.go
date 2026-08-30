@@ -116,11 +116,11 @@ func (f *faultyStore) AggregateWebDay(ctx context.Context, project string, day c
 	return f.Store.AggregateWebDay(ctx, project, day)
 }
 
-func (f *faultyStore) AggregateProductDay(ctx context.Context, project string, day civil.Date, agg store.ProductAggSettings) error {
+func (f *faultyStore) AggregateProductDay(ctx context.Context, project string, day civil.Date, attrs []string, topN int) error {
 	if f.shouldFail("AggregateProductDay") {
 		return errBoom
 	}
-	return f.Store.AggregateProductDay(ctx, project, day, agg)
+	return f.Store.AggregateProductDay(ctx, project, day, attrs, topN)
 }
 
 func (f *faultyStore) AggregateAppDay(ctx context.Context, project string, day civil.Date) error {

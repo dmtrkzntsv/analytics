@@ -85,7 +85,7 @@ func TestIssueIngestKeyUnknownProject(t *testing.T) {
 	}
 }
 
-func TestUpdateProjectAppliesRetentionAndAggregation(t *testing.T) {
+func TestUpdateProjectAppliesRetentionAndAttributes(t *testing.T) {
 	st := testStore(t)
 	reg := New(st, defaults, discard())
 	ctx := context.Background()
@@ -97,8 +97,8 @@ func TestUpdateProjectAppliesRetentionAndAggregation(t *testing.T) {
 	rawDays := 90
 	p, err := ops.UpdateProject(ctx, "cli", ProjectSpec{
 		Alias: "blog", Name: "b", Identity: "identified",
-		Retention:   &config.RetentionOverride{Web: &config.RetentionClassOverride{RawDays: &rawDays}},
-		Aggregation: &config.ProductAggregation{Enabled: true, Attributes: map[string][]string{"*": {"plan"}}, TopN: 10},
+		Retention:  &config.RetentionOverride{Web: &config.RetentionClassOverride{RawDays: &rawDays}},
+		Attributes: []string{"plan"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -106,8 +106,8 @@ func TestUpdateProjectAppliesRetentionAndAggregation(t *testing.T) {
 	if p.Identity != "identified" || p.Retention == nil || p.Retention.Web == nil || *p.Retention.Web.RawDays != 90 {
 		t.Fatalf("updated project = %+v", p)
 	}
-	if p.Aggregation == nil || !p.Aggregation.Enabled || p.Aggregation.TopN != 10 {
-		t.Fatalf("aggregation not applied: %+v", p.Aggregation)
+	if len(p.Attributes) != 1 || p.Attributes[0] != "plan" {
+		t.Fatalf("attributes not applied: %+v", p.Attributes)
 	}
 	// invalid identity is rejected before it reaches the store
 	if _, err := ops.UpdateProject(ctx, "cli", ProjectSpec{Alias: "blog", Identity: "sometimes"}); err == nil {
@@ -176,23 +176,23 @@ func TestValidateDefaultsNameAndIdentity(t *testing.T) {
 	}
 }
 
-func TestRowMarshalsOriginsRetentionAggregation(t *testing.T) {
-	// nil origins -> "[]", no retention/aggregation
+func TestRowMarshalsOriginsRetentionAttributes(t *testing.T) {
+	// nil origins/attributes -> "[]", no retention
 	sp := &ProjectSpec{Alias: "a", Name: "a", Identity: "anonymous"}
 	row, err := sp.row()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if row.AllowedOrigins != "[]" || row.Retention != "" || row.Aggregation != "" {
+	if row.AllowedOrigins != "[]" || row.Retention != "" || row.Attributes != "[]" {
 		t.Fatalf("row = %+v", row)
 	}
 
-	// non-nil origins, retention and aggregation all set
+	// non-nil origins, retention and attributes all set
 	rawDays := 5
 	sp2 := &ProjectSpec{Alias: "b", Name: "b", Identity: "identified",
 		AllowedOrigins: []string{"https://b.example.com"},
 		Retention:      &config.RetentionOverride{Web: &config.RetentionClassOverride{RawDays: &rawDays}},
-		Aggregation:    &config.ProductAggregation{Enabled: true, TopN: 5}}
+		Attributes:     []string{"plan", "tier"}}
 	row2, err := sp2.row()
 	if err != nil {
 		t.Fatal(err)
@@ -203,8 +203,8 @@ func TestRowMarshalsOriginsRetentionAggregation(t *testing.T) {
 	if !strings.Contains(row2.Retention, `"raw_days":5`) {
 		t.Errorf("Retention = %q", row2.Retention)
 	}
-	if !strings.Contains(row2.Aggregation, `"enabled":true`) {
-		t.Errorf("Aggregation = %q", row2.Aggregation)
+	if row2.Attributes != `["plan","tier"]` {
+		t.Errorf("Attributes = %q", row2.Attributes)
 	}
 }
 
@@ -217,13 +217,13 @@ func TestSnippetDefaultsOriginWhenEmpty(t *testing.T) {
 
 // ---- registry.go: previously-zero accessors and error branches ----
 
-func TestProjectsAnyOriginAllowedAndAggregationFor(t *testing.T) {
+func TestProjectsAnyOriginAllowedAndAttributesFor(t *testing.T) {
 	st := testStore(t)
 	ctx := context.Background()
 	if err := st.CreateProject(ctx, store.RegistryProject{
 		Alias: "blog", Name: "blog", Identity: "anonymous",
 		AllowedOrigins: `["https://blog.example.com/"]`, // trailing slash on this side
-		Aggregation:    `{"enabled":true,"attributes":{"*":["plan"]},"top_n":25}`,
+		Attributes:     `["plan"]`,
 	}, store.AuditEntry{Actor: "test", Action: "project.create", Subject: "blog"}); err != nil {
 		t.Fatal(err)
 	}
@@ -251,15 +251,15 @@ func TestProjectsAnyOriginAllowedAndAggregationFor(t *testing.T) {
 		t.Error("AnyOriginAllowed matched an origin nobody allows")
 	}
 
-	agg := s.AggregationFor("blog")
-	if !agg.Enabled || agg.TopN != 25 {
-		t.Fatalf("AggregationFor(blog) = %+v", agg)
+	attrs := s.AttributesFor("blog")
+	if len(attrs) != 1 || attrs[0] != "plan" {
+		t.Fatalf("AttributesFor(blog) = %+v", attrs)
 	}
-	if got := s.AggregationFor("docs"); got.Enabled {
-		t.Fatalf("AggregationFor(docs) = %+v, want zero value (no aggregation configured)", got)
+	if got := s.AttributesFor("docs"); len(got) != 0 {
+		t.Fatalf("AttributesFor(docs) = %+v, want empty (no attributes declared)", got)
 	}
-	if got := s.AggregationFor("ghost"); got.Enabled {
-		t.Fatalf("AggregationFor(ghost) = %+v, want zero value (unknown alias)", got)
+	if got := s.AttributesFor("ghost"); len(got) != 0 {
+		t.Fatalf("AttributesFor(ghost) = %+v, want nil (unknown alias)", got)
 	}
 }
 
@@ -407,7 +407,7 @@ func TestImportRestoresAnArchivedProjectWhenDocumentSaysSo(t *testing.T) {
 	}
 }
 
-func TestExportIncludesRetentionAndAggregation(t *testing.T) {
+func TestExportIncludesRetentionAndAttributes(t *testing.T) {
 	st := testStore(t)
 	reg := New(st, defaults, discard())
 	ctx := context.Background()
@@ -416,8 +416,8 @@ func TestExportIncludesRetentionAndAggregation(t *testing.T) {
 	rawDays := 90
 	if _, err := ops.CreateProject(ctx, "cli", ProjectSpec{
 		Alias: "blog", Name: "blog", Identity: "identified",
-		Retention:   &config.RetentionOverride{Web: &config.RetentionClassOverride{RawDays: &rawDays}},
-		Aggregation: &config.ProductAggregation{Enabled: true, TopN: 10},
+		Retention:  &config.RetentionOverride{Web: &config.RetentionClassOverride{RawDays: &rawDays}},
+		Attributes: []string{"plan"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -436,8 +436,11 @@ func TestExportIncludesRetentionAndAggregation(t *testing.T) {
 	if ep.Retention == nil || ep.Retention.Web == nil || *ep.Retention.Web.RawDays != 90 {
 		t.Fatalf("exported retention = %+v", ep.Retention)
 	}
-	if ep.ProductAggregation == nil || !ep.ProductAggregation.Enabled || ep.ProductAggregation.TopN != 10 {
-		t.Fatalf("exported aggregation = %+v", ep.ProductAggregation)
+	if len(ep.Attributes) != 1 || ep.Attributes[0] != "plan" {
+		t.Fatalf("exported attributes = %+v", ep.Attributes)
+	}
+	if strings.Contains(buf.String(), "product_aggregation") {
+		t.Errorf("export must not carry the legacy product_aggregation field: %s", buf.String())
 	}
 }
 
@@ -467,7 +470,7 @@ func TestReloadAndExportRejectCorruptRegistryJSON(t *testing.T) {
 	}{
 		{"allowed_origins", "allowed_origins"},
 		{"retention", "retention"},
-		{"product_aggregation", "product_aggregation"},
+		{"attributes", "attributes"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			st := testStore(t)

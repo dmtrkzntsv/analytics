@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -58,7 +59,13 @@ type RetentionOverride struct {
 	App     *RetentionClassOverride `json:"app"`
 }
 
-type ProductAggregation struct {
+// LegacyAggregation is the pre-2026-08 product_aggregation block: an
+// event-keyed map of attribute keys, an opt-in flag and a per-project
+// top_n. `attributes` replaced it with one flat declared list (enabled is
+// gone — rollups always run now; top_n is the global
+// PRODUCT_ATTRIBUTES_TOP_N setting), but `config import` still accepts
+// this shape so an unmodified pre-upgrade projects.json keeps working.
+type LegacyAggregation struct {
 	Enabled    bool                `json:"enabled"`
 	Attributes map[string][]string `json:"attributes"`
 	TopN       int                 `json:"top_n"`
@@ -80,13 +87,37 @@ type IngestKey struct {
 // config import` to seed the registry (internal/manage) from a pre-upgrade
 // install. The running server never reads this type from a file.
 type Project struct {
-	Alias              string              `json:"alias"`
-	Name               string              `json:"name"`
-	Identity           string              `json:"identity"`
-	IngestKeys         []IngestKey         `json:"ingest_keys"`
-	AllowedOrigins     []string            `json:"allowed_origins"`
-	Retention          *RetentionOverride  `json:"retention"`
-	ProductAggregation *ProductAggregation `json:"product_aggregation"`
+	Alias          string             `json:"alias"`
+	Name           string             `json:"name"`
+	Identity       string             `json:"identity"`
+	IngestKeys     []IngestKey        `json:"ingest_keys"`
+	AllowedOrigins []string           `json:"allowed_origins"`
+	Retention      *RetentionOverride `json:"retention"`
+	Attributes     []string           `json:"attributes"`
+	// LegacyAggregation is the pre-2026-08 product_aggregation block.
+	// Import still accepts it and folds its event-keyed map into a flat
+	// list, so an unmodified pre-upgrade projects.json still imports.
+	LegacyAggregation *LegacyAggregation `json:"product_aggregation"`
+}
+
+// DeclaredAttributes returns the declared keys, folding the legacy
+// event-keyed map into a sorted DISTINCT union when only it is present.
+func (p *Project) DeclaredAttributes() []string {
+	if len(p.Attributes) > 0 || p.LegacyAggregation == nil {
+		return p.Attributes
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, keys := range p.LegacyAggregation.Attributes {
+		for _, k := range keys {
+			if !seen[k] {
+				seen[k] = true
+				out = append(out, k)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // DashboardsConfig configures `twillingate dashboards`: which database to
@@ -132,15 +163,16 @@ type MCPConfig struct {
 }
 
 type Config struct {
-	Listen     string
-	Database   string
-	Geo        string
-	PublicURL  string
-	Log        LogConfig
-	Buffer     BufferConfig
-	Retention  Retention
-	Dashboards DashboardsConfig
-	MCP        MCPConfig
+	Listen                string
+	Database              string
+	Geo                   string
+	PublicURL             string
+	Log                   LogConfig
+	Buffer                BufferConfig
+	Retention             Retention
+	ProductAttributesTopN int
+	Dashboards            DashboardsConfig
+	MCP                   MCPConfig
 }
 
 // Load builds the configuration from the process environment.
@@ -243,6 +275,10 @@ func parse(lookup func(string) (string, bool), dashboards bool) (*Config, error)
 				AggregateDays: e.num("RETENTION_APP_AGGREGATE_DAYS", 365),
 			},
 		},
+		// Distinct client-supplied *values* per declared attribute key are
+		// capped globally rather than per project (spec: the operator picks
+		// the key, clients pick the values).
+		ProductAttributesTopN: e.num("PRODUCT_ATTRIBUTES_TOP_N", 50),
 		Dashboards: DashboardsConfig{
 			DBPath:     e.str("DASHBOARDS_DB_PATH", ""),
 			Addr:       e.str("DASHBOARDS_ADDR", "0.0.0.0:3000"),

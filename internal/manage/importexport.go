@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 
 	"github.com/dmtrkzntsv/twillingate/internal/config"
 	"github.com/dmtrkzntsv/twillingate/internal/store"
@@ -27,7 +28,7 @@ func (o *Ops) Export(ctx context.Context, w io.Writer) error {
 	doc := exportDoc{Version: 1}
 	for _, rp := range ps {
 		ep := exportProject{Alias: rp.Alias, Name: rp.Name, Identity: rp.Identity,
-			Archived: rp.Archived, AllowedOrigins: []string{},
+			Archived: rp.Archived, AllowedOrigins: []string{}, Attributes: []string{},
 			IngestKeys: keysByProject[rp.Alias]}
 		if ep.IngestKeys == nil {
 			ep.IngestKeys = []exportKey{}
@@ -43,9 +44,8 @@ func (o *Ops) Export(ctx context.Context, w io.Writer) error {
 				return fmt.Errorf("export %q: %w", rp.Alias, err)
 			}
 		}
-		if rp.Aggregation != "" {
-			ep.ProductAggregation = new(config.ProductAggregation)
-			if err := json.Unmarshal([]byte(rp.Aggregation), ep.ProductAggregation); err != nil {
+		if rp.Attributes != "" {
+			if err := json.Unmarshal([]byte(rp.Attributes), &ep.Attributes); err != nil {
 				return fmt.Errorf("export %q: %w", rp.Alias, err)
 			}
 		}
@@ -77,7 +77,7 @@ func (o *Ops) Import(ctx context.Context, actor string, r io.Reader) (ImportResu
 		for _, lp := range legacy {
 			ep := exportProject{Alias: lp.Alias, Name: lp.Name, Identity: lp.Identity,
 				AllowedOrigins: lp.AllowedOrigins, Retention: lp.Retention,
-				ProductAggregation: lp.ProductAggregation}
+				Attributes: lp.DeclaredAttributes()}
 			for _, k := range lp.IngestKeys {
 				ep.IngestKeys = append(ep.IngestKeys, exportKey{Key: k.Key, Label: k.Label, Disabled: k.Disabled})
 			}
@@ -99,7 +99,7 @@ func (o *Ops) Import(ctx context.Context, actor string, r io.Reader) (ImportResu
 	for _, ep := range projects {
 		spec := ProjectSpec{Alias: ep.Alias, Name: ep.Name, Identity: ep.Identity,
 			AllowedOrigins: ep.AllowedOrigins, Retention: ep.Retention,
-			Aggregation: ep.ProductAggregation}
+			Attributes: ep.declaredAttributes()}
 		// snapshot re-read per iteration: CreateProject reloads it, and a
 		// document may (erroneously) repeat an alias — the second pass
 		// must see the first.
@@ -205,14 +205,40 @@ type exportDoc struct {
 }
 
 type exportProject struct {
-	Alias              string                     `json:"alias"`
-	Name               string                     `json:"name"`
-	Identity           string                     `json:"identity"`
-	AllowedOrigins     []string                   `json:"allowed_origins"`
-	Retention          *config.RetentionOverride  `json:"retention,omitempty"`
-	ProductAggregation *config.ProductAggregation `json:"product_aggregation,omitempty"`
-	Archived           bool                       `json:"archived,omitempty"`
-	IngestKeys         []exportKey                `json:"ingest_keys"`
+	Alias          string                    `json:"alias"`
+	Name           string                    `json:"name"`
+	Identity       string                    `json:"identity"`
+	AllowedOrigins []string                  `json:"allowed_origins"`
+	Retention      *config.RetentionOverride `json:"retention,omitempty"`
+	Attributes     []string                  `json:"attributes,omitempty"`
+	// ProductAggregation is the pre-2026-08 shape. Import still accepts it
+	// (DisallowUnknownFields would otherwise reject every previously
+	// exported document); Export never sets it, so omitempty drops it from
+	// round-tripped documents.
+	ProductAggregation *config.LegacyAggregation `json:"product_aggregation,omitempty"`
+	Archived           bool                      `json:"archived,omitempty"`
+	IngestKeys         []exportKey               `json:"ingest_keys"`
+}
+
+// declaredAttributes resolves Attributes and the legacy ProductAggregation
+// block the same way config.Project.DeclaredAttributes does, preferring
+// Attributes when both are present.
+func (ep *exportProject) declaredAttributes() []string {
+	if len(ep.Attributes) > 0 || ep.ProductAggregation == nil {
+		return ep.Attributes
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, keys := range ep.ProductAggregation.Attributes {
+		for _, k := range keys {
+			if !seen[k] {
+				seen[k] = true
+				out = append(out, k)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 type exportKey struct {

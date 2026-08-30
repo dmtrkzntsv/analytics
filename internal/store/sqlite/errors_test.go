@@ -244,7 +244,7 @@ func TestAggregateProductDayFailsOnCountQuery(t *testing.T) {
 	if _, err := db.db.ExecContext(ctx, `DROP TABLE product_events`); err != nil {
 		t.Fatal(err)
 	}
-	err := db.AggregateProductDay(ctx, "p", day("2026-08-10"), store.ProductAggSettings{})
+	err := db.AggregateProductDay(ctx, "p", day("2026-08-10"), nil, 50)
 	if err == nil {
 		t.Error("want error counting a missing product_events table")
 	}
@@ -262,7 +262,7 @@ func TestAggregateProductDayFailsOnDailyRollup(t *testing.T) {
 	if _, err := db.db.ExecContext(ctx, `DROP TABLE agg_product_daily`); err != nil {
 		t.Fatal(err)
 	}
-	err := db.AggregateProductDay(ctx, "p", day("2026-08-10"), store.ProductAggSettings{Enabled: true})
+	err := db.AggregateProductDay(ctx, "p", day("2026-08-10"), nil, 50)
 	if err == nil || !strings.Contains(err.Error(), "agg_product_daily") {
 		t.Errorf("err = %v, want mention of agg_product_daily", err)
 	}
@@ -280,7 +280,7 @@ func TestAggregateProductDayFailsOnTotalsRollup(t *testing.T) {
 	if _, err := db.db.ExecContext(ctx, `DROP TABLE agg_product_totals`); err != nil {
 		t.Fatal(err)
 	}
-	err := db.AggregateProductDay(ctx, "p", day("2026-08-10"), store.ProductAggSettings{Enabled: true})
+	err := db.AggregateProductDay(ctx, "p", day("2026-08-10"), nil, 50)
 	if err == nil || !strings.Contains(err.Error(), "agg_product_totals") {
 		t.Errorf("err = %v, want mention of agg_product_totals", err)
 	}
@@ -299,8 +299,7 @@ func TestAggregateProductDayFailsOnAttrRollup(t *testing.T) {
 	if _, err := db.db.ExecContext(ctx, `DROP TABLE agg_product_attrs`); err != nil {
 		t.Fatal(err)
 	}
-	agg := store.ProductAggSettings{Enabled: true, Attributes: map[string][]string{"*": {"plan"}}, TopN: 10}
-	err := db.AggregateProductDay(ctx, "p", day("2026-08-10"), agg)
+	err := db.AggregateProductDay(ctx, "p", day("2026-08-10"), []string{"plan"}, 10)
 	if err == nil || !strings.Contains(err.Error(), "attr signup/plan") {
 		t.Errorf("err = %v, want mention of attr signup/plan", err)
 	}
@@ -320,7 +319,7 @@ CREATE TRIGGER block_product_delete BEFORE DELETE ON product_events
 BEGIN SELECT RAISE(ABORT, 'blocked'); END`); err != nil {
 		t.Fatal(err)
 	}
-	err := db.AggregateProductDay(ctx, "p", day("2026-08-10"), store.ProductAggSettings{})
+	err := db.AggregateProductDay(ctx, "p", day("2026-08-10"), nil, 50)
 	if err == nil || !strings.Contains(err.Error(), "blocked") {
 		t.Errorf("err = %v, want mention of the blocking trigger", err)
 	}

@@ -82,7 +82,7 @@ func TestUpdateProjectAppliesFieldsAndAudits(t *testing.T) {
 
 	updated := store.RegistryProject{Alias: "blog", Name: "Renamed blog",
 		Identity: "identified", AllowedOrigins: `["https://blog.example.com","https://www.blog.example.com"]`,
-		Retention: `{"web":{"raw_days":90}}`, Aggregation: `{"enabled":true}`}
+		Retention: `{"web":{"raw_days":90}}`, Attributes: `["plan"]`}
 	if err := d.UpdateProject(ctx, updated, store.AuditEntry{
 		Actor: "cli", Action: "project.update", Subject: "blog"}); err != nil {
 		t.Fatal(err)
@@ -98,7 +98,7 @@ func TestUpdateProjectAppliesFieldsAndAudits(t *testing.T) {
 	got := ps[0]
 	if got.Name != "Renamed blog" || got.Identity != "identified" ||
 		got.AllowedOrigins != updated.AllowedOrigins ||
-		got.Retention != updated.Retention || got.Aggregation != updated.Aggregation {
+		got.Retention != updated.Retention || got.Attributes != updated.Attributes {
 		t.Fatalf("LoadRegistry after update = %+v", got)
 	}
 
@@ -253,6 +253,86 @@ func TestMigrationUpgradeFrom004(t *testing.T) {
 	}
 	if allowedOrigins != "[]" {
 		t.Errorf("allowed_origins = %q, want '[]'", allowedOrigins)
+	}
+}
+
+// TestProjectsAttributesDefaultsToEmptyArray asserts the new column's
+// NOT NULL DEFAULT '[]', for a row inserted (via ExecForTest, bypassing the
+// application write path) without ever mentioning it.
+func TestProjectsAttributesDefaultsToEmptyArray(t *testing.T) {
+	db := newTestDB(t) // existing helper; applies all migrations
+	ctx := context.Background()
+	if _, err := db.ExecForTest(
+		`INSERT INTO projects (id, alias, name, identity, allowed_origins)
+		 VALUES ('i1','blog','Blog','anonymous','[]')`); err != nil {
+		t.Fatal(err)
+	}
+	ps, _, err := db.LoadRegistry(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ps) != 1 || ps[0].Attributes != "[]" {
+		t.Fatalf("Attributes = %q, want \"[]\"", ps[0].Attributes)
+	}
+}
+
+// TestMigrationBackfillsAttributesFromLegacyMap is the risky part of 006:
+// it reconstructs pre-006 state (product_aggregation's old event-keyed
+// map), runs the migration's UPDATE statement verbatim, and asserts the
+// backfill produced the sorted DISTINCT union of every array in the map —
+// {"*":["plan"],"subscribed":["tier","plan"]} -> ["plan","tier"]. This
+// also exercises whether the correlated
+// json_each(json_extract(projects.product_aggregation, '$.attributes'))
+// reference actually works on this SQLite build.
+func TestMigrationBackfillsAttributesFromLegacyMap(t *testing.T) {
+	d, err := openAt(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	ctx := context.Background()
+
+	// Reconstruct pre-006 state: migrations 001-005 applied, so
+	// product_aggregation exists as a plain TEXT column.
+	if err := applyMigrationsUpTo(ctx, d, 5); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.db.ExecContext(ctx,
+		`INSERT INTO projects (id, alias, name, identity, allowed_origins, product_aggregation)
+		 VALUES (?,?,?,?,?,?)`,
+		"id1", "blog", "Blog", "anonymous", "[]",
+		`{"enabled":true,"attributes":{"*":["plan"],"subscribed":["tier","plan"]},"top_n":50}`); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run 006's ALTER + UPDATE verbatim (not the DROP COLUMN, which would
+	// remove the very column this test reads from).
+	if _, err := d.db.ExecContext(ctx,
+		`ALTER TABLE projects ADD COLUMN attributes TEXT NOT NULL DEFAULT '[]'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.db.ExecContext(ctx, `
+UPDATE projects SET attributes = COALESCE((
+  SELECT json_group_array(k) FROM (
+    SELECT DISTINCT v.value AS k
+    FROM json_each(json_extract(projects.product_aggregation, '$.attributes')) AS m,
+         json_each(m.value) AS v
+    ORDER BY 1
+  )
+), '[]')
+WHERE product_aggregation IS NOT NULL
+  AND product_aggregation <> ''
+  AND json_extract(product_aggregation, '$.attributes') IS NOT NULL`); err != nil {
+		t.Fatal(err)
+	}
+
+	var attrs string
+	if err := d.db.QueryRowContext(ctx,
+		`SELECT attributes FROM projects WHERE alias='blog'`).Scan(&attrs); err != nil {
+		t.Fatal(err)
+	}
+	if attrs != `["plan","tier"]` {
+		t.Fatalf("attributes = %q, want [\"plan\",\"tier\"] (sorted DISTINCT union)", attrs)
 	}
 }
 

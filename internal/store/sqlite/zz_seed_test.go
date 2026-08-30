@@ -70,8 +70,7 @@ func TestSeedEvidenceFixture(t *testing.T) {
 		if err := db.AggregateWebDay(ctx, "app", day); err != nil {
 			t.Fatal(err)
 		}
-		if err := db.AggregateProductDay(ctx, "app", day, store.ProductAggSettings{
-			Enabled: true, Attributes: map[string][]string{"*": {"plan"}}, TopN: 10}); err != nil {
+		if err := db.AggregateProductDay(ctx, "app", day, []string{"plan"}, 10); err != nil {
 			t.Fatal(err)
 		}
 	}

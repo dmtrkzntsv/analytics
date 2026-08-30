@@ -58,10 +58,6 @@ func (h *host) productAttributes(ctx context.Context, _ *mcp.CallToolRequest, in
 	if p == nil {
 		return nil, tableOut{}, h.unknownProjectErr(ctx, in.Project)
 	}
-	if p.Aggregation == nil || !p.Aggregation.Enabled {
-		return nil, tableOut{}, fmt.Errorf(
-			"project %q has product_aggregation disabled; enable it with `update_project` or `twillingate project update` (attribute breakdowns are opt-in per key)", in.Project)
-	}
 	q := `SELECT day, event_name, attr_key, attr_value, count, unique_users
 		FROM agg_product_attrs WHERE project=? AND day BETWEEN ? AND ?`
 	args := []any{in.Project, in.From, in.To}
@@ -152,7 +148,7 @@ func (h *host) registerProduct(s *mcp.Server) {
 		Description: "Opt-in product events per day: count and unique users per event name, plus daily totals."},
 		h.productEvents)
 	mcp.AddTool(s, &mcp.Tool{Name: "product_attributes", Annotations: ro,
-		Description: "Attribute breakdowns for product events. Only meaningful where the project has product_aggregation enabled; the error explains the setting when it is not."},
+		Description: "Attribute breakdowns for product events. Only returns rows for keys the project declares in attributes (see update_project); an undeclared key yields an empty result, not an error."},
 		h.productAttributes)
 	mcp.AddTool(s, &mcp.Tool{Name: "retention", Annotations: ro,
 		Description: "D1/D7/D30-style cohort curves for identified projects. Returns aggregated_through: cohorts after it are absent (refreshed 03:00 UTC), not zero. Anonymous projects have no retention by design."},

@@ -137,7 +137,7 @@ func cmdProject(args []string, stdout io.Writer) int {
 			spec.Identity = current.Identity
 			spec.AllowedOrigins = current.AllowedOrigins
 			spec.Retention = current.Retention
-			spec.Aggregation = current.Aggregation
+			spec.Attributes = current.Attributes
 
 			// Overlay explicitly-set flags using sf.Visit
 			sf.Visit(func(f *flag.Flag) {

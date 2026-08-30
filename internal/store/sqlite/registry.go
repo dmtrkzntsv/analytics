@@ -37,7 +37,7 @@ func (d *DB) ConfigVersion(ctx context.Context) (int64, error) {
 
 func (d *DB) LoadRegistry(ctx context.Context) ([]store.RegistryProject, []store.RegistryKey, error) {
 	rows, err := d.db.QueryContext(ctx, `SELECT alias, name, identity,
-		allowed_origins, COALESCE(retention,''), COALESCE(product_aggregation,''),
+		allowed_origins, COALESCE(retention,''), attributes,
 		archived_at IS NOT NULL FROM projects ORDER BY alias`)
 	if err != nil {
 		return nil, nil, err
@@ -47,7 +47,7 @@ func (d *DB) LoadRegistry(ctx context.Context) ([]store.RegistryProject, []store
 	for rows.Next() {
 		var p store.RegistryProject
 		if err := rows.Scan(&p.Alias, &p.Name, &p.Identity,
-			&p.AllowedOrigins, &p.Retention, &p.Aggregation, &p.Archived); err != nil {
+			&p.AllowedOrigins, &p.Retention, &p.Attributes, &p.Archived); err != nil {
 			return nil, nil, err
 		}
 		ps = append(ps, p)
@@ -87,10 +87,10 @@ func (d *DB) CreateProject(ctx context.Context, p store.RegistryProject, a store
 			return fmt.Errorf("create project: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO projects
-			(id, alias, name, identity, allowed_origins, retention, product_aggregation)
-			VALUES (?,?,?,?,?,NULLIF(?,''),NULLIF(?,''))`,
+			(id, alias, name, identity, allowed_origins, retention, attributes)
+			VALUES (?,?,?,?,?,NULLIF(?,''),?)`,
 			id.String(), p.Alias, p.Name, p.Identity, p.AllowedOrigins,
-			p.Retention, p.Aggregation); err != nil {
+			p.Retention, p.Attributes); err != nil {
 			return fmt.Errorf("create project %q: %w", p.Alias, err)
 		}
 		return auditAndBump(ctx, tx, a)
@@ -100,9 +100,9 @@ func (d *DB) CreateProject(ctx context.Context, p store.RegistryProject, a store
 func (d *DB) UpdateProject(ctx context.Context, p store.RegistryProject, a store.AuditEntry) error {
 	return d.tx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE projects SET name=?, identity=?,
-			allowed_origins=?, retention=NULLIF(?,''), product_aggregation=NULLIF(?,'')
+			allowed_origins=?, retention=NULLIF(?,''), attributes=?
 			WHERE alias=?`,
-			p.Name, p.Identity, p.AllowedOrigins, p.Retention, p.Aggregation, p.Alias)
+			p.Name, p.Identity, p.AllowedOrigins, p.Retention, p.Attributes, p.Alias)
 		if err != nil {
 			return err
 		}

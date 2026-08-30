@@ -21,7 +21,7 @@ type Project struct {
 	Alias, Name, Identity string
 	AllowedOrigins        []string
 	Retention             *config.RetentionOverride
-	Aggregation           *config.ProductAggregation
+	Attributes            []string
 	Archived              bool
 }
 
@@ -90,13 +90,9 @@ func (r *Registry) Reload(ctx context.Context) error {
 				return fmt.Errorf("manage: project %q retention: %w", rp.Alias, err)
 			}
 		}
-		if rp.Aggregation != "" {
-			p.Aggregation = new(config.ProductAggregation)
-			if err := json.Unmarshal([]byte(rp.Aggregation), p.Aggregation); err != nil {
-				return fmt.Errorf("manage: project %q product_aggregation: %w", rp.Alias, err)
-			}
-			if p.Aggregation.TopN == 0 {
-				p.Aggregation.TopN = 50
+		if rp.Attributes != "" {
+			if err := json.Unmarshal([]byte(rp.Attributes), &p.Attributes); err != nil {
+				return fmt.Errorf("manage: project %q attributes: %w", rp.Alias, err)
 			}
 		}
 		s.byAlias[p.Alias] = p
@@ -225,14 +221,12 @@ func (s *Snapshot) KeylessProjects() []string {
 	return out
 }
 
-func (s *Snapshot) AggregationFor(alias string) store.ProductAggSettings {
+// AttributesFor returns the project's declared attribute keys. Unknown
+// aliases return nil, matching the archived-project fallback.
+func (s *Snapshot) AttributesFor(alias string) []string {
 	p := s.byAlias[alias]
-	if p == nil || p.Aggregation == nil {
-		return store.ProductAggSettings{}
+	if p == nil {
+		return nil
 	}
-	return store.ProductAggSettings{
-		Enabled:    p.Aggregation.Enabled,
-		Attributes: p.Aggregation.Attributes,
-		TopN:       p.Aggregation.TopN,
-	}
+	return p.Attributes
 }

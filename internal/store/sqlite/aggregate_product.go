@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/dmtrkzntsv/twillingate/internal/civil"
-	"github.com/dmtrkzntsv/twillingate/internal/store"
 )
 
 // attrPath builds a JSON path literal for a config-supplied attribute key.
@@ -18,7 +17,7 @@ func attrPath(key string) string {
 	return `$."` + strings.ReplaceAll(key, `"`, `\"`) + `"`
 }
 
-func (d *DB) AggregateProductDay(ctx context.Context, project string, day civil.Date, agg store.ProductAggSettings) error {
+func (d *DB) AggregateProductDay(ctx context.Context, project string, day civil.Date, attrs []string, topN int) error {
 	from, to := dayRange(day)
 	return d.tx(ctx, func(tx *sql.Tx) error {
 		var n int
@@ -30,10 +29,8 @@ func (d *DB) AggregateProductDay(ctx context.Context, project string, day civil.
 		if n == 0 {
 			return nil
 		}
-		if agg.Enabled {
-			if err := d.rollupProduct(ctx, tx, project, day, from, to, agg); err != nil {
-				return err
-			}
+		if err := d.rollupProduct(ctx, tx, project, day, from, to, attrs, topN); err != nil {
+			return err
 		}
 		_, err := tx.ExecContext(ctx,
 			`DELETE FROM product_events WHERE project=? AND ts>=? AND ts<?`, project, from, to)
@@ -41,7 +38,7 @@ func (d *DB) AggregateProductDay(ctx context.Context, project string, day civil.
 	})
 }
 
-func (d *DB) rollupProduct(ctx context.Context, tx *sql.Tx, project string, day civil.Date, from, to string, agg store.ProductAggSettings) error {
+func (d *DB) rollupProduct(ctx context.Context, tx *sql.Tx, project string, day civil.Date, from, to string, attrs []string, topN int) error {
 	if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO agg_product_daily
 		(project, day, event_name, count, unique_users)
 		SELECT project, ?, event_name, COUNT(*), COUNT(DISTINCT actor_id)
@@ -76,15 +73,8 @@ func (d *DB) rollupProduct(ctx context.Context, tx *sql.Tx, project string, day 
 		return err
 	}
 	for _, event := range events {
-		keys := map[string]bool{}
-		for _, k := range agg.Attributes[event] {
-			keys[k] = true
-		}
-		for _, k := range agg.Attributes["*"] {
-			keys[k] = true
-		}
-		for key := range keys {
-			if err := d.rollupAttr(ctx, tx, project, day, from, to, event, key, agg.TopN); err != nil {
+		for _, key := range attrs {
+			if err := d.rollupAttr(ctx, tx, project, day, from, to, event, key, topN); err != nil {
 				return fmt.Errorf("attr %s/%s: %w", event, key, err)
 			}
 		}

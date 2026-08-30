@@ -97,9 +97,9 @@ type projectOut struct {
 	LastWebDay         string                     `json:"last_web_day,omitempty"`
 	FirstAppDay        string                     `json:"first_app_day,omitempty"`
 	LastAppDay         string                     `json:"last_app_day,omitempty"`
-	AllowedOrigins     []string                   `json:"allowed_origins"`
-	Retention          *config.RetentionOverride  `json:"retention,omitempty"`
-	ProductAggregation *config.ProductAggregation `json:"product_aggregation,omitempty"`
+	AllowedOrigins []string                  `json:"allowed_origins"`
+	Retention      *config.RetentionOverride `json:"retention,omitempty"`
+	Attributes     []string                  `json:"attributes,omitempty"`
 }
 
 type listProjectsOut struct {
@@ -111,7 +111,7 @@ func (h *host) listProjects(ctx context.Context, _ *mcp.CallToolRequest, _ struc
 	for _, p := range h.reg.Snapshot(ctx).Projects() {
 		po := projectOut{
 			Alias: p.Alias, Name: p.Name, Identity: p.Identity, Archived: p.Archived,
-			AllowedOrigins: p.AllowedOrigins, Retention: p.Retention, ProductAggregation: p.Aggregation,
+			AllowedOrigins: p.AllowedOrigins, Retention: p.Retention, Attributes: p.Attributes,
 		}
 		// coverage probe: cheap MIN/MAX over the stitch views
 		for _, probe := range []struct {

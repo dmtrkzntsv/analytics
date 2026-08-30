@@ -26,7 +26,7 @@ type ProjectSpec struct {
 	Alias, Name, Identity string
 	AllowedOrigins        []string
 	Retention             *config.RetentionOverride
-	Aggregation           *config.ProductAggregation
+	Attributes            []string
 }
 
 func (sp *ProjectSpec) validate() error {
@@ -70,13 +70,14 @@ func (sp *ProjectSpec) row() (store.RegistryProject, error) {
 		}
 		row.Retention = string(b)
 	}
-	if sp.Aggregation != nil {
-		b, err := json.Marshal(sp.Aggregation)
-		if err != nil {
-			return row, err
-		}
-		row.Aggregation = string(b)
+	attrs, err := json.Marshal(sp.Attributes)
+	if sp.Attributes == nil {
+		attrs, err = []byte("[]"), nil
 	}
+	if err != nil {
+		return row, err
+	}
+	row.Attributes = string(attrs)
 	return row, nil
 }
 
