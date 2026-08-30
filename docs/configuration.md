@@ -142,7 +142,8 @@ attribute.
 `$platform` and `$app_version` roll up automatically without being
 declared, the same way web and app surfaces have always aggregated their
 own system dimensions — they appear in `agg_product_attrs` /
-`v_product_attrs` under those `$`-prefixed keys. Do not add them to
+`v_product_attrs` under those `$`-prefixed keys, and as the `platform` /
+`app_version` base columns of `v_events_flat`. Do not add them to
 `attributes`: `$`-prefixed keys are reserved and never reach the custom
 attribute blob, so `"attributes": ["$platform"]` would extract nothing.
 

@@ -33,6 +33,29 @@ func TestFlatViewOnlyDeclaredKeys(t *testing.T) {
 	}
 }
 
+// The typed system columns platform and app_version are written on every
+// product event, so the flat view must expose them as base columns — they
+// live outside the attributes JSON and would otherwise be unreachable from
+// the query surface entirely.
+func TestFlatViewSystemColumns(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	seedProductEvent(t, db, "app", "signup", "2026-08-01T10:00:00Z",
+		map[string]string{"plan": "pro"}, "ios", "2.4.1")
+	if err := db.RebuildFlatView(ctx, []string{"plan"}); err != nil {
+		t.Fatal(err)
+	}
+	var platform, version string
+	if err := db.db.QueryRow(
+		`SELECT platform, app_version FROM v_events_flat WHERE event_name='signup'`).
+		Scan(&platform, &version); err != nil {
+		t.Fatal(err)
+	}
+	if platform != "ios" || version != "2.4.1" {
+		t.Fatalf("platform, app_version = %q, %q, want ios, 2.4.1", platform, version)
+	}
+}
+
 // A rebuild with an unchanged column set must not re-execute the
 // DROP/CREATE — the daily pass runs this every night and should be a
 // no-op in steady state.
@@ -156,9 +179,10 @@ func TestRebuildFlatViewHostileKeys(t *testing.T) {
 	if !cols["attr_1starts_with_digit"] {
 		t.Errorf("digit-leading key not prefixed into a valid identifier: %v", cols)
 	}
-	// 5 base columns (id, project, event_name, actor_id, ts) + attributes + 4 attrs (漢字 skipped).
-	if len(cols) != 6+4 {
-		t.Errorf("cols = %v, want 6 base + 4 attrs (漢字 skipped)", cols)
+	// 7 base columns (id, project, event_name, actor_id, ts, platform,
+	// app_version) + attributes + 4 attrs (漢字 skipped).
+	if len(cols) != 8+4 {
+		t.Errorf("cols = %v, want 8 base + 4 attrs (漢字 skipped)", cols)
 	}
 }
 
@@ -210,7 +234,8 @@ func TestRebuildFlatViewDeterministicOrder(t *testing.T) {
 			t.Fatalf("column order not deterministic: %v vs %v", first, second)
 		}
 	}
-	want := []string{"id", "project", "event_name", "actor_id", "ts", "attributes",
+	want := []string{"id", "project", "event_name", "actor_id", "ts",
+		"platform", "app_version", "attributes",
 		"attr_alpha", "attr_mu", "attr_zeta"}
 	for i := range want {
 		if first[i] != want[i] {

@@ -66,8 +66,9 @@ worth reporting on:
   unique-user count.
 - Set attributes with the update_project tool or ` + "`twillingate project create/update -attr`" + `.
   $platform and $app_version break down automatically without being
-  declared — do not add them to attributes, $-prefixed keys never reach
-  the custom attribute blob.
+  declared (and are plain platform / app_version columns in
+  v_events_flat) — do not add them to attributes, $-prefixed keys never
+  reach the custom attribute blob.
 
 ## Identity across all families
 
