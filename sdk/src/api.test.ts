@@ -1,4 +1,4 @@
-// The v2 API surface: setAttrs defaults, identify/group with display
+// The v2 API surface: attrs defaults, identify/group with display
 // names, and the page() overloads (current page / explicit path / listener).
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Twillingate } from "./twillingate";
@@ -43,10 +43,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("setAttrs", () => {
+describe("attrs", () => {
   it("merges defaults under every event, event attrs winning", async () => {
     const t = tg();
-    t.setAttrs({ tier: "beta", region: "eu" });
+    t.attrs({ tier: "beta", region: "eu" });
     t.track("signup", { tier: "pro" });
     t.flush();
     await drain();
@@ -55,7 +55,7 @@ describe("setAttrs", () => {
 
   it("applies to pageviews and screens too", async () => {
     const t = tg();
-    t.setAttrs({ ab_test: "b" });
+    t.attrs({ ab_test: "b" });
     t.page();
     t.screen("/home");
     t.flush();
@@ -66,12 +66,12 @@ describe("setAttrs", () => {
     expect(sc).toEqual({ ab_test: "b", $screen: "/home" });
   });
 
-  it("successive calls merge; setAttrs(null) clears", async () => {
+  it("successive calls merge; attrs(null) clears", async () => {
     const t = tg();
-    t.setAttrs({ a: 1 });
-    t.setAttrs({ b: 2 });
+    t.attrs({ a: 1 });
+    t.attrs({ b: 2 });
     t.track("both");
-    t.setAttrs(null);
+    t.attrs(null);
     t.track("none");
     t.flush();
     await drain();

@@ -131,15 +131,15 @@ initialise yourself:
     twillingate.page(fn);                          // register a pageview listener (see below)
     twillingate.screen("/settings");               // app $screen_view
     twillingate.track("signup", { plan: "pro" });  // custom product event
-    twillingate.setAttrs({ tier: "beta" });        // default attributes on every event
+    twillingate.attrs({ tier: "beta" });        // default attributes on every event
     twillingate.identify("user-123", "Ada");       // $user_id + optional $user_name
     twillingate.group("org-9", "Acme");            // $group_id + optional $group_name
     twillingate.reset();                           // on logout
     twillingate.flush();                           // force-send the queue
 
 - track(name, attrs): sends a product event. Do not $-prefix your names.
-- setAttrs(attrs): defaults merged under every event's own attributes
-  (event attributes win); successive calls merge, setAttrs(null) clears.
+- attrs(attrs): defaults merged under every event's own attributes
+  (event attributes win); successive calls merge, attrs(null) clears.
 - page(fn): the listener runs for every pageview, automatic ones included,
   receiving {url, path, referrer, attributes}; return an object to merge
   extra attributes, false to cancel the pageview.

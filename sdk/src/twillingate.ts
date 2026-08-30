@@ -238,9 +238,9 @@ export class Twillingate {
 
   /**
    * Default attributes merged under every event's own (event attributes
-   * win). Successive calls merge; setAttrs(null) clears them all.
+   * win). Successive calls merge; attrs(null) clears them all.
    */
-  setAttrs(attrs: Record<string, unknown> | null): void {
+  attrs(attrs: Record<string, unknown> | null): void {
     if (attrs === null) {
       this.defaultAttrs = {};
       return;

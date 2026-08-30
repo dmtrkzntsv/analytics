@@ -64,7 +64,7 @@ func TestDocsJSSDKMatchesSDK(t *testing.T) {
 	src := readSource(t, "../../sdk/src/twillingate.ts")
 	for _, symbol := range []string{
 		"data-key", "data-identity", "data-user", "data-group", "data-auto",
-		"init", "page", "screen", "track", "setAttrs", "identify", "group", "reset", "flush",
+		"init", "page", "screen", "track", "attrs", "identify", "group", "reset", "flush",
 		"twillingate_ignore", "analytics_ignore",
 		"pushState", "popstate", "sendBeacon",
 		"$pageview", "$screen_view", "$install_id",

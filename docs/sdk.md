@@ -58,7 +58,7 @@ twillingate.page("/settings");                 // $pageview for an explicit path
 twillingate.page((p) => ({ ab: "b" }));        // register a pageview listener
 twillingate.screen("/settings");               // app $screen_view
 twillingate.track("signup", { plan: "pro" });  // opt-in product event
-twillingate.setAttrs({ tier: "beta" });        // default attributes on every event
+twillingate.attrs({ tier: "beta" });        // default attributes on every event
 twillingate.identify("user-123", "Ada");       // $user_id + optional $user_name
 twillingate.group("org-9", "Acme Corp");       // $group_id + optional $group_name
 twillingate.reset();                           // on logout — see below
@@ -66,8 +66,8 @@ twillingate.flush();                           // force-send the queue
 ```
 
 - `track(name, attrs)` — product event; don't `$`-prefix your names.
-- `setAttrs(attrs)` — default attributes merged under every event's own
-  (event attributes win). Successive calls merge; `setAttrs(null)` clears.
+- `attrs(attrs)` — default attributes merged under every event's own
+  (event attributes win). Successive calls merge; `attrs(null)` clears.
 - `page(arg?, attrs?)` — no argument records the current page; a string
   records that path (resolved against the page for `$url`); an object is
   extra attributes for the current page. Passing a **function** registers
