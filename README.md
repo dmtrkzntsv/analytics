@@ -1,4 +1,12 @@
-# twillingate
+<p align="center">
+  <img src="docs/logo.svg" width="140" alt="An iceberg, most of it below the waterline">
+</p>
+
+<h1 align="center">twillingate</h1>
+
+<p align="center"><em>Named after <a href="https://en.wikipedia.org/wiki/Twillingate">Twillingate</a>,
+the Canadian town where tourists come to watch icebergs —
+this one surfaces the insights beneath your data.</em></p>
 
 Web, app and product analytics as one Go binary and one SQLite file —
 cookieless and anonymous by default ([details](#privacy-and-gdpr)). It holds

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 30 30">
+  <!-- Full square background -->
+  <path d="M0 0H30V30H0Z" fill="#0A4D8C"/>
+  <path d="M0 0H30V13H0Z" fill="#8FD3FF"/>
+
+  <!-- Iceberg above water -->
+  <path d="M5.5 13L10.2 9.1L12.2 10.2L15.5 4L18 8.1L20 7L24.5 13H5.5Z" fill="#F8FCFF"/>
+  <path d="M12.2 10.2L15.5 4L16.3 10L14.4 13H9.2L12.2 10.2Z" fill="#D5F1FF"/>
+  <path d="M15.5 4L18 8.1L16.3 10Z" fill="#2E9FE5"/>
+  <path d="M18 8.1L20 7L22 13H16.3Z" fill="#62C3F3"/>
+
+  <!-- Iceberg below water -->
+  <path d="M5.5 13H24.5L20 20.5L15 27L10 20.5L5.5 13Z" fill="#1478C9"/>
+  <path d="M5.5 13L12.5 16L10 20.5Z" fill="#54C8F7"/>
+  <path d="M12.5 16L15 27L10 20.5Z" fill="#249FE3"/>
+  <path d="M12.5 16L17 13L20 20.5L15 27Z" fill="#0D61AD"/>
+  <path d="M17 13H24.5L20 20.5Z" fill="#073F7C"/>
+</svg>
