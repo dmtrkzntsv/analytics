@@ -7,7 +7,8 @@ coverage.out
 # build` still passes — the local tree has the file, the build context does not.
 docs/
 !docs/embed.go
-!docs/ingest-api.md
+!docs/twillingate.md
+!docs/deployment.md
 !docs/plausible/plausible-shim.js
 local/
 evidence/node_modules
