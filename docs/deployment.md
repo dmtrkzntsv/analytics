@@ -34,6 +34,21 @@ none of it.
 
 ## Install
 
+### docker compose
+
+Tracking: ingestion, the SDK, and `/mcp` once `MCP_AUTH_DSN` is set. The
+dashboards are a second compose file, added under [Reporting with
+Evidence](#reporting-with-evidence):
+
+```bash
+mkdir twillingate && cd twillingate
+base=https://raw.githubusercontent.com/dmtrkzntsv/twillingate/main
+curl -fsSLO $base/deploy/compose/docker-compose.yml
+docker compose up -d
+docker compose exec twillingate twillingate project create -alias myapp
+docker compose exec twillingate twillingate key issue -project myapp -label web
+```
+
 ### systemd on a VPS
 
 ```bash
@@ -70,21 +85,6 @@ curl -s localhost:8080/healthz            # → {"status":"ok"}
 
 Put TLS in front of `127.0.0.1:8080` — Caddy, nginx, or a Cloudflare tunnel.
 The service binds to loopback by default, deliberately.
-
-### docker compose
-
-Tracking: ingestion, the SDK, and `/mcp` once `MCP_AUTH_DSN` is set. The
-dashboards are a second compose file, added under [Reporting with
-Evidence](#reporting-with-evidence):
-
-```bash
-mkdir twillingate && cd twillingate
-base=https://raw.githubusercontent.com/dmtrkzntsv/twillingate/main
-curl -fsSLO $base/deploy/compose/docker-compose.yml
-docker compose up -d
-docker compose exec twillingate twillingate project create -alias myapp
-docker compose exec twillingate twillingate key issue -project myapp -label web
-```
 
 ### Verifying ingestion
 
