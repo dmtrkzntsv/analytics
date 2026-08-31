@@ -85,7 +85,8 @@ the text you read and the text they read are the same bytes.
 [docs/deployment.md](docs/deployment.md) is everything needed to run
 twillingate on your own server: installing it, configuring the collector,
 Evidence reporting, the MCP endpoint, and litestream if you split across two
-machines.
+machines. It is served as `docs://deployment`, so an agent can help with an
+install too.
 
 | Section | Covers |
 | --- | --- |

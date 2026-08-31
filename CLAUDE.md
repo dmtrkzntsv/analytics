@@ -54,11 +54,12 @@ suite on its own.
 
 ## Documentation
 
-Two pages, split on using versus running. `docs/twillingate.md` is what an
-agent needs to set up a project, get it tracking, and answer questions from
-the data — and is the only prose the MCP endpoint serves.
-`docs/deployment.md` is what an operator needs to run twillingate on their
-own server. Neither is a summary of the code — they are the contract.
+Two pages, split on using versus running, and both served over MCP.
+`docs/twillingate.md` (`docs://twillingate`) is what an agent needs to set
+up a project, get it tracking, and answer questions from the data.
+`docs/deployment.md` (`docs://deployment`) is what an operator needs to run
+twillingate on their own server. Neither is a summary of the code — they
+are the contract.
 
 Update `docs/twillingate.md` **in the same commit** as any change to:
 
@@ -85,7 +86,10 @@ seven files they absorbed are gone, so do not resurrect one. The plausible
 page stays separate because it documents bytes the collector serves at
 `/js/plausible-shim.js` and a test binds it to them.
 
-`docs_sync_test.go` enforces part of this — reserved keys in both
-directions, the SDK's public symbols, and every queryable web view. The rest
-is on you. A `docs`-only push publishes nothing (`paths-ignore`), so a
-same-commit update costs no extra release.
+`docs_sync_test.go` enforces part of this — reserved keys, MCP tool names
+and environment variables, each checked in both directions against the
+source, plus the SDK's public symbols and every queryable web view. Those
+checks read the specific **table** that claims a fact, not the whole file:
+a document-wide match passes for the wrong reason when the same word
+appears in prose. The rest is on you. A `docs`-only push publishes nothing
+(`paths-ignore`), so a same-commit update costs no extra release.

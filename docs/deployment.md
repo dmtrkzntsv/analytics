@@ -5,9 +5,12 @@ up, and getting it back after the host is gone.
 
 Everything about *using* it — setting up a project, instrumenting a site,
 the wire format, answering questions from the data — lives in
-[twillingate.md](twillingate.md), which is what the MCP endpoint serves to
-agents. This page is deliberately separate: an operator standing up a VPS
-and an agent asking for last week's numbers want different things.
+[twillingate.md](twillingate.md). The two are separate because an operator
+standing up a VPS and an agent asking for last week's numbers want
+different things.
+
+Both are served over MCP, this one as `docs://deployment`, so an agent
+helping with an install reads the same bytes you do.
 
 Two topologies. **One server** puts ingestion and dashboards on the same
 machine — simplest, and enough for a Pi at home behind a tunnel. **Two

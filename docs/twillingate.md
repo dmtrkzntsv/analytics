@@ -789,7 +789,8 @@ already apply the caveats below.
 `enable_ingest_key`, `disable_ingest_key` and `integration_guide`, all
 described in [Set up a project](#set-up-a-project).
 
-**Resources:** `docs://twillingate` (this document), `schema://views` (the
+**Resources:** `docs://twillingate` (this document), `docs://deployment`
+(installing and configuring the collector itself), `schema://views` (the
 authoritative column list — read it before writing SQL) and
 `schema://projects` (the live registry).
 
