@@ -34,6 +34,20 @@ none of it.
 
 ## Install
 
+### docker compose
+
+Tracking: ingestion, the SDK, and `/mcp` once `MCP_AUTH_DSN` is set. The
+dashboards are a second compose file, added under [Reporting with
+Evidence](#reporting-with-evidence):
+
+```bash
+mkdir twillingate && cd twillingate
+curl -fsSLO https://raw.githubusercontent.com/dmtrkzntsv/twillingate/main/deploy/compose/docker-compose.yml
+docker compose up -d
+docker compose exec twillingate twillingate project create -alias myapp
+docker compose exec twillingate twillingate key issue -project myapp -label web
+```
+
 ### systemd on a VPS
 
 ```bash
@@ -70,27 +84,6 @@ curl -s localhost:8080/healthz            # → {"status":"ok"}
 
 Put TLS in front of `127.0.0.1:8080` — Caddy, nginx, or a Cloudflare tunnel.
 The service binds to loopback by default, deliberately.
-
-### docker compose
-
-Tracking (`docker-compose.yml` — ingestion, the SDK, and `/mcp` once
-`MCP_AUTH_DSN` is set) and reporting (`docker-compose.evidence.yml`) as one
-project sharing one database:
-
-```bash
-mkdir twillingate && cd twillingate
-base=https://raw.githubusercontent.com/dmtrkzntsv/twillingate/main
-curl -fsSLO $base/deploy/compose/docker-compose.yml
-curl -fsSLO $base/deploy/compose/docker-compose.evidence.yml
-echo COMPOSE_FILE=docker-compose.yml:docker-compose.evidence.yml > .env
-docker compose up -d
-docker compose exec twillingate twillingate project create -alias myapp
-docker compose exec twillingate twillingate key issue -project myapp -label web
-```
-
-`COMPOSE_FILE` is what lets every later `docker compose` command see both
-files; without it, pass `-f` twice each time. Port 3000 answers `503` until
-Evidence finishes its first build — roughly a minute.
 
 ### Verifying ingestion
 
@@ -173,6 +166,21 @@ modification time and does not need to be told. `DASHBOARDS_INTERVAL`
 snapshots the database into `DASHBOARDS_WORK_DIR`, so the host needs room
 for one more copy.
 
+### One server
+
+Add the second file next to the tracking `docker-compose.yml` and let
+`COMPOSE_FILE` join them into one project sharing one database:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/dmtrkzntsv/twillingate/main/deploy/compose/docker-compose.evidence.yml
+echo COMPOSE_FILE=docker-compose.yml:docker-compose.evidence.yml >> .env
+docker compose up -d
+```
+
+`COMPOSE_FILE` is what lets every later `docker compose` command see both
+files; without it, pass `-f` twice each time. Port 3000 answers `503` until
+Evidence finishes its first build — roughly a minute.
+
 ### Two servers
 
 Ingestion on a public VPS, dashboards at home off a restored replica, so the
@@ -180,7 +188,7 @@ dashboard machine never needs to be reachable from the internet. The reader
 restores the database on cron and renders it:
 
 ```bash
-curl -fsSLO $base/deploy/compose/docker-compose.evidence.yml
+curl -fsSLO https://raw.githubusercontent.com/dmtrkzntsv/twillingate/main/deploy/compose/docker-compose.evidence.yml
 docker compose -f docker-compose.evidence.yml up -d
 ```
 
