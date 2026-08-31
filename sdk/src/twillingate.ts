@@ -105,7 +105,7 @@ const GROUP_NAME = "twillingate_group_name";
 const QUEUE = "twillingate_queue";
 const LEGACY = { [VISITOR]: "analytics_visitor", [USER]: "analytics_user", [GROUP]: "analytics_group" };
 
-const MAX_BATCH = 500; // server cap per docs/ingest-api.md
+const MAX_BATCH = 500; // server cap per docs/twillingate.md
 const FLUSH_AT = 20; // flush early once this many events queue up
 const MAX_STORED_BATCHES = 50; // offline queue bound: oldest dropped first
 

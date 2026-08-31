@@ -54,27 +54,33 @@ suite on its own.
 
 ## Documentation
 
-`docs/twillingate.md` is the single normative document and the only prose
-the MCP endpoint serves to agents. It is not a summary of the code — it is
-the contract. Update it **in the same commit** as any change to:
+Two pages, split on using versus running. `docs/twillingate.md` is the
+normative document and the only prose the MCP endpoint serves to agents;
+`docs/deployment.md` is the operator's runbook. Neither is a summary of the
+code — they are the contract.
+
+Update `docs/twillingate.md` **in the same commit** as any change to:
 
 - reserved attribute keys or event names (`internal/server/ingest.go`)
 - the ingest wire format or its responses (`internal/server/handlers.go`)
 - the JS SDK's public API, `data-` attributes or defaults
   (`sdk/src/twillingate.ts`)
 - config keys, env vars or project fields (`internal/config/`)
-- install, upgrade or restore procedure (`deploy/`, `Makefile`)
-- MCP auth modes, client setup, or the set of tools offered
-  (`internal/mcpserver/`)
-- the Evidence dashboards (`internal/dashboards/`, `evidence/`)
+- the set of MCP tools or resources offered (`internal/mcpserver/tools_*.go`,
+  `resources.go`)
+
+Update `docs/deployment.md` in the same commit as any change to the install,
+upgrade, replication or restore procedure (`deploy/`, `Makefile`), to MCP
+auth modes or client setup (`internal/mcpserver/auth.go`), or to the
+Evidence dashboards (`internal/dashboards/`, `evidence/`).
 
 Update `schemaViews` in `internal/mcpserver/resources.go` in the same commit
 as any migration that adds or changes a queryable view.
 
-Everything else under `docs/` that it absorbed is a pointer, not a source —
-never add content there. `docs/plausible/README.md` is the exception: it
-documents bytes the collector serves at `/js/plausible-shim.js` and a test
-binds it to them.
+Those two plus `docs/plausible/README.md` are the whole of `docs/` — the
+seven files they absorbed are gone, so do not resurrect one. The plausible
+page stays separate because it documents bytes the collector serves at
+`/js/plausible-shim.js` and a test binds it to them.
 
 `docs_sync_test.go` enforces part of this — reserved keys in both
 directions, the SDK's public symbols, and every queryable web view. The rest
