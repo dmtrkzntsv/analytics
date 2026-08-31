@@ -452,13 +452,6 @@ same day-long cache. Load one only if its problem is yours.
 | --- | --- |
 | `/js/plausible-shim.js` | Fires events from Plausible's `plausible-event-*` classes, so a site migrating off Plausible keeps its tagged CTAs without touching the markup. See `docs/plausible/`. |
 
-`/js/script.js`, the pre-2.0 snippet, has been **removed and returns 404**.
-A site still carrying that tag must swap the `src` to `/js/twillingate.js`
-and rename `analytics.*` calls to `twillingate.*`. One signature changed:
-`analytics.identify(user, group)` is now `twillingate.identify(user,
-userName)` plus `twillingate.group(group)`. Identified-mode visitors carry
-over via the storage migration above.
-
 ---
 
 ## The event model

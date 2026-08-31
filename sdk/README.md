@@ -16,5 +16,4 @@ every source change must ship with a fresh `npm run build`.
 
 The user-facing API reference and the wire format the SDK speaks both live
 in [docs/twillingate.md](../docs/twillingate.md).
-This bundle is the only client the collector serves; the legacy
-`/js/script.js` snippet was removed once every project had migrated.
+This bundle is the only client the collector serves.

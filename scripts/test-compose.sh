@@ -47,7 +47,7 @@ compose up -d > /dev/null
 
 echo "waiting for ingestion..."
 for _ in $(seq 1 30); do
-  curl -fsS -o /dev/null "http://127.0.0.1:18080/js/script.js" 2>/dev/null && break
+  curl -fsS -o /dev/null "http://127.0.0.1:18080/healthz" 2>/dev/null && break
   sleep 1
 done
 
@@ -71,7 +71,7 @@ post_events() {
     -H "X-Analytics-Key: $key" \
     -d '{"attributes":{"$platform":"ios","$app_version":"1.0","$install_id":"install-1"},
          "events":[
-           {"name":"$pageview","attributes":{"$url":"http://localhost:18080/pricing"}},
+           {"name":"$pageview","attributes":{"$host":"localhost","$path":"/pricing"}},
            {"name":"$screen_view","attributes":{"$screen":"/settings"}},
            {"name":"signup","attributes":{"plan":"pro"}}]}'
 }

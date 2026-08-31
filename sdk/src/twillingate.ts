@@ -96,7 +96,7 @@ interface Batch {
 }
 
 // Persisted under the twillingate_* names; the analytics_* fallbacks keep
-// identified-mode visitors continuous across the legacy snippet's removal.
+// identified-mode visitors from earlier releases continuous.
 const VISITOR = "twillingate_visitor";
 const USER = "twillingate_user";
 const USER_NAME = "twillingate_user_name";
@@ -142,8 +142,8 @@ function ignored(): boolean {
   return false;
 }
 
-// One-time migration from the legacy snippet's storage. The snippet itself
-// is gone, but returning visitors still arrive holding its keys.
+// One-time migration from the storage keys earlier releases wrote.
+// Returning visitors still arrive holding them.
 function migrated(name: keyof typeof LEGACY): string | null {
   const v = ls(name);
   if (v !== null) return v;

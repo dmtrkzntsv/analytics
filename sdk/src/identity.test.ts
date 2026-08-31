@@ -120,7 +120,7 @@ describe("identified mode", () => {
   });
 });
 
-describe("migration from the legacy script.js storage", () => {
+describe("migration from the legacy storage keys", () => {
   it("adopts analytics_visitor / analytics_user / analytics_group", async () => {
     localStorage.setItem("analytics_visitor", "legacy-visitor");
     localStorage.setItem("analytics_user", "legacy-user");
@@ -130,7 +130,7 @@ describe("migration from the legacy script.js storage", () => {
     expect(attrs.$install_id).toBe("legacy-visitor");
     expect(attrs.$user_id).toBe("legacy-user");
     expect(attrs.$group_id).toBe("legacy-group");
-    // copied, not moved: script.js may still run during the cut-over
+    // copied, not moved: an older client may still be running elsewhere
     expect(localStorage.getItem("analytics_visitor")).toBe("legacy-visitor");
     expect(localStorage.getItem("twillingate_visitor")).toBe("legacy-visitor");
   });

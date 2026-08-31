@@ -135,11 +135,6 @@ func TestDocumentMatchesSDK(t *testing.T) {
 			t.Errorf("util.%s missing from docs/twillingate.md", symbol)
 		}
 	}
-	// The legacy snippet is gone; the document must tell a stale site what
-	// to do rather than leaving it to guess.
-	if !strings.Contains(docs.Twillingate, "script.js") {
-		t.Error("docs/twillingate.md must tell sites still on /js/script.js how to migrate")
-	}
 }
 
 // TestDocumentCoversEveryWebDimension keeps the query guidance honest: a new

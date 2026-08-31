@@ -10,8 +10,7 @@ import (
 )
 
 // twillingate.js is the only served client, compiled from sdk/ (`npm run
-// build` there rewrites the committed bundle). The legacy /js/script.js
-// snippet was removed once every project had migrated.
+// build` there rewrites the committed bundle).
 //
 //go:embed twillingate.js
 var sdkScript []byte
