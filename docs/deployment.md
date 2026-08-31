@@ -42,8 +42,7 @@ Evidence](#reporting-with-evidence):
 
 ```bash
 mkdir twillingate && cd twillingate
-base=https://raw.githubusercontent.com/dmtrkzntsv/twillingate/main
-curl -fsSLO $base/deploy/compose/docker-compose.yml
+curl -fsSLO https://raw.githubusercontent.com/dmtrkzntsv/twillingate/main/deploy/compose/docker-compose.yml
 docker compose up -d
 docker compose exec twillingate twillingate project create -alias myapp
 docker compose exec twillingate twillingate key issue -project myapp -label web
@@ -173,7 +172,7 @@ Add the second file next to the tracking `docker-compose.yml` and let
 `COMPOSE_FILE` join them into one project sharing one database:
 
 ```bash
-curl -fsSLO $base/deploy/compose/docker-compose.evidence.yml
+curl -fsSLO https://raw.githubusercontent.com/dmtrkzntsv/twillingate/main/deploy/compose/docker-compose.evidence.yml
 echo COMPOSE_FILE=docker-compose.yml:docker-compose.evidence.yml >> .env
 docker compose up -d
 ```
@@ -189,7 +188,7 @@ dashboard machine never needs to be reachable from the internet. The reader
 restores the database on cron and renders it:
 
 ```bash
-curl -fsSLO $base/deploy/compose/docker-compose.evidence.yml
+curl -fsSLO https://raw.githubusercontent.com/dmtrkzntsv/twillingate/main/deploy/compose/docker-compose.evidence.yml
 docker compose -f docker-compose.evidence.yml up -d
 ```
 
