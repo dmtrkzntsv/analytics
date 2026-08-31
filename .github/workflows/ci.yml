@@ -3,12 +3,32 @@ on:
   push: { branches: [main] }
   pull_request:
 jobs:
+  # Pull requests only: a push to main triggers release.yml, which runs
+  # make check on the same commit before tagging, so a second run here would
+  # prove nothing. The accepted gap: a docs-only push to main matches
+  # release.yml's paths-ignore too, so it lands with no Go check and a
+  # docs_sync_test.go failure would surface on the next release run instead.
   test:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with: { go-version-file: go.mod }
+        with: { go-version-file: go.mod, cache: false }
+      # Not setup-go's built-in cache: that keys on go.sum alone, so it is a
+      # snapshot from the last dependency change and goes staler with every
+      # commit. Keying on the sha (unique, so every run saves) and restoring
+      # by prefix starts each run from the newest cache instead. What it
+      # carries is mostly the -race test builds, which dominate make check.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-${{ hashFiles('go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            go-${{ hashFiles('go.sum') }}-
+            go-
       - run: make check
       - run: make build
 

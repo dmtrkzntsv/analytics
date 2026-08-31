@@ -31,7 +31,19 @@ jobs:
         # v26.105.N); the run number makes the tag unique by construction.
         run: echo "tag=v$(date -u +%-y.%-m%d).${{ github.run_number }}" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@v5
-        with: { go-version-file: go.mod }
+        with: { go-version-file: go.mod, cache: false }
+      # Same cache as ci.yml, and the only job that saves it for main: ci's
+      # test job skips pushes, so each release seeds the next one (and the
+      # next pull request) from this commit's build cache.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-${{ hashFiles('go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            go-${{ hashFiles('go.sum') }}-
+            go-
       - run: make check
       - run: make dist
       # The tag has to exist on the remote before the release points at it.
@@ -49,11 +61,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
-  # Published separately from the tarballs: the ingestion image is a static Go
-  # binary on alpine, while the Evidence image carries a Node toolchain and
-  # compiles sqlite3 from source. A slow or broken dashboards build must not
-  # hold up the release of either the binaries or the collector image.
-  images:
+  # The images publish separately from the tarballs and from each other: the
+  # ingestion image is a static Go binary on alpine, while the Evidence image
+  # carries a Node toolchain and compiles sqlite3 from source. Parallel jobs
+  # mean a slow or broken build of either image can neither hold up the
+  # release of the binaries nor stop the other image from publishing.
+  image-twillingate:
     runs-on: ubuntu-latest
     needs: release
     steps:
@@ -78,9 +91,22 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/twillingate:latest
           cache-from: type=gha,scope=twillingate
           cache-to: type=gha,mode=max,scope=twillingate
-      # No linux/arm/v7: sqlite3 publishes no prebuilds for it, and building
-      # it from source under QEMU is not worth the release time. A 32-bit
-      # host runs the tarball, or renders dashboards elsewhere.
+
+  # No linux/arm/v7: sqlite3 publishes no prebuilds for it, and building
+  # it from source under QEMU is not worth the release time. A 32-bit
+  # host runs the tarball, or renders dashboards elsewhere.
+  image-evidence:
+    runs-on: ubuntu-latest
+    needs: release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: twillingate-evidence
         uses: docker/build-push-action@v6
         with:
