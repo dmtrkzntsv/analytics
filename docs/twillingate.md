@@ -50,7 +50,36 @@ see [Configure the collector](deployment.md#configure-the-collector).
 ## Set up a project
 
 Projects live in the database — a registry table, not a file — and are
-managed through the CLI or the MCP management tools:
+managed either through the CLI or, over MCP, through the management tools.
+Every operation has both forms:
+
+| Operation | CLI | MCP tool |
+| --- | --- | --- |
+| Create a project | `twillingate project create` | `create_project` |
+| Change one | `twillingate project update` | `update_project` |
+| List them | `twillingate project list` | `list_projects` |
+| Archive / restore | `twillingate project archive` / `restore` | `archive_project` / `restore_project` |
+| Rename | `twillingate project rename` | **none — CLI only** |
+| Issue an ingest key | `twillingate key issue` | `issue_ingest_key` |
+| List keys | `twillingate key list` | `list_ingest_keys` |
+| Disable / enable a key | `twillingate key disable` / `enable` | `disable_ingest_key` / `enable_ingest_key` |
+| Export / import the registry | `twillingate config export` / `import` | **none — CLI only** |
+| Get paste-ready setup | — | `integration_guide` |
+
+`create_project` and `update_project` take the project fields below as
+`{alias, name, identity, allowed_origins, attributes}`; `create_project`
+also takes `skip_key: true` to *not* issue a first key. `issue_ingest_key`
+takes `{project, label}` and returns the key **and** a paste-ready snippet.
+`integration_guide` takes `{project, platform}` where platform is `web`,
+`spa`, `server` or `mobile`, and returns the whole setup as markdown with
+the project's live key and identity mode already filled in — reach for it
+before hand-assembling a snippet.
+
+Renaming and registry import/export have no MCP tool: both rewrite every
+table in one transaction, which is not something to hand to an agent. Ask
+the operator to run them.
+
+The CLI forms:
 
 ```bash
 twillingate project create -alias myapp -name "My App" -identity anonymous \
@@ -174,6 +203,22 @@ The reverse does not hold: `url`, `platform`, `appVersion`, `installId` and
 
 Pageviews are automatic, including on `history.pushState` and `popstate`, so
 single-page apps need no extra code.
+
+**Migrating from Plausible?** The collector also serves
+`/js/plausible-shim.js`, an optional second tag that fires events from
+Plausible's `plausible-event-*` CSS classes. A site whose CTAs are already
+tagged that way keeps working without touching the markup:
+
+```html
+<script defer src="https://twillingate.example.com/js/twillingate.js"
+        data-key="ak_9f3c…" data-identity="anonymous"></script>
+<script defer src="https://twillingate.example.com/js/plausible-shim.js"></script>
+```
+
+Both are `defer`, so they execute in document order and the shim finds the
+tracker already initialised. It also tolerates the tracker being absent
+(blocked, failed to load) — clicks are ignored rather than throwing. See
+[docs/plausible/](plausible/) for what it supports.
 
 ### SDK-only mode
 
@@ -727,16 +772,33 @@ request CORS-simple.
 
 ## Answer questions with the data
 
-Once the endpoint is running, a connected session gets nineteen tools —
-`web_overview`, `web_breakdown` (dimensions: pages, hosts, referrers,
-countries, devices, browsers, os, utm), `app_overview`, `app_breakdown`,
-`product_events`, `product_attributes`, `retention`, `identities`, a guarded
-read-only SQL `query`, the project and ingest-key management tools, and
-`integration_guide`, which returns paste-ready setup for a given project and
-platform.
+A connected session gets nineteen tools. Reach for a purpose-built one
+before `query` — they are cheaper, they cannot be malformed, and they
+already apply the caveats below.
 
-Resources: `docs://twillingate` (this document), `schema://views` (the
-queryable schema) and `schema://projects` (the live registry).
+**Reading (all take `project`, `from`, `to` as `YYYY-MM-DD` unless noted):**
+
+| Tool | Extra parameters | Returns |
+| --- | --- | --- |
+| `list_projects` | none | Every non-archived project, its alias and identity mode. Call this first — every other tool needs an alias |
+| `web_overview` | — | Visitors, pageviews, sessions, bounces, average session length per day |
+| `web_breakdown` | `dimension`, `limit` (default 20) | Top rows for one of `pages`, `hosts`, `referrers`, `countries`, `devices`, `browsers`, `os`, `utm` |
+| `app_overview` | — | Actives, views, sessions, duration per day |
+| `app_breakdown` | `dimension`, `limit` | One of `screens`, `versions`, `os`, `devices`, `countries` |
+| `product_events` | `event` (optional filter) | Count and unique users per event name, plus daily totals |
+| `product_attributes` | `event`, `key` | Value breakdowns for a declared attribute. `$platform` and `$app_version` are always available; a custom key only appears once the project declares it |
+| `retention` | `surface` (`web` or `app`) | Cohort curves, plus `aggregated_through` — cohorts after that day are **absent, not zero** |
+| `identities` | `kind` (`user` or `group`), `limit` | Per-user or per-group activity with display names. **Surfaces personal data on identified projects** |
+| `query` | `sql` | A single read-only `SELECT`/`WITH` against the views. Row-capped and time-limited |
+
+**Managing** — `create_project`, `update_project`, `archive_project`,
+`restore_project`, `issue_ingest_key`, `list_ingest_keys`,
+`enable_ingest_key`, `disable_ingest_key` and `integration_guide`, all
+described in [Set up a project](#set-up-a-project).
+
+**Resources:** `docs://twillingate` (this document), `schema://views` (the
+authoritative column list — read it before writing SQL) and
+`schema://projects` (the live registry).
 
 Ask in plain language — "how many visitors did myapp get last week by
 country", "which hosts is this project collecting from", "which screens do

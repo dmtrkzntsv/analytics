@@ -154,3 +154,71 @@ func TestDocumentCoversEveryWebDimension(t *testing.T) {
 		}
 	}
 }
+
+// TestDocumentNamesEveryTool binds the tool tables in docs/twillingate.md to
+// the tools actually registered. A tool nobody documents is one an agent
+// never reaches for; a documented tool that does not exist is a failed call.
+func TestDocumentNamesEveryTool(t *testing.T) {
+	registered := map[string]bool{}
+	for _, f := range []string{
+		"tools_read.go", "tools_product.go", "tools_manage.go",
+		"query.go", "guide.go",
+	} {
+		src := readSource(t, f)
+		for _, m := range regexp.MustCompile(`mcp\.Tool\{Name:\s*"([a-z_]+)"`).FindAllStringSubmatch(src, -1) {
+			registered[m[1]] = true
+		}
+	}
+	if len(registered) < 15 {
+		t.Fatalf("extracted only %d tools — extraction regexp broken?", len(registered))
+	}
+	// Scoped to the tool tables and the "Managing" list, not the whole
+	// document: `identities` is also a table name in the views prose, so a
+	// document-wide Contains would pass for the wrong reason.
+	documented := documentedTools()
+	for name := range registered {
+		if !documented[name] {
+			t.Errorf("tool %s is registered but not listed in a tool table in docs/twillingate.md", name)
+		}
+	}
+	// No reverse check: these table rows also carry parameter names and
+	// dimension values, so "documented but not registered" is noise. The
+	// count assertion below is what catches a tool that quietly went away.
+	// The document states a count; keep it honest.
+	if !strings.Contains(docs.Twillingate, spellOut(len(registered))+" tools") {
+		t.Errorf("docs/twillingate.md does not say %q tools (there are %d)",
+			spellOut(len(registered)), len(registered))
+	}
+}
+
+// documentedTools reads tool names out of the document's tables and its
+// "Managing" list — the places that claim a tool exists, as opposed to
+// prose that may mention the same word for something else.
+func documentedTools() map[string]bool {
+	out := map[string]bool{}
+	tick := regexp.MustCompile("`([a-z][a-z_]+)`")
+	for _, line := range strings.Split(docs.Twillingate, "\n") {
+		managing := strings.HasPrefix(line, "**Managing**") ||
+			strings.HasPrefix(line, "`restore_project`") ||
+			strings.HasPrefix(line, "`enable_ingest_key`")
+		if !strings.HasPrefix(line, "|") && !managing {
+			continue
+		}
+		for _, m := range tick.FindAllStringSubmatch(line, -1) {
+			out[m[1]] = true
+		}
+	}
+	return out
+}
+
+// spellOut covers the range the tool count plausibly moves through. A count
+// outside it returns "" so the assertion above fails loudly rather than
+// silently passing on a substring that happens to match.
+func spellOut(n int) string {
+	words := map[int]string{
+		15: "fifteen", 16: "sixteen", 17: "seventeen", 18: "eighteen",
+		19: "nineteen", 20: "twenty", 21: "twenty-one", 22: "twenty-two",
+		23: "twenty-three", 24: "twenty-four", 25: "twenty-five",
+	}
+	return words[n]
+}
