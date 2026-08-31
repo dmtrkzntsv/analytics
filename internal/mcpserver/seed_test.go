@@ -53,6 +53,8 @@ func newTestHost(t *testing.T) (*host, *mcp.ClientSession) {
 	      VALUES ('blog','2026-08-20',10,25,12,3,600), ('blog','2026-08-21',12,30,14,4,720)`)
 	seed(`INSERT INTO agg_web_pages (project, day, path, visitors, pageviews)
 	      VALUES ('blog','2026-08-20','/post-1',8,15), ('blog','2026-08-20','/post-2',4,10)`)
+	seed(`INSERT INTO agg_web_hosts (project, day, host, visitors, pageviews)
+	      VALUES ('blog','2026-08-20','blog.example.com',9,20), ('blog','2026-08-20','shop.example.com',3,5)`)
 	seed(`INSERT INTO agg_web_utm (project, day, utm_source, utm_medium, utm_campaign, visitors, pageviews)
 	      VALUES ('blog','2026-08-20','newsletter','email','august',6,9)`)
 	seed(`INSERT INTO web_hits (id, project, ts, received_at, actor_id, path, referrer_source,

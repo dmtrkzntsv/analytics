@@ -53,7 +53,7 @@ code=$(curl -s -o "$dir/events.out" -w '%{http_code}' -A "$ua" -X POST "$base/ap
   -H "X-Analytics-Key: $key" \
   -d '{"attributes":{"$platform":"ios","$app_version":"1.0","$install_id":"install-1"},
        "events":[
-         {"name":"$pageview","attributes":{"$url":"http://localhost/pricing","$referrer":"https://news.ycombinator.com/"}},
+         {"name":"$pageview","attributes":{"$host":"localhost","$path":"/pricing","$referrer":"https://news.ycombinator.com/"}},
          {"name":"$screen_view","attributes":{"$screen":"/settings"}},
          {"name":"signup","attributes":{"plan":"pro"}}]}')
 [ "$code" = 202 ] || fail "/api/events returned $code: $(cat "$dir/events.out")"
@@ -85,9 +85,9 @@ echo "ok: /api/events accepts a replayed batch"
 
 # -o /dev/null rather than piping to head: closing the pipe early makes curl
 # fail with EPIPE once the snippet grows past one buffer.
-curl -fs "$base/js/script.js" -o "$dir/script.js" || fail "/js/script.js not served"
-grep -q 'data-key' "$dir/script.js" || fail "/js/script.js is missing data-key wiring"
-echo "ok: /js/script.js served"
+curl -fs "$base/js/twillingate.js" -o "$dir/twillingate.js" || fail "/js/twillingate.js not served"
+grep -q 'data-key' "$dir/twillingate.js" || fail "/js/twillingate.js is missing data-key wiring"
+echo "ok: /js/twillingate.js served"
 
 # Wait past flush_interval, then stop the server cleanly so the buffer drains.
 sleep 1

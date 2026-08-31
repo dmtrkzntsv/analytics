@@ -28,6 +28,7 @@ Views (all carry a 'project' column — always filter on it):
 
   v_web_daily(project, day, visitors, pageviews, sessions, bounces, duration_sec)
   v_web_pages(project, day, path, visitors, pageviews)
+  v_web_hosts(project, day, host, visitors, pageviews)
   v_web_referrers(project, day, source, visitors, pageviews)
   v_web_countries(project, day, country, visitors, pageviews)
   v_web_devices(project, day, device, visitors, pageviews)
@@ -62,15 +63,12 @@ func textResource(s *mcp.Server, uri, name, desc, text string) {
 }
 
 func (h *host) registerResources(s *mcp.Server) {
-	textResource(s, "docs://events", "events",
-		"The event model: $pageview (web), $screen_view (app) and custom product events — what each family feeds, reserved attributes, identity, and the declared attributes list. Read before instrumenting anything.",
-		docsEvents)
-	textResource(s, "docs://js-sdk", "js-sdk",
-		"The JS SDK: snippet and SDK-only modes, twillingate page/screen/track/identify/reset, SPA auto-tracking, localhost silence, opt-out.",
-		docsJSSDK)
-	textResource(s, "docs://ingest-api", "ingest-api",
-		"Normative HTTP wire format for POST /api/events: envelope, batching, retries, timestamps, idempotency, offline replay. For server-side and native clients.",
-		docs.IngestAPI)
+	textResource(s, "docs://twillingate", "twillingate",
+		"Set up a project, instrument a site or app, and answer questions from the data: project and ingest-key management, the JS SDK, the normative POST /api/events wire format and event model, and the queryable views. Read before instrumenting or integrating anything.",
+		docs.Twillingate)
+	textResource(s, "docs://deployment", "deployment",
+		"Run twillingate on your own server: systemd and docker install, every environment variable, Evidence reporting, enabling and authenticating the MCP endpoint, litestream replication for a two-server topology, backup drills and disaster recovery. Read when helping an operator install or configure the collector itself.",
+		docs.Deployment)
 
 	s.AddResource(&mcp.Resource{
 		URI: "schema://views", Name: "views",

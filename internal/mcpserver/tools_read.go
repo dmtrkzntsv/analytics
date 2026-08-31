@@ -157,6 +157,7 @@ func (h *host) webOverview(ctx context.Context, _ *mcp.CallToolRequest, in range
 // behaviour cannot drift.
 var webDimensions = map[string]struct{ view, col string }{
 	"pages":     {"v_web_pages", "path"},
+	"hosts":     {"v_web_hosts", "host"},
 	"referrers": {"v_web_referrers", "source"},
 	"countries": {"v_web_countries", "country"},
 	"devices":   {"v_web_devices", "device"},
@@ -172,7 +173,7 @@ var webDimensions = map[string]struct{ view, col string }{
 // "rangeIn" key. See task-16-report.md.
 type breakdownIn struct {
 	rangeIn
-	Dimension string `json:"dimension" jsonschema:"one of: pages, referrers, countries, devices, browsers, os, utm"`
+	Dimension string `json:"dimension" jsonschema:"one of: pages, hosts, referrers, countries, devices, browsers, os, utm"`
 	Limit     int    `json:"limit,omitempty" jsonschema:"top-N rows, default 20"`
 }
 
@@ -266,7 +267,7 @@ func (h *host) register(s *mcp.Server) {
 		Description: "Daily web traffic for one project: visitors, pageviews, sessions, bounces, duration, with derived bounce_rate and avg_session_sec. Data includes yesterday and today (live)."},
 		h.webOverview)
 	mcp.AddTool(s, &mcp.Tool{Name: "web_breakdown", Annotations: ro,
-		Description: "Top pages, referrers, countries, devices, browsers, os or utm for one project over a date range."},
+		Description: "Top pages, hosts, referrers, countries, devices, browsers, os or utm for one project over a date range."},
 		h.webBreakdown)
 	mcp.AddTool(s, &mcp.Tool{Name: "app_overview", Annotations: ro,
 		Description: "Daily app usage for one project: active users, screen views, sessions, duration."},

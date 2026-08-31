@@ -1,11 +1,11 @@
 /* twillingate SDK core — web, product and app analytics against the
- * collector's POST /api/events (docs/ingest-api.md is the normative wire
+ * collector's POST /api/events (docs/twillingate.md is the normative wire
  * format). Bundled as an IIFE by build.mjs and served at /js/twillingate.js.
  *
  * Two usage modes:
  *  - snippet: <script defer src=".../js/twillingate.js" data-key="ak_…">
  *    auto-inits from data attributes with automatic pageviews, a superset
- *    of the legacy /js/script.js behaviour;
+ *    with automatic pageviews;
  *  - SDK-only: load the file without data-key (or bundle this module) and
  *    call twillingate.init({...}) yourself — web, product and app events
  *    entirely from code.
@@ -16,6 +16,9 @@
  */
 
 // Substituted by the collector at serve time with its build version.
+import { resolveMask, type MaskSpec } from "./mask";
+import { maskIds, withQuery } from "./util";
+
 export const VERSION = "__TWILLINGATE_VERSION__";
 
 export interface InitOptions {
@@ -37,13 +40,37 @@ export interface InitOptions {
    * choice when instrumenting a SPA through the API.
    */
   autoPageviews?: boolean;
+  /**
+   * Rewrite the URL before it is split into $host and $path. Accepts the
+   * same strings as data-mask-url ("uuid", "uuid,numeric", "/re/flags", or
+   * a global function name) plus a RegExp or a function directly.
+   *
+   * A mask that cannot be resolved, throws, or returns a non-string DROPS
+   * pageviews. Shipping the raw path would defeat the point of masking.
+   */
+  maskUrl?: MaskSpec;
+  /**
+   * "history" (default) or "hash". In hash mode $path is pathname + hash
+   * and hashchange emits a pageview; in history mode a hash change is an
+   * in-page anchor and is ignored.
+   */
+  routing?: "history" | "hash";
   /** Milliseconds events wait in the queue before a flush. */
   flushInterval?: number;
 }
 
-/** What a page listener sees for each pageview, automatic or manual. */
+/**
+ * What a page listener sees for each pageview, automatic or manual.
+ *
+ * host and path are THREADED: each listener receives the previous
+ * listener's output, so rules split across several page() calls compose
+ * instead of clobbering each other. url is the post-mask URL -- handing
+ * over the raw href would let a mask scrub a parameter and then leak it
+ * straight back through a listener.
+ */
 export interface PageviewInfo {
   url: string;
+  host: string;
   path: string;
   referrer: string;
   attributes: Record<string, unknown>;
@@ -69,7 +96,7 @@ interface Batch {
 }
 
 // Persisted under the twillingate_* names; the analytics_* fallbacks keep
-// identified-mode visitors continuous for sites migrating off script.js.
+// identified-mode visitors from earlier releases continuous.
 const VISITOR = "twillingate_visitor";
 const USER = "twillingate_user";
 const USER_NAME = "twillingate_user_name";
@@ -78,7 +105,7 @@ const GROUP_NAME = "twillingate_group_name";
 const QUEUE = "twillingate_queue";
 const LEGACY = { [VISITOR]: "analytics_visitor", [USER]: "analytics_user", [GROUP]: "analytics_group" };
 
-const MAX_BATCH = 500; // server cap per docs/ingest-api.md
+const MAX_BATCH = 500; // server cap per docs/twillingate.md
 const FLUSH_AT = 20; // flush early once this many events queue up
 const MAX_STORED_BATCHES = 50; // offline queue bound: oldest dropped first
 
@@ -115,8 +142,8 @@ function ignored(): boolean {
   return false;
 }
 
-// One-time migration from the legacy snippet's storage: copy, never delete —
-// a page may still run script.js next to this SDK during a cut-over.
+// One-time migration from the storage keys earlier releases wrote.
+// Returning visitors still arrive holding them.
 function migrated(name: keyof typeof LEGACY): string | null {
   const v = ls(name);
   if (v !== null) return v;
@@ -144,6 +171,14 @@ export class Twillingate {
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private lastPage: string | null = null;
   private hooked = false;
+  // undefined = no mask configured; null = one was configured and could
+  // not be resolved, which drops pageviews (fail closed).
+  private mask: ((href: string) => string) | null | undefined;
+  private routing: "history" | "hash" = "history";
+  private firstPageviewSent = false;
+
+  /** Path-shaping helpers, for use inside a page() listener. */
+  readonly util = { maskIds, withQuery };
   private ready = false;
 
   init(opts: InitOptions): void {
@@ -166,6 +201,10 @@ export class Twillingate {
     this.appVersion = opts.appVersion || null;
     this.installId = opts.installId || null;
     if (opts.flushInterval !== undefined) this.flushInterval = opts.flushInterval;
+    // Resolved before any pageview can fire, so data-mask-url covers the
+    // entry page -- the one most likely to carry an identifier.
+    this.mask = resolveMask(opts.maskUrl);
+    this.routing = opts.routing === "hash" ? "hash" : "history";
     this.ready = true;
 
     this.replayStored();
@@ -180,6 +219,13 @@ export class Twillingate {
     }
     if (opts.autoPageviews) {
       this.hookHistory();
+      // Synchronous, deliberately. Deferring this by a tick would let a
+      // listener registered from an inline module still affect it, but an
+      // app that navigates during hydration would then have the entry
+      // pageview fire AFTER its pushState -- reporting the wrong location
+      // and deduping against it. Masking the entry page is data-mask-url's
+      // job (resolved above, before this line); a listener registered too
+      // late gets a warning from page() instead.
       this.page();
     }
   }
@@ -196,32 +242,82 @@ export class Twillingate {
    */
   page(arg?: string | Record<string, unknown> | PageListener | null, attrs?: Record<string, unknown>): void {
     if (typeof arg === "function") {
+      if (this.firstPageviewSent) {
+        console.warn(
+          "twillingate: page() listener registered after the first pageview; " +
+            "it will not apply to that one. Register it from an inline " +
+            '<script type="module"> placed after the tag.',
+        );
+      }
       this.pageListeners.push(arg);
       return;
     }
     if (!this.ok()) return;
-    let path: string;
-    let url: string;
+
+    let href: string;
+    // The dedup key is always the RAW location. Keying on the masked path
+    // would collapse /account/1 -> /account/2 into a single pageview.
+    let rawKey: string;
     if (typeof arg === "string" && arg !== "") {
-      path = arg;
       try {
-        url = new URL(arg, location.href).href;
+        href = new URL(arg, location.href).href;
       } catch {
-        url = arg;
+        href = arg;
       }
+      rawKey = arg;
     } else {
       if (arg && typeof arg === "object") attrs = { ...arg, ...attrs };
-      path = location.pathname + location.search;
-      url = location.href;
+      href = location.href;
+      rawKey =
+        location.pathname + location.search +
+        (this.routing === "hash" ? location.hash : "");
     }
-    if (path === this.lastPage) return;
-    this.lastPage = path;
-    let attributes: Record<string, unknown> = { $url: url, $referrer: document.referrer, ...attrs };
+    if (rawKey === this.lastPage) return;
+    this.lastPage = rawKey;
+
+    // Campaign parameters come off the ORIGINAL href: a mask that strips
+    // the query must not cost attribution.
+    const utm = utmFrom(href);
+
+    if (this.mask === null) return; // configured but unresolvable: fail closed
+    let masked = href;
+    if (this.mask) {
+      try {
+        masked = this.mask(href);
+      } catch (e) {
+        console.warn("twillingate: mask threw, dropping pageview", e);
+        return;
+      }
+      if (typeof masked !== "string") {
+        console.warn("twillingate: mask returned a non-string, dropping pageview");
+        return;
+      }
+    }
+
+    const split = splitLocation(masked, this.routing);
+    if (!split) {
+      console.warn(`twillingate: mask produced an unusable url, dropping pageview: ${masked}`);
+      return;
+    }
+    let { host, path } = split;
+
+    let attributes: Record<string, unknown> = {
+      $host: host, $path: path, $referrer: document.referrer, ...utm, ...attrs,
+    };
     for (const listener of this.pageListeners) {
-      const r = listener({ url, path, referrer: document.referrer, attributes });
+      const r = listener({ url: masked, host, path, referrer: document.referrer, attributes });
       if (r === false) return;
-      if (r && typeof r === "object") attributes = { ...attributes, ...r };
+      if (r && typeof r === "object") {
+        attributes = { ...attributes, ...r };
+        if (typeof r.$host === "string") host = r.$host;
+        if (typeof r.$path === "string") path = r.$path;
+      }
     }
+    if (typeof attributes.$path !== "string" || attributes.$path === "") {
+      console.warn("twillingate: a listener produced no $path, dropping pageview");
+      return;
+    }
+    this.firstPageviewSent = true;
     this.emit("$pageview", attributes);
   }
 
@@ -409,7 +505,59 @@ export class Twillingate {
       this.page();
     };
     addEventListener("popstate", () => this.page());
+    // Hash mode only. In history mode a hash change is an in-page anchor
+    // jump (#pricing), and treating those as pageviews would flood the
+    // pages breakdown with duplicates of one route.
+    if (this.routing === "hash") {
+      addEventListener("hashchange", () => this.page());
+    }
   }
+}
+
+/** Campaign parameters, read from the original href before any masking. */
+function utmFrom(href: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  let params: URLSearchParams;
+  try {
+    params = new URL(href, "http://localhost").searchParams;
+  } catch {
+    return out;
+  }
+  for (const [param, key] of [
+    ["utm_source", "$utm_source"],
+    ["utm_medium", "$utm_medium"],
+    ["utm_campaign", "$utm_campaign"],
+  ] as const) {
+    const v = params.get(param);
+    if (v) out[key] = v;
+  }
+  return out;
+}
+
+/**
+ * Split a URL into the host and path that get stored. The query is always
+ * dropped; the hash is kept only in hash-routing mode, where it IS the
+ * route. The "#" is retained so the client route /app/#/settings stays
+ * distinguishable from the server route /app/settings, and the pathname
+ * prefix is kept so two hash apps mounted at different paths stay apart.
+ */
+function splitLocation(
+  href: string,
+  routing: "history" | "hash",
+): { host: string; path: string } | null {
+  let u: URL;
+  try {
+    u = new URL(href, location.href);
+  } catch {
+    return null;
+  }
+  let path = u.pathname || "/";
+  if (routing === "hash" && u.hash) {
+    // Strip a hash-internal query: $path carries none by default, in
+    // either mode.
+    path += "#" + u.hash.slice(1).split("?")[0];
+  }
+  return { host: u.hostname, path };
 }
 
 function scriptOrigin(): string | null {
@@ -444,5 +592,7 @@ export function autoInit(tg: Twillingate, script: HTMLScriptElement | null): voi
     user: script.getAttribute("data-user") || undefined,
     group: script.getAttribute("data-group") || undefined,
     autoPageviews: script.getAttribute("data-auto") !== "off",
+    maskUrl: script.getAttribute("data-mask-url") || undefined,
+    routing: script.getAttribute("data-routing") === "hash" ? "hash" : "history",
   });
 }

@@ -2,6 +2,7 @@
 // failure handling. Identity and pageview behaviour live in identity.test.ts.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Twillingate, autoInit } from "./twillingate";
+import twillingateSource from "./twillingate.ts?raw";
 
 const URL_BASE = "https://collector.example.com";
 
@@ -275,7 +276,7 @@ describe("snippet auto-init", () => {
     expect(sent[0].body.key).toBe("ak_snippet");
     expect(sent[0].body.events[0].name).toBe("$pageview");
     const attrs = sent[0].body.events[0].attributes as Record<string, unknown>;
-    expect(attrs.$url).toContain("https://example.com");
+    expect(attrs.$host).toBe("example.com");
   });
 
   it("data-auto=off suppresses automatic pageviews", async () => {
@@ -298,5 +299,70 @@ describe("snippet auto-init", () => {
     t.flush();
     await drain();
     expect(sent[0].body.attributes).toMatchObject({ $user_id: "u_1", $group_id: "org_9" });
+  });
+});
+
+describe("script tag and init parity", () => {
+  // Every data-* attribute must have an InitOptions field. A new attribute
+  // added without one would silently do nothing in bundled apps.
+  it("maps every data attribute to an InitOptions field", () => {
+    const src = twillingateSource;
+    // exec loop rather than matchAll: the tsconfig lib is pinned at ES2019
+    // for the shipped bundle's browser target.
+    const attrs: string[] = [];
+    const re = /getAttribute\("data-([a-z-]+)"\)/g;
+    for (let m = re.exec(src); m !== null; m = re.exec(src)) attrs.push(m[1]);
+    const optionFor: Record<string, string> = {
+      key: "key", identity: "identity", user: "user", group: "group",
+      auto: "autoPageviews", "mask-url": "maskUrl", routing: "routing",
+    };
+    expect(attrs.length).toBeGreaterThan(0);
+    for (const a of attrs) {
+      const opt = optionFor[a];
+      expect(opt, `data-${a} has no InitOptions field`).toBeDefined();
+      // Required (key: string) or optional (maskUrl?: MaskSpec) both count.
+      const declared = new RegExp(`^\\s+${opt}\\??:`, "m");
+      expect(declared.test(src), `InitOptions declares no ${opt}`).toBe(true);
+    }
+  });
+
+  it("reads data-mask-url and data-routing", async () => {
+    document.body.innerHTML = "";
+    const s = document.createElement("script");
+    s.src = URL_BASE + "/js/twillingate.js";
+    s.setAttribute("data-key", "ak_test");
+    s.setAttribute("data-mask-url", "uuid");
+    s.setAttribute("data-routing", "hash");
+    document.body.appendChild(s);
+    history.replaceState(null, "", "/app/#/u/3f8a91c2-4b7e-4d1a-9f2c-8e6b5a0d7c31");
+
+    const t = new Twillingate();
+    autoInit(t, s);
+    t.flush();
+    await drain();
+    const mine = sent.flatMap((x) => x.body.events);
+    expect((mine[0].attributes as Record<string, string>).$path).toBe("/app/#/u/[id]");
+  });
+
+  it("exposes the helpers under twillingate.util", () => {
+    const t = new Twillingate();
+    expect(typeof t.util.maskIds).toBe("function");
+    expect(typeof t.util.withQuery).toBe("function");
+  });
+
+  // The entry pageview is synchronous, so a listener registered after
+  // init cannot affect it. That is a warning, not a silent miss -- and
+  // data-mask-url, resolved during init, is the mechanism that does cover
+  // the entry page.
+  it("warns when a listener is registered after the first pageview", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    history.replaceState(null, "", "/account/88");
+    const t = tg({ key: "ak_late", autoPageviews: true });
+    t.page(({ path }) => ({ $path: path.replace(/\/\d+$/, "/[id]") }));
+    t.flush();
+    await drain();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("after the first pageview"));
+    const mine = sent.filter((x) => x.body.key === "ak_late").flatMap((x) => x.body.events);
+    expect((mine[0].attributes as Record<string, string>).$path).toBe("/account/88");
   });
 });

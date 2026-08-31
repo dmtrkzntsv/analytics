@@ -1,5 +1,5 @@
 # Tracking: ingestion, the tracker script and — once MCP_AUTH_DSN is set in
-# `.env` — the MCP endpoint, all on :8080. See docs/mcp-auth.md.
+# `.env` — the MCP endpoint, all on :8080. See docs/twillingate.md.
 #
 # Dashboards are docker-compose.evidence.yml. To run both, put this in `.env`:
 #   COMPOSE_FILE=docker-compose.yml:docker-compose.evidence.yml
@@ -24,7 +24,7 @@ services:
   # Continuous backup: streams this database to object storage. Needs the R2
   # credentials in `.env` and deploy/litestream/litestream.yml next to this
   # file. Never on at the same time as the `restore` service in
-  # docker-compose.evidence.yml. See docs/litestream.md.
+  # docker-compose.evidence.yml. See docs/twillingate.md.
   # litestream:
   #   image: litestream/litestream:0.5
   #   restart: unless-stopped

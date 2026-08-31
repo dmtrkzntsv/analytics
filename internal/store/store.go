@@ -14,7 +14,7 @@ type WebHit struct {
 	ID, Project                       string
 	TS, ReceivedAt                    time.Time
 	ActorID, UserID, GroupID          string
-	Path, ReferrerSource              string
+	Host, Path, ReferrerSource        string
 	UTMSource, UTMMedium, UTMCampaign string
 	Country, Device, Browser, OS      string
 }

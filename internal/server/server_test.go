@@ -197,7 +197,7 @@ func TestRoutesPageviewScreenViewAndCustom(t *testing.T) {
 	q, h := testServer(t)
 	body := `{"key":"` + testKey + `","attributes":{"$platform":"ios","$app_version":"2.4.1"},
 	  "events":[
-	    {"name":"$pageview","attributes":{"$url":"https://app.com/pricing?utm_source=hn"}},
+	    {"name":"$pageview","attributes":{"$host":"app.com","$path":"/pricing","$utm_source":"hn"}},
 	    {"name":"$screen_view","attributes":{"$screen":"/settings","$os_version":"17.2","$device_model":"iPhone15,2","$locale":"en-US","$session_id":"s1"}},
 	    {"name":"subscribed","attributes":{"plan":"pro"}}
 	  ]}`
@@ -208,7 +208,8 @@ func TestRoutesPageviewScreenViewAndCustom(t *testing.T) {
 	if res := decodeResult(t, w); res.Accepted != 3 || res.Rejected != 0 {
 		t.Errorf("result = %+v", res)
 	}
-	if len(q.hits) != 1 || q.hits[0].Path != "/pricing" || q.hits[0].UTMSource != "hn" {
+	if len(q.hits) != 1 || q.hits[0].Host != "app.com" ||
+		q.hits[0].Path != "/pricing" || q.hits[0].UTMSource != "hn" {
 		t.Errorf("hits = %+v", q.hits)
 	}
 	if q.hits[0].Country != "DE" || q.hits[0].Browser != "Chrome" {
@@ -283,7 +284,7 @@ func TestPerEventRejectionLeavesBatchIntact(t *testing.T) {
 		t.Fatalf("status = %d, want 202 even with rejects", w.Code)
 	}
 	res := decodeResult(t, w)
-	// missing name; $pageview without $url; $screen_view without $screen; bad id
+	// missing name; $pageview without $path; $screen_view without $screen; bad id
 	if res.Accepted != 2 || res.Rejected != 4 || len(res.Errors) != 4 {
 		t.Errorf("result = %+v", res)
 	}
@@ -439,7 +440,7 @@ func TestBatchNamesAreDedupedAcrossEvents(t *testing.T) {
 
 func TestBotFilterAppliesOnlyToPageviews(t *testing.T) {
 	q, h := testServer(t)
-	body := envelopeOf(`{"name":"$pageview","attributes":{"$url":"https://app.com/x"}},
+	body := envelopeOf(`{"name":"$pageview","attributes":{"$host":"app.com","$path":"/x"}},
 		{"name":"$screen_view","attributes":{"$screen":"/s"}},
 		{"name":"custom"}`)
 	w := post(h, body, map[string]string{"User-Agent": "Googlebot/2.1"})

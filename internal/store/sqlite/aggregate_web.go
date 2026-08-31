@@ -93,6 +93,9 @@ func (d *DB) AggregateWebDay(ctx context.Context, project string, day civil.Date
 		type dim struct{ table, cols, group, where string }
 		dims := []dim{
 			{"agg_web_pages", "path", "path", ""},
+			// No where clause: unlike utm, an empty host is a real bucket
+			// (rows predating migration 008), not an absent dimension.
+			{"agg_web_hosts", "host", "host", ""},
 			{"agg_web_referrers", "source", "referrer_source", ""},
 			{"agg_web_countries", "country", "country", ""},
 			{"agg_web_devices", "device", "device", ""},

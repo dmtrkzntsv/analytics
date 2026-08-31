@@ -22,7 +22,7 @@ tracker itself, so there is nothing to copy. Load it **after** the tracking
 snippet, which is what defines the tracker global:
 
 ```html
-<script defer src="https://a.example.com/js/script.js" data-key="ak_9f3c…"></script>
+<script defer src="https://a.example.com/js/twillingate.js" data-key="ak_9f3c…"></script>
 <script defer src="https://a.example.com/js/plausible-shim.js"></script>
 ```
 
@@ -60,7 +60,7 @@ click, so a tagged form wrapping a tagged button does not count twice.
 Middle-clicks fire too — they open links.
 
 Keys beginning with `$` are refused by the shim. They are reserved
-attributes (§6 of [ingest-api.md](../ingest-api.md)) and an unrecognized one
+attributes (see [twillingate.md](../twillingate.md)) and an unrecognized one
 is dropped server-side, so failing at the source beats losing it in transit.
 
 ---

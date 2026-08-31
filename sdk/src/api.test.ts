@@ -62,7 +62,7 @@ describe("attrs", () => {
     await drain();
     const [pv, sc] = sent[0].body.events.map((e) => e.attributes as Record<string, unknown>);
     expect(pv.ab_test).toBe("b");
-    expect(pv.$url).toContain("https://example.com"); // reserved keys unaffected
+    expect(pv.$host).toBe("example.com"); // reserved keys unaffected
     expect(sc).toEqual({ ab_test: "b", $screen: "/home" });
   });
 
@@ -136,14 +136,15 @@ describe("identify and group with display names", () => {
 });
 
 describe("page() overloads", () => {
-  it("page(path) records an explicit path with an absolute $url", async () => {
+  it("page(path) records an explicit path", async () => {
     const t = tg();
     t.page("/settings");
     t.flush();
     await drain();
     const ev = lastEvent();
     expect(ev.name).toBe("$pageview");
-    expect((ev.attributes as Record<string, unknown>).$url).toBe("https://example.com/settings");
+    expect((ev.attributes as Record<string, unknown>).$path).toBe("/settings");
+    expect((ev.attributes as Record<string, unknown>).$host).toBe("example.com");
   });
 
   it("dedupes on the explicit path", async () => {
@@ -163,7 +164,7 @@ describe("page() overloads", () => {
     await drain();
     const attrs = lastEvent().attributes as Record<string, unknown>;
     expect(attrs.section).toBe("docs");
-    expect(attrs.$url).toContain("https://example.com");
+    expect(attrs.$host).toBe("example.com");
   });
 
   it("page(listener) registers a pageview listener that can enrich attributes", async () => {
@@ -187,8 +188,8 @@ describe("page() overloads", () => {
     t.page("/public");
     t.flush();
     await drain();
-    const urls = sent[0].body.events.map((e) => (e.attributes as Record<string, string>).$url);
-    expect(urls).toEqual(["https://example.com/public"]);
+    const paths = sent[0].body.events.map((e) => (e.attributes as Record<string, string>).$path);
+    expect(paths).toEqual(["/public"]);
   });
 
   it("listeners fire for automatic SPA pageviews too", async () => {

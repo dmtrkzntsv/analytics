@@ -120,7 +120,7 @@ describe("identified mode", () => {
   });
 });
 
-describe("migration from the legacy script.js storage", () => {
+describe("migration from the legacy storage keys", () => {
   it("adopts analytics_visitor / analytics_user / analytics_group", async () => {
     localStorage.setItem("analytics_visitor", "legacy-visitor");
     localStorage.setItem("analytics_user", "legacy-user");
@@ -130,7 +130,7 @@ describe("migration from the legacy script.js storage", () => {
     expect(attrs.$install_id).toBe("legacy-visitor");
     expect(attrs.$user_id).toBe("legacy-user");
     expect(attrs.$group_id).toBe("legacy-group");
-    // copied, not moved: script.js may still run during the cut-over
+    // copied, not moved: an older client may still be running elsewhere
     expect(localStorage.getItem("analytics_visitor")).toBe("legacy-visitor");
     expect(localStorage.getItem("twillingate_visitor")).toBe("legacy-visitor");
   });
@@ -155,14 +155,14 @@ describe("group()", () => {
 });
 
 describe("pageviews", () => {
-  it("page() emits $pageview with url and referrer", async () => {
+  it("page() emits $pageview with host, path and referrer", async () => {
     const t = tg();
     t.page();
     t.flush();
     await drain();
     const ev = sent[0].body.events[0];
     expect(ev.name).toBe("$pageview");
-    expect((ev.attributes as Record<string, unknown>).$url).toContain("https://example.com");
+    expect((ev.attributes as Record<string, unknown>).$host).toBe("example.com");
   });
 
   it("dedupes consecutive pageviews for the same path", async () => {
@@ -183,8 +183,8 @@ describe("pageviews", () => {
     await drain();
     const names = sent.flatMap((s) => s.body.events.map((e) => e.name));
     expect(names.filter((n) => n === "$pageview")).toHaveLength(3); // initial + 2 pushes
-    const urls = sent.flatMap((s) => s.body.events.map((e) => (e.attributes as Record<string, string>).$url));
-    expect(urls[urls.length - 1]).toContain("/third");
+    const paths = sent.flatMap((s) => s.body.events.map((e) => (e.attributes as Record<string, string>).$path));
+    expect(paths[paths.length - 1]).toBe("/third");
   });
 
   it("popstate back to a different path emits another pageview", async () => {
@@ -194,7 +194,162 @@ describe("pageviews", () => {
     window.dispatchEvent(new Event("popstate"));
     t.flush();
     await drain();
-    const urls = sent.flatMap((s) => s.body.events.map((e) => (e.attributes as Record<string, string>).$url));
-    expect(urls[urls.length - 1]).toContain("/b");
+    const paths = sent.flatMap((s) => s.body.events.map((e) => (e.attributes as Record<string, string>).$path));
+    expect(paths[paths.length - 1]).toBe("/b");
+  });
+});
+
+describe("location attributes", () => {
+  it("emits $host and $path instead of $url", async () => {
+    history.replaceState(null, "", "/pricing?utm_source=news");
+    const t = tg();
+    t.page();
+    t.flush();
+    await drain();
+    const attrs = sent[0].body.events[0].attributes as Record<string, unknown>;
+    expect(attrs.$host).toBe("example.com");
+    expect(attrs.$path).toBe("/pricing");
+    expect(attrs.$utm_source).toBe("news");
+    expect(attrs.$url).toBeUndefined();
+  });
+
+  it("applies a maskUrl before the pageview is sent", async () => {
+    history.replaceState(null, "", "/account/3f8a91c2-4b7e-4d1a-9f2c-8e6b5a0d7c31/edit");
+    const t = tg({ maskUrl: "uuid" });
+    t.page();
+    t.flush();
+    await drain();
+    const attrs = sent[0].body.events[0].attributes as Record<string, unknown>;
+    expect(attrs.$path).toBe("/account/[id]/edit");
+  });
+
+  // UTM is read off the original href, so a mask that eats the query
+  // cannot cost campaign attribution.
+  it("keeps utm when the mask strips the query", async () => {
+    history.replaceState(null, "", "/x?utm_source=news");
+    const t = tg({ maskUrl: (href: string) => href.split("?")[0] });
+    t.page();
+    t.flush();
+    await drain();
+    const attrs = sent[0].body.events[0].attributes as Record<string, unknown>;
+    expect(attrs.$utm_source).toBe("news");
+    expect(attrs.$path).toBe("/x");
+  });
+
+  // Without threading the second listener starts from the raw path and the
+  // first rule's identifier leaks.
+  it("threads host and path through the listener chain", async () => {
+    history.replaceState(null, "", "/account/88/orders/12");
+    const t = tg();
+    t.page(({ path }) => ({ $path: path.replace(/^\/account\/[^/]+/, "/account/[id]") }));
+    t.page(({ path }) => ({ $path: path.replace(/\/orders\/\d+/, "/orders/[id]") }));
+    t.page();
+    t.flush();
+    await drain();
+    const attrs = sent[0].body.events[0].attributes as Record<string, unknown>;
+    expect(attrs.$path).toBe("/account/[id]/orders/[id]");
+  });
+
+  it("gives listeners the post-mask url", async () => {
+    history.replaceState(null, "", "/u/3f8a91c2-4b7e-4d1a-9f2c-8e6b5a0d7c31");
+    const seen: string[] = [];
+    const t = tg({ maskUrl: "uuid" });
+    t.page(({ url }) => {
+      seen.push(url);
+    });
+    t.page();
+    t.flush();
+    await drain();
+    expect(seen[0]).toBe("https://example.com/u/[id]");
+  });
+
+  // Dedup keys on the raw path: two accounts are two visits even though
+  // both report as /account/[id].
+  it("does not dedupe distinct raw paths that mask alike", async () => {
+    history.replaceState(null, "", "/account/1");
+    const t = tg({ maskUrl: "uuid,numeric" });
+    t.page();
+    history.replaceState(null, "", "/account/2");
+    t.page();
+    t.flush();
+    await drain();
+    const evs = sent.flatMap((s) => s.body.events);
+    expect(evs).toHaveLength(2);
+    expect((evs[0].attributes as Record<string, string>).$path).toBe("/account/[id]");
+    expect((evs[1].attributes as Record<string, string>).$path).toBe("/account/[id]");
+  });
+
+  it("drops pageviews when the mask throws", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    history.replaceState(null, "", "/account/8812");
+    const t = tg({
+      maskUrl: () => {
+        throw new Error("boom");
+      },
+    });
+    t.page();
+    t.flush();
+    await drain();
+    expect(sent).toHaveLength(0);
+    expect(warn).toHaveBeenCalled();
+  });
+
+  it("drops pageviews when the mask names no function", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const t = tg({ maskUrl: "noSuchFunction" });
+    t.page();
+    t.flush();
+    await drain();
+    expect(sent).toHaveLength(0);
+    expect(warn).toHaveBeenCalled();
+  });
+});
+
+describe("hash routing", () => {
+  // Hash routing was broken outright: lastPage was pathname+search, which
+  // never changes in a hash SPA, so every route after the first was
+  // deduped away.
+  it("records consecutive hash routes", async () => {
+    history.replaceState(null, "", "/app/#/one");
+    const t = tg({ routing: "hash", autoPageviews: true });
+    await vi.advanceTimersByTimeAsync(0);
+    history.replaceState(null, "", "/app/#/two");
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+    t.flush();
+    await drain();
+    const paths = sent.flatMap((s) =>
+      s.body.events.map((e) => (e.attributes as Record<string, string>).$path));
+    expect(paths).toEqual(["/app/#/one", "/app/#/two"]);
+  });
+
+  it("puts pathname and hash in $path, without the hash query", async () => {
+    history.replaceState(null, "", "/app/?utm_source=news#/account/1?tab=billing");
+    const t = tg({ routing: "hash" });
+    t.page();
+    t.flush();
+    await drain();
+    const attrs = sent[0].body.events[0].attributes as Record<string, unknown>;
+    expect(attrs.$path).toBe("/app/#/account/1");
+    expect(attrs.$utm_source).toBe("news");
+  });
+
+  // In history mode #pricing is an in-page anchor, not a route. A pageview
+  // per anchor click would flood the pages breakdown.
+  //
+  // Asserts on this tracker's own batches, keyed by its ingest key: jsdom's
+  // window is shared across tests and a hash-mode tracker from an earlier
+  // test leaves its hashchange listener attached, so the global `sent`
+  // array is not this tracker's output alone.
+  it("ignores hashchange in history mode", async () => {
+    history.replaceState(null, "", "/x");
+    const t = tg({ key: "ak_history" , autoPageviews: true });
+    await vi.advanceTimersByTimeAsync(0);
+    history.replaceState(null, "", "/x#pricing");
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+    t.flush();
+    await drain();
+    const mine = sent.filter((s) => s.body.key === "ak_history").flatMap((s) => s.body.events);
+    expect(mine).toHaveLength(1);
+    expect((mine[0].attributes as Record<string, string>).$path).toBe("/x");
   });
 });

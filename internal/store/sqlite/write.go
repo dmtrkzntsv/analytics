@@ -21,9 +21,9 @@ func (d *DB) WriteWebHits(ctx context.Context, hits []store.WebHit) error {
 		// retried after a timeout that actually succeeded is a no-op.
 		stmt, err := tx.PrepareContext(ctx, `INSERT OR IGNORE INTO web_hits
 			(id, project, ts, received_at, actor_id, user_id, group_id,
-			 path, referrer_source, utm_source, utm_medium, utm_campaign,
+			 host, path, referrer_source, utm_source, utm_medium, utm_campaign,
 			 country, device, browser, os)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 		if err != nil {
 			return err
 		}
@@ -32,7 +32,7 @@ func (d *DB) WriteWebHits(ctx context.Context, hits []store.WebHit) error {
 			if _, err := stmt.ExecContext(ctx, h.ID, h.Project,
 				h.TS.UTC().Format(tsFormat), h.ReceivedAt.UTC().Format(tsFormat),
 				h.ActorID, h.UserID, h.GroupID,
-				h.Path, h.ReferrerSource, h.UTMSource, h.UTMMedium, h.UTMCampaign,
+				h.Host, h.Path, h.ReferrerSource, h.UTMSource, h.UTMMedium, h.UTMCampaign,
 				h.Country, h.Device, h.Browser, h.OS); err != nil {
 				return fmt.Errorf("web hit %s: %w", h.ID, err)
 			}

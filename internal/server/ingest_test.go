@@ -50,7 +50,7 @@ func TestResolveAttributesSplitsReservedFromCustom(t *testing.T) {
 		"$group_id": "org9", "$group_name": "Acme", "$session_id": "s1",
 		"$platform": "ios", "$app_version": "2.4.1", "$os_version": "17.2",
 		"$device_model": "iPhone15,2", "$locale": "en-US",
-		"$url": "https://x/y", "$referrer": "https://z", "$screen": "/settings",
+		"$host": "x", "$path": "/y", "$referrer": "https://z", "$screen": "/settings",
 		"plan": "pro", "count": float64(3), "ok": true, "nothing": nil,
 	})
 
@@ -69,7 +69,7 @@ func TestResolveAttributesSplitsReservedFromCustom(t *testing.T) {
 	if r.DeviceModel != "iPhone15,2" || r.Locale != "en-US" {
 		t.Errorf("device = %+v", r)
 	}
-	if r.URL != "https://x/y" || r.Referrer != "https://z" || r.Screen != "/settings" {
+	if r.Host != "x" || r.Path != "/y" || r.Referrer != "https://z" || r.Screen != "/settings" {
 		t.Errorf("payload = %+v", r)
 	}
 	// float64(3) must not render as "3.000000"; bool and nil round-trip.
@@ -165,5 +165,56 @@ func TestNoticeCaps(t *testing.T) {
 	// so the count never understates what was dropped.
 	if res.Rejected != maxNotices*3 {
 		t.Errorf("Rejected = %d, want %d", res.Rejected, maxNotices*3)
+	}
+}
+
+func TestResolveAttributesLocationKeys(t *testing.T) {
+	r, unknown := resolveAttributes(map[string]any{
+		"$host":         "shop.example.com",
+		"$path":         "/account/[id]/edit",
+		"$utm_source":   "newsletter",
+		"$utm_medium":   "email",
+		"$utm_campaign": "spring",
+		"$referrer":     "https://news.ycombinator.com/",
+	})
+	if len(unknown) != 0 {
+		t.Errorf("unknown = %v, want none", unknown)
+	}
+	if r.Host != "shop.example.com" || r.Path != "/account/[id]/edit" {
+		t.Errorf("host/path = %q/%q", r.Host, r.Path)
+	}
+	if r.UTMSource != "newsletter" || r.UTMMedium != "email" || r.UTMCampaign != "spring" {
+		t.Errorf("utm = %q/%q/%q", r.UTMSource, r.UTMMedium, r.UTMCampaign)
+	}
+	if len(r.Custom) != 0 {
+		t.Errorf("custom = %v, want empty", r.Custom)
+	}
+}
+
+// $url is gone from the contract. It must warn as an unknown reserved key
+// rather than being stored as a custom attribute, so a stale client sees
+// the reason in the response body.
+func TestResolveAttributesRejectsURL(t *testing.T) {
+	r, unknown := resolveAttributes(map[string]any{"$url": "https://a.example.com/x"})
+	if len(unknown) != 1 || unknown[0] != "$url" {
+		t.Errorf("unknown = %v, want [$url]", unknown)
+	}
+	if len(r.Custom) != 0 {
+		t.Errorf("custom = %v, want empty", r.Custom)
+	}
+}
+
+// The server stores what it is told. A path carrying a hash route or an
+// opt-in query string must survive untouched.
+func TestResolveAttributesPathVerbatim(t *testing.T) {
+	for _, path := range []string{
+		"/app/#/account/[id]/edit",
+		"/settings?tab=billing",
+		"/plain",
+	} {
+		r, _ := resolveAttributes(map[string]any{"$path": path})
+		if r.Path != path {
+			t.Errorf("path %q stored as %q", path, r.Path)
+		}
 	}
 }

@@ -130,7 +130,7 @@ func TestServeEndToEnd(t *testing.T) {
 	if r := post("/api/events", "https://app.com",
 		`{"key":"ak_test","attributes":{"$platform":"ios","$app_version":"1.0"},
 		  "events":[
-		    {"name":"$pageview","attributes":{"$url":"https://app.com/pricing"}},
+		    {"name":"$pageview","attributes":{"$host":"app.com","$path":"/pricing"}},
 		    {"name":"$screen_view","attributes":{"$screen":"/settings"}},
 		    {"name":"signup","attributes":{"plan":"pro"}}]}`); r.StatusCode != 202 {
 		t.Fatalf("events: %d", r.StatusCode)
@@ -148,14 +148,14 @@ func TestServeEndToEnd(t *testing.T) {
 		t.Fatalf("bad key: %d", r.StatusCode)
 	}
 
-	// The tracking snippet must be served by the same process.
-	resp, err := http.Get(base + "/js/script.js")
+	// The SDK must be served by the same process.
+	resp, err := http.Get(base + "/js/twillingate.js")
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
 	if resp.StatusCode != 200 {
-		t.Fatalf("script.js: %d", resp.StatusCode)
+		t.Fatalf("twillingate.js: %d", resp.StatusCode)
 	}
 
 	// Graceful shutdown must flush the buffer.
@@ -232,8 +232,8 @@ func TestServeRestartsOnExistingDatabase(t *testing.T) {
 			t.Fatal("serve did not shut down")
 		}
 	}
-	run(`{"key":"ak_test","events":[{"name":"$pageview","attributes":{"$url":"https://app.com/one"}}]}`)
-	run(`{"key":"ak_test","events":[{"name":"$pageview","attributes":{"$url":"https://app.com/two"}}]}`)
+	run(`{"key":"ak_test","events":[{"name":"$pageview","attributes":{"$host":"app.com","$path":"/one"}}]}`)
+	run(`{"key":"ak_test","events":[{"name":"$pageview","attributes":{"$host":"app.com","$path":"/two"}}]}`)
 
 	st, err := store.Open("sqlite://" + dbPath)
 	if err != nil {
@@ -431,7 +431,7 @@ func TestServeNeverPersistsIPOrUserAgent(t *testing.T) {
 	waitHealthy(t, base)
 
 	req, err := http.NewRequest("POST", base+"/api/events",
-		strings.NewReader(`{"key":"ak_test","events":[{"name":"$pageview","attributes":{"$url":"https://app.com/pricing"}}]}`))
+		strings.NewReader(`{"key":"ak_test","events":[{"name":"$pageview","attributes":{"$host":"app.com","$path":"/pricing"}}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}

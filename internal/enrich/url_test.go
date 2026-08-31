@@ -2,32 +2,6 @@ package enrich
 
 import "testing"
 
-func TestParsePageURL(t *testing.T) {
-	p, err := ParsePageURL("https://app.com/pricing?utm_source=hn&utm_medium=social&utm_campaign=launch&ref=newsletter&session_token=SECRET&email=a@b.c")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p.Host != "app.com" || p.Path != "/pricing" {
-		t.Errorf("host/path: %+v", p)
-	}
-	if p.UTMSource != "hn" || p.UTMMedium != "social" || p.UTMCampaign != "launch" || p.Ref != "newsletter" {
-		t.Errorf("campaign params: %+v", p)
-	}
-	// Privacy: nothing else from the query may survive anywhere in the struct.
-	if p.Path != "/pricing" {
-		t.Errorf("query must not leak into path: %q", p.Path)
-	}
-	if _, err := ParsePageURL("not a url"); err == nil {
-		t.Error("garbage must error")
-	}
-	if _, err := ParsePageURL("/relative/only"); err == nil {
-		t.Error("relative URL must error (no host)")
-	}
-	if p, _ := ParsePageURL("https://app.com"); p.Path != "/" {
-		t.Errorf("empty path must normalize to /: %q", p.Path)
-	}
-}
-
 func TestCleanReferrer(t *testing.T) {
 	cases := []struct{ ref, own, want string }{
 		{"", "app.com", ""},
@@ -44,5 +18,26 @@ func TestCleanReferrer(t *testing.T) {
 		if got := CleanReferrer(c.ref, c.own); got != c.want {
 			t.Errorf("CleanReferrer(%q) = %q, want %q", c.ref, got, c.want)
 		}
+	}
+}
+
+// Referrer cleaning uses the host the client supplied. Same host means a
+// self-referral and is suppressed; no host means there is nothing to
+// compare against, so the referrer is taken at face value.
+func TestCleanReferrerAgainstSuppliedHost(t *testing.T) {
+	for _, tc := range []struct {
+		name, host, referrer, want string
+	}{
+		{"self", "shop.example.com", "https://shop.example.com/a", ""},
+		{"external", "shop.example.com", "https://news.ycombinator.com/", "hackernews"},
+		{"no host", "", "https://shop.example.com/a", "shop.example.com"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := CleanReferrer(tc.referrer, tc.host)
+			if got != tc.want {
+				t.Errorf("CleanReferrer(%q, %q) = %q, want %q",
+					tc.referrer, tc.host, got, tc.want)
+			}
+		})
 	}
 }

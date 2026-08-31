@@ -57,17 +57,14 @@ func TestTwillingateSDKServed(t *testing.T) {
 	}
 }
 
-// The legacy snippet must keep serving byte-for-byte: deployed websites
-// load it, and the cut-over promise is that they never break.
-func TestLegacyScriptStillServed(t *testing.T) {
+// The legacy snippet is gone. A stale tag must 404 rather than serve a
+// client whose every pageview the collector would reject.
+func TestLegacyScriptRemoved(t *testing.T) {
 	_, h := testServer(t)
 	r := httptest.NewRequest("GET", "/js/script.js", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
-	if w.Code != 200 {
-		t.Fatalf("code = %d", w.Code)
-	}
-	if w.Body.String() != string(trackingScript) {
-		t.Error("/js/script.js does not serve the embedded legacy snippet verbatim")
+	if w.Code != 404 {
+		t.Fatalf("code = %d, want 404", w.Code)
 	}
 }

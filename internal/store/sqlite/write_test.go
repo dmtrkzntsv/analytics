@@ -252,3 +252,44 @@ func TestUpsertIdentitiesEmptyIsNoop(t *testing.T) {
 		t.Fatalf("empty upsert: %v", err)
 	}
 }
+
+func TestWriteWebHitsStoresHost(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	hits := []store.WebHit{{
+		ID: "h1", Project: "app", TS: ts("2026-08-10T10:00:00Z"),
+		ActorID: "v1", Host: "shop.example.com", Path: "/pricing",
+	}}
+	if err := db.WriteWebHits(ctx, hits); err != nil {
+		t.Fatal(err)
+	}
+	var host string
+	if err := db.db.QueryRow(
+		`SELECT host FROM web_hits WHERE id='h1'`).Scan(&host); err != nil {
+		t.Fatal(err)
+	}
+	if host != "shop.example.com" {
+		t.Errorf("host = %q, want %q", host, "shop.example.com")
+	}
+}
+
+// A hit written without a host must read back as the empty string, not
+// NULL: every consumer scans into a string and the column is NOT NULL.
+func TestWriteWebHitsHostDefaultsEmpty(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	if err := db.WriteWebHits(ctx, []store.WebHit{{
+		ID: "h2", Project: "app", TS: ts("2026-08-10T10:00:00Z"),
+		ActorID: "v1", Path: "/pricing",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	var host string
+	if err := db.db.QueryRow(
+		`SELECT host FROM web_hits WHERE id='h2'`).Scan(&host); err != nil {
+		t.Fatal(err)
+	}
+	if host != "" {
+		t.Errorf("host = %q, want empty", host)
+	}
+}

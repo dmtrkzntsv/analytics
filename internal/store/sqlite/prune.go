@@ -12,7 +12,7 @@ import (
 // TestPruneAggregatesCoversAllAggTables fails if a migration adds one that is
 // missing here, since such a table would never honour retention.
 var webAggTables = []string{
-	"agg_web_daily", "agg_web_pages", "agg_web_referrers", "agg_web_countries",
+	"agg_web_daily", "agg_web_pages", "agg_web_hosts", "agg_web_referrers", "agg_web_countries",
 	"agg_web_devices", "agg_web_browsers", "agg_web_os", "agg_web_utm",
 }
 

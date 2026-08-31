@@ -18,7 +18,7 @@ release page needs one of the three published types.
 
 The scope is the package or area the change lands in, matching the tree:
 `store`, `server`, `jobs`, `config`, `mcpserver`, `manage`, `pipeline`, `geo`,
-`dashboards`, `cmd`, `deploy`, `ci`. Omit it when a change is genuinely
+`dashboards`, `sdk`, `cmd`, `deploy`, `ci`. Omit it when a change is genuinely
 repo-wide.
 
 Breaking changes take a `!` before the colon (`feat(store)!: ...`), or a
@@ -51,3 +51,45 @@ Two consequences worth remembering:
 `make check` (vet + coverage + restore test) is what CI runs — run it before
 pushing. `make build` compiles the binary; `make test` runs the race-enabled
 suite on its own.
+
+## Documentation
+
+Two pages, split on using versus running, and both served over MCP.
+`docs/twillingate.md` (`docs://twillingate`) is what an agent needs to set
+up a project, get it tracking, and answer questions from the data.
+`docs/deployment.md` (`docs://deployment`) is what an operator needs to run
+twillingate on their own server. Neither is a summary of the code — they
+are the contract.
+
+Update `docs/twillingate.md` **in the same commit** as any change to:
+
+- reserved attribute keys or event names (`internal/server/ingest.go`)
+- the ingest wire format or its responses (`internal/server/handlers.go`)
+- the JS SDK's public API, `data-` attributes or defaults
+  (`sdk/src/twillingate.ts`)
+- project fields, or the CLI/MCP surface that edits them (`internal/manage/`)
+- the MCP tools or resources offered (`internal/mcpserver/tools_*.go`,
+  `resources.go`)
+- queryable views (`internal/store/sqlite/migrations/`)
+
+Update `docs/deployment.md` in the same commit as any change to environment
+variables (`internal/config/`), the install, upgrade, replication or restore
+procedure (`deploy/`, `Makefile`), MCP auth modes or client setup
+(`internal/mcpserver/auth.go`), or the Evidence dashboards
+(`internal/dashboards/`, `evidence/`).
+
+Update `schemaViews` in `internal/mcpserver/resources.go` in the same commit
+as any migration that adds or changes a queryable view.
+
+Those two plus `docs/plausible/README.md` are the whole of `docs/` — the
+seven files they absorbed are gone, so do not resurrect one. The plausible
+page stays separate because it documents bytes the collector serves at
+`/js/plausible-shim.js` and a test binds it to them.
+
+`docs_sync_test.go` enforces part of this — reserved keys, MCP tool names
+and environment variables, each checked in both directions against the
+source, plus the SDK's public symbols and every queryable web view. Those
+checks read the specific **table** that claims a fact, not the whole file:
+a document-wide match passes for the wrong reason when the same word
+appears in prose. The rest is on you. A `docs`-only push publishes nothing
+(`paths-ignore`), so a same-commit update costs no extra release.
