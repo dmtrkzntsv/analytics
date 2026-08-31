@@ -78,20 +78,25 @@ and [The wire format](docs/twillingate.md#the-wire-format).
 
 ## Documentation
 
-Two pages. [docs/twillingate.md](docs/twillingate.md) is how you *use*
-twillingate, and is what the MCP endpoint serves to agents as
-`docs://twillingate` — the text you read and the text they read are the same
-bytes. [docs/deployment.md](docs/deployment.md) is how you *run* it.
+Two pages. [docs/twillingate.md](docs/twillingate.md) is everything needed
+to set up a project, get it tracking, and answer questions from the data —
+and is what the MCP endpoint serves to agents as `docs://twillingate`, so
+the text you read and the text they read are the same bytes.
+[docs/deployment.md](docs/deployment.md) is everything needed to run
+twillingate on your own server: installing it, configuring the collector,
+Evidence reporting, the MCP endpoint, and litestream if you split across two
+machines.
 
 | Section | Covers |
 | --- | --- |
-| [Configure](docs/twillingate.md#configure) | Every environment variable, projects, ingest keys, retention, attribute breakdowns, low-resource tuning |
+| [Set up a project](docs/twillingate.md#set-up-a-project) | Projects, identity modes, allowed origins, retention, attribute breakdowns, ingest keys |
 | [Instrument a website](docs/twillingate.md#instrument-a-website) | twillingate.js: snippet and SDK modes, URL masking, routing modes, offline queue |
 | [The event model](docs/twillingate.md#the-event-model) | The three event families, for native apps and backends too |
 | [The wire format](docs/twillingate.md#the-wire-format) | The normative contract for `/api/events` |
-| [Use it from an MCP client](docs/twillingate.md#use-it-from-an-mcp-client) | The tools and resources a connected session gets |
-| [Query the data](docs/twillingate.md#query-the-data) | The views and the caveats needed to write correct SQL |
+| [Answer questions with the data](docs/twillingate.md#answer-questions-with-the-data) | The MCP tools, the views, and the caveats needed to write correct SQL |
 | [Install](docs/deployment.md#install) | systemd and docker compose, verifying ingestion |
+| [Configure the collector](docs/deployment.md#configure-the-collector) | Every environment variable, low-resource tuning |
+| [Reporting with Evidence](docs/deployment.md#reporting-with-evidence) | Dashboards, one server and two |
 | [The MCP endpoint](docs/deployment.md#the-mcp-endpoint) | Auth modes, and pointing Claude Code, Desktop or claude.ai at it |
 | [Operate and recover](docs/deployment.md#operate-and-recover) | Upgrades, litestream replication, backup drills, disaster recovery |
 | [docs/plausible/](docs/plausible/) | The Plausible class-tagging shim |

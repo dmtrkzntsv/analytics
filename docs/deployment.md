@@ -3,12 +3,11 @@
 The operator's runbook: getting twillingate onto a host, keeping it backed
 up, and getting it back after the host is gone.
 
-Everything about *using* it — configuring projects, instrumenting a site,
-the wire format, connecting an MCP client, querying — lives in
-[twillingate.md](twillingate.md), which is the single normative document and
-the one the MCP endpoint serves to agents. This page is deliberately
-separate: an operator standing up a VPS and an agent asking about the event
-model want different things.
+Everything about *using* it — setting up a project, instrumenting a site,
+the wire format, answering questions from the data — lives in
+[twillingate.md](twillingate.md), which is what the MCP endpoint serves to
+agents. This page is deliberately separate: an operator standing up a VPS
+and an agent asking for last week's numbers want different things.
 
 Two topologies. **One server** puts ingestion and dashboards on the same
 machine — simplest, and enough for a Pi at home behind a tunnel. **Two
@@ -23,9 +22,10 @@ litestream](#replication-with-litestream). The one-server topology needs
 none of it.
 
 - [Install](#install)
-- [Dashboards](#dashboards)
+- [Configure the collector](#configure-the-collector)
+- [Reporting with Evidence](#reporting-with-evidence)
 - [The MCP endpoint](#the-mcp-endpoint)
-- [Operate and recover](#operate-and-recover)
+- [Operate and recover](#operate-and-recover) — including litestream for the two-server topology
 
 ---
 
@@ -107,7 +107,59 @@ curl -i -X POST http://localhost:8080/api/events \
        "attributes":{"$host":"myapp.com","$path":"/"}}]}'
 ```
 
-## Dashboards
+## Configure the collector
+
+| Variable | Meaning |
+| --- | --- |
+| `LISTEN_ADDR` | Address to bind. Default `127.0.0.1:8080` (the docker image sets `0.0.0.0:8080`). |
+| `PUBLIC_URL` | The collector's public base URL (`https://twillingate.example.com`). Embed snippets, MCP integration guidance and the default MCP resource URL are built from it; unset, they carry a placeholder. |
+| `DATABASE_DSN` | Store DSN. Only `sqlite://<path>` today. Required. |
+| `GEO_DSN` | Country lookup: `cloudflare://` (header), `maxmind://<license-key>`, or `none://`. |
+| `LOG_LEVEL` | `debug`, `info`, `warn`, `error`. Default `info`. |
+| `LOG_FORMAT` | `json` or `text`. Default `json`. |
+| `LOG_FILE` | Log to this path instead of stdout. |
+| `BUFFER_FLUSH_MAX_EVENTS` | Flush once this many events are buffered. Default 1000. |
+| `BUFFER_FLUSH_INTERVAL` | Flush at least this often. Default `5s`. |
+| `BUFFER_CAPACITY` | Bounded queue size; excess is dropped rather than growing memory. Default 10000. |
+| `RETENTION_WEB_RAW_DAYS` | Days raw hits are kept before rollup. Default 7. |
+| `RETENTION_WEB_AGGREGATE_DAYS` | Days aggregates are kept. Default 365. |
+| `RETENTION_PRODUCT_RAW_DAYS` | Days raw product events are kept before rollup. Default 30. |
+| `RETENTION_PRODUCT_AGGREGATE_DAYS` | Days product aggregates are kept. Default 365. |
+| `PRODUCT_ATTRIBUTES_TOP_N` | Distinct attribute values kept per (project, day, event, key) before the rest collapse into `(other)`. Default 50. |
+| `RETENTION_APP_RAW_DAYS` | Days raw app events are kept before rollup. Default 30. |
+| `RETENTION_APP_AGGREGATE_DAYS` | Days app aggregates are kept. Default 365. |
+| `DASHBOARDS_DB_PATH` | Database `dashboards` renders. Defaults to the `DATABASE_DSN` path. |
+| `DASHBOARDS_ADDR` | Address the dashboards bind. Default `0.0.0.0:3000`. |
+| `DASHBOARDS_INTERVAL` | Minimum spacing between Evidence rebuilds. Default `15m`. |
+| `DASHBOARDS_PROJECT_DIR` | Evidence project in the image. Default `/opt/evidence`. |
+| `DASHBOARDS_WORK_DIR` | Where the database snapshot is written. Default `/var/lib/dashboards`. |
+| `MCP_AUTH_DSN` | MCP authentication: `token://<token>`, `cloudflare://<team>?aud=<tag>` or `oauth://<issuer-host>`. Unset, bare `serve` skips MCP with a warning. |
+| `MCP_ADDR` | Give the MCP endpoint its own listener. Defaults to `LISTEN_ADDR` (shared). |
+| `MCP_DB_PATH` | Database MCP reads for queries. Defaults to the `DATABASE_DSN` path. |
+| `MCP_QUERY_TIMEOUT` | Per-query guard on the MCP `query` tool. Default `10s`. |
+| `MCP_QUERY_MAX_ROWS` | Row cap on the MCP `query` tool. Default 1000. |
+
+Litestream credentials (`LITESTREAM_ACCESS_KEY_ID`,
+`LITESTREAM_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_ENDPOINT`) live in the same
+`twillingate.env`, so secrets never sit in a JSON file. Nothing in the
+collector reads them.
+
+### Raspberry Pi and low-resource hosts
+
+- Raise `BUFFER_FLUSH_INTERVAL` (for example `30s`) to trade latency for
+  fewer, larger writes.
+- Raise litestream's `sync-interval`.
+- Set `GOMEMLIMIT` (the systemd unit and compose files ship `128MiB`).
+- Keep `GEO_DSN` on `cloudflare://` or `none://`; the MaxMind provider
+  downloads and holds a database in memory.
+
+Maintenance is bounded on purpose: aggregation and pruning run once a day at
+03:00 UTC, and free pages are reclaimed with incremental vacuum rather than a
+full `VACUUM`, which would rewrite the whole file.
+
+---
+
+## Reporting with Evidence
 
 `twillingate dashboards` renders an Evidence site from the database. In the
 compose setup it is `docker-compose.evidence.yml`, serving port 3000.

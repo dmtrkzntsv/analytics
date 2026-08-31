@@ -54,10 +54,11 @@ suite on its own.
 
 ## Documentation
 
-Two pages, split on using versus running. `docs/twillingate.md` is the
-normative document and the only prose the MCP endpoint serves to agents;
-`docs/deployment.md` is the operator's runbook. Neither is a summary of the
-code — they are the contract.
+Two pages, split on using versus running. `docs/twillingate.md` is what an
+agent needs to set up a project, get it tracking, and answer questions from
+the data — and is the only prose the MCP endpoint serves.
+`docs/deployment.md` is what an operator needs to run twillingate on their
+own server. Neither is a summary of the code — they are the contract.
 
 Update `docs/twillingate.md` **in the same commit** as any change to:
 
@@ -65,14 +66,16 @@ Update `docs/twillingate.md` **in the same commit** as any change to:
 - the ingest wire format or its responses (`internal/server/handlers.go`)
 - the JS SDK's public API, `data-` attributes or defaults
   (`sdk/src/twillingate.ts`)
-- config keys, env vars or project fields (`internal/config/`)
-- the set of MCP tools or resources offered (`internal/mcpserver/tools_*.go`,
+- project fields, or the CLI/MCP surface that edits them (`internal/manage/`)
+- the MCP tools or resources offered (`internal/mcpserver/tools_*.go`,
   `resources.go`)
+- queryable views (`internal/store/sqlite/migrations/`)
 
-Update `docs/deployment.md` in the same commit as any change to the install,
-upgrade, replication or restore procedure (`deploy/`, `Makefile`), to MCP
-auth modes or client setup (`internal/mcpserver/auth.go`), or to the
-Evidence dashboards (`internal/dashboards/`, `evidence/`).
+Update `docs/deployment.md` in the same commit as any change to environment
+variables (`internal/config/`), the install, upgrade, replication or restore
+procedure (`deploy/`, `Makefile`), MCP auth modes or client setup
+(`internal/mcpserver/auth.go`), or the Evidence dashboards
+(`internal/dashboards/`, `evidence/`).
 
 Update `schemaViews` in `internal/mcpserver/resources.go` in the same commit
 as any migration that adds or changes a queryable view.

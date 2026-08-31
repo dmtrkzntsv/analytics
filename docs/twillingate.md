@@ -1,23 +1,19 @@
 # twillingate
 
-The single normative document for working with twillingate: configuring
-projects, instrumenting a site or app, the wire format, connecting an MCP
-client and querying the result. The MCP endpoint serves this file verbatim
-as `docs://twillingate`.
+What an AI agent — or a person — needs to set up a project, get a site or
+app sending data, and answer questions from what comes back. The MCP
+endpoint serves this file verbatim as `docs://twillingate`.
 
-Read it in order and you end up with an instrumented, queryable collector.
-Skip to a heading if you already have one.
+Installing twillingate on a server, configuring the collector itself,
+standing up Evidence reporting, enabling the MCP endpoint and replicating
+the database are the operator's job, in [deployment.md](deployment.md).
 
 - [What twillingate is](#what-twillingate-is)
-- [Configure](#configure)
+- [Set up a project](#set-up-a-project)
 - [Instrument a website](#instrument-a-website)
 - [The event model](#the-event-model)
 - [The wire format](#the-wire-format)
-- [Use it from an MCP client](#use-it-from-an-mcp-client)
-- [Query the data](#query-the-data)
-
-Getting it onto a host, replicating it and recovering it is the operator's
-runbook, [deployment.md](deployment.md).
+- [Answer questions with the data](#answer-questions-with-the-data)
 
 ---
 
@@ -46,56 +42,12 @@ The pieces:
 | `twillingate project`, `key`, `config` | Registry management |
 | `twillingate migrate` | Applies schema migrations and exits |
 
-Bare `serve` starts MCP only once `MCP_AUTH_DSN` is set; until then it logs
-`MCP endpoint disabled` and serves ingestion alone.
+Which of those run, and how they are configured, is set by the operator —
+see [Configure the collector](deployment.md#configure-the-collector).
 
 ---
 
-## Configure
-
-Infra settings are environment variables. Both systemd units load them from
-`/etc/twillingate/twillingate.env`; docker compose reads a `.env` next to the
-compose file; the binary itself only reads the real environment.
-`.env.example` at the repo root ships every variable with its default.
-
-### Environment variables
-
-| Variable | Meaning |
-| --- | --- |
-| `LISTEN_ADDR` | Address to bind. Default `127.0.0.1:8080` (the docker image sets `0.0.0.0:8080`). |
-| `PUBLIC_URL` | The collector's public base URL (`https://twillingate.example.com`). Embed snippets, MCP integration guidance and the default MCP resource URL are built from it; unset, they carry a placeholder. |
-| `DATABASE_DSN` | Store DSN. Only `sqlite://<path>` today. Required. |
-| `GEO_DSN` | Country lookup: `cloudflare://` (header), `maxmind://<license-key>`, or `none://`. |
-| `LOG_LEVEL` | `debug`, `info`, `warn`, `error`. Default `info`. |
-| `LOG_FORMAT` | `json` or `text`. Default `json`. |
-| `LOG_FILE` | Log to this path instead of stdout. |
-| `BUFFER_FLUSH_MAX_EVENTS` | Flush once this many events are buffered. Default 1000. |
-| `BUFFER_FLUSH_INTERVAL` | Flush at least this often. Default `5s`. |
-| `BUFFER_CAPACITY` | Bounded queue size; excess is dropped rather than growing memory. Default 10000. |
-| `RETENTION_WEB_RAW_DAYS` | Days raw hits are kept before rollup. Default 7. |
-| `RETENTION_WEB_AGGREGATE_DAYS` | Days aggregates are kept. Default 365. |
-| `RETENTION_PRODUCT_RAW_DAYS` | Days raw product events are kept before rollup. Default 30. |
-| `RETENTION_PRODUCT_AGGREGATE_DAYS` | Days product aggregates are kept. Default 365. |
-| `PRODUCT_ATTRIBUTES_TOP_N` | Distinct attribute values kept per (project, day, event, key) before the rest collapse into `(other)`. Default 50. |
-| `RETENTION_APP_RAW_DAYS` | Days raw app events are kept before rollup. Default 30. |
-| `RETENTION_APP_AGGREGATE_DAYS` | Days app aggregates are kept. Default 365. |
-| `DASHBOARDS_DB_PATH` | Database `dashboards` renders. Defaults to the `DATABASE_DSN` path. |
-| `DASHBOARDS_ADDR` | Address the dashboards bind. Default `0.0.0.0:3000`. |
-| `DASHBOARDS_INTERVAL` | Minimum spacing between Evidence rebuilds. Default `15m`. |
-| `DASHBOARDS_PROJECT_DIR` | Evidence project in the image. Default `/opt/evidence`. |
-| `DASHBOARDS_WORK_DIR` | Where the database snapshot is written. Default `/var/lib/dashboards`. |
-| `MCP_AUTH_DSN` | MCP authentication: `token://<token>`, `cloudflare://<team>?aud=<tag>` or `oauth://<issuer-host>`. Unset, bare `serve` skips MCP with a warning. |
-| `MCP_ADDR` | Give the MCP endpoint its own listener. Defaults to `LISTEN_ADDR` (shared). |
-| `MCP_DB_PATH` | Database MCP reads for queries. Defaults to the `DATABASE_DSN` path. |
-| `MCP_QUERY_TIMEOUT` | Per-query guard on the MCP `query` tool. Default `10s`. |
-| `MCP_QUERY_MAX_ROWS` | Row cap on the MCP `query` tool. Default 1000. |
-
-Litestream credentials (`LITESTREAM_ACCESS_KEY_ID`,
-`LITESTREAM_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_ENDPOINT`) live in the same
-`twillingate.env`, so secrets never sit in a JSON file. Nothing in the
-collector reads them.
-
-### Projects
+## Set up a project
 
 Projects live in the database — a registry table, not a file — and are
 managed through the CLI or the MCP management tools:
@@ -161,7 +113,9 @@ totals, it just has nothing to break down.
 Declaring a key bounds columns, not the values inside one. An
 unbounded-cardinality key like a URL or session id would make the aggregate
 grow as fast as the raw data it summarises, defeating retention.
-`PRODUCT_ATTRIBUTES_TOP_N` (default 50) guards that globally: only the top N
+`PRODUCT_ATTRIBUTES_TOP_N` (default 50, set
+[server-side](deployment.md#configure-the-collector)) guards that globally:
+only the top N
 values per key are kept and the rest collapse into one `(other)` row whose
 unique-user count is recomputed from raw rather than summed. A client
 sending the literal string `(other)` collides with that bucket and loses its
@@ -184,19 +138,6 @@ retire one: add the replacement, ship clients, watch the old label fall to
 zero in the per-minute `ingest summary` log line, then disable it. Deleting
 the entry is the eventual cleanup; the flag keeps the step reversible during
 a botched rollout.
-
-### Raspberry Pi and low-resource hosts
-
-- Raise `BUFFER_FLUSH_INTERVAL` (for example `30s`) to trade latency for
-  fewer, larger writes.
-- Raise litestream's `sync-interval`.
-- Set `GOMEMLIMIT` (the systemd unit and compose files ship `128MiB`).
-- Keep `GEO_DSN` on `cloudflare://` or `none://`; the MaxMind provider
-  downloads and holds a database in memory.
-
-Maintenance is bounded on purpose: aggregation and pruning run once a day at
-03:00 UTC, and free pages are reclaimed with incremental vacuum rather than a
-full `VACUUM`, which would rewrite the whole file.
 
 ---
 
@@ -784,7 +725,7 @@ request CORS-simple.
 
 ---
 
-## Use it from an MCP client
+## Answer questions with the data
 
 Once the endpoint is running, a connected session gets nineteen tools —
 `web_overview`, `web_breakdown` (dimensions: pages, hosts, referrers,
@@ -804,9 +745,7 @@ people hit before they subscribe", "issue a key for the marketing site".
 Enabling the endpoint, choosing an auth mode and pointing a client at it are
 in [deployment.md](deployment.md#the-mcp-endpoint).
 
----
-
-## Query the data
+### Writing SQL against the views
 
 The `query` tool takes read-only SQL against the views below. It is
 row-capped (`MCP_QUERY_MAX_ROWS`, default 1000) and time-limited
@@ -841,17 +780,3 @@ and a `WHERE` on `day` may not prune that work. Narrow ranges and the `agg_*`
 tables are cheaper.
 
 ---
-
----
-
-## Dashboards
-
-`twillingate dashboards` renders an Evidence site from the database, served
-on port 3000. It rebuilds within a minute of the database changing — it
-compares size and modification time and does not need to be told.
-`DASHBOARDS_INTERVAL` (default `15m`) sets the minimum spacing between
-rebuilds, and each rebuild snapshots the database into
-`DASHBOARDS_WORK_DIR`, so the host needs room for one more copy.
-
-Standing them up, including the two-server topology where reporting reads a
-restored replica, is in [deployment.md](deployment.md#dashboards).
