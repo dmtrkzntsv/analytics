@@ -1,6 +1,7 @@
 package dashboards
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
@@ -39,6 +40,9 @@ func (b *Builder) Build(ctx context.Context) error {
 	if err := snapshot(ctx, b.cfg.DBPath, snap); err != nil {
 		return fmt.Errorf("dashboards: snapshot: %w", err)
 	}
+	if err := checkSchema(ctx, snap); err != nil {
+		return fmt.Errorf("dashboards: %s: %w", b.cfg.DBPath, err)
+	}
 	filename, err := sourceFilename(b.cfg.ProjectDir, snap)
 	if err != nil {
 		return fmt.Errorf("dashboards: source path: %w", err)
@@ -47,8 +51,17 @@ func (b *Builder) Build(ctx context.Context) error {
 		cmd := execCommand(ctx, "npm", "run", script)
 		cmd.Dir = b.cfg.ProjectDir
 		cmd.Env = append(os.Environ(), "EVIDENCE_SOURCE__twillingate__filename="+filename)
-		if out, err := cmd.CombinedOutput(); err != nil {
+		out, err := cmd.CombinedOutput()
+		if err != nil {
 			return fmt.Errorf("dashboards: npm run %s: %w (%s)", script, err, out)
+		}
+		// Evidence marks a source it could not read and still exits 0, which
+		// leaves the next step building on the previous pass's parquet. The
+		// marker is Evidence's own output, so a change of wording turns this
+		// check off rather than on — checkSchema is what catches the usual
+		// cause; this catches the rest.
+		if bytes.ContainsRune(out, '✖') {
+			return fmt.Errorf("dashboards: npm run %s could not read a source (%s)", script, out)
 		}
 	}
 	return b.rotate()

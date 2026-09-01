@@ -14,7 +14,11 @@ func seedDB(t *testing.T, path string) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if _, err := db.Exec("create table t(x); insert into t values (42)"); err != nil {
+	// schema_migrations with a row is what makes this a twillingate database
+	// as far as the builder is concerned; see checkSchema.
+	if _, err := db.Exec(`create table t(x); insert into t values (42);
+		create table schema_migrations(version integer primary key);
+		insert into schema_migrations values (1)`); err != nil {
 		t.Fatal(err)
 	}
 }
