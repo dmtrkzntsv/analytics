@@ -7,8 +7,9 @@
 # find at REPLICA_PATH.
 #
 # The restore never writes to REPLICA_PATH directly. A failed download, a
-# truncated file or a corrupt database leaves the previous replica in place,
-# so the dashboards keep serving stale-but-valid data instead of nothing.
+# truncated file, a corrupt database or one with no twillingate schema in it
+# leaves the previous replica in place, so the dashboards keep serving
+# stale-but-valid data instead of nothing.
 #
 # Environment:
 #   SOURCE_DB     path of the database *on the writer* — litestream keys a
@@ -54,6 +55,27 @@ restore_once() {
     echo "restore: restored file is corrupt: $check" >&2
     return 1
   fi
+
+  # An empty restore is not an error to litestream. A `path:` that does not
+  # match the writer's, or a bucket written by a different litestream
+  # major/minor, produces a valid database with nothing in it and exits 0 —
+  # it passes quick_check, and renaming it into place replaces good data with
+  # none. The dashboards then rebuild from it and report success. The schema
+  # is what tells an empty restore from a real one.
+  applied="$(sqlite3 -readonly "$tmp" 'SELECT COUNT(*) FROM schema_migrations' 2>&1)" || {
+    echo "restore: restored file is not a twillingate database: $applied" >&2
+    return 1
+  }
+  case "$applied" in
+    0)
+      echo "restore: restored database has no migrations applied" >&2
+      return 1
+      ;;
+    '' | *[!0-9]*)
+      echo "restore: could not count migrations: $applied" >&2
+      return 1
+      ;;
+  esac
 
   # Rename is atomic within a filesystem: a reader either sees the whole old
   # replica or the whole new one, never a half-written file.

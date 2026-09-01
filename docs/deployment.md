@@ -209,6 +209,13 @@ cron, never both.
 
 A failed or corrupt restore is not fatal: `restore.sh` verifies into a
 temporary file and only then renames, so the previous replica keeps serving.
+An *empty* restore is checked for by name, because litestream does not treat
+it as a failure: a `path:` that does not match the writer's, or a bucket
+written by a different litestream major/minor, downloads a valid database
+with nothing in it and exits 0. `restore.sh` counts the applied migrations
+before it renames, so that lands as `restored file is not a twillingate
+database` with the previous replica untouched, rather than as dashboards
+quietly rebuilt from an empty database.
 
 ## The MCP endpoint
 
