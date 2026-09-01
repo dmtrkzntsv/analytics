@@ -8,6 +8,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -44,6 +45,32 @@ func snapshot(ctx context.Context, dbPath, dest string) error {
 	defer db.Close()
 	if _, err := db.ExecContext(ctx, "VACUUM INTO ?", dest); err != nil {
 		return err
+	}
+	return nil
+}
+
+// checkSchema fails when path is not a twillingate database.
+//
+// `evidence sources` exits 0 when every one of its queries fails with "no
+// such table", so a replica that never received the schema — an empty file a
+// restore never filled, a volume left behind by another stack — yields a
+// green build rendered over whatever parquet the last good pass wrote. The
+// dashboards then serve stale numbers under a "dashboards: rebuilt" line,
+// which is the one failure mode nobody looks for. Failing here instead keeps
+// the previous site up and says what is wrong with the database.
+func checkSchema(ctx context.Context, path string) error {
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	var applied int
+	if err := db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM schema_migrations").Scan(&applied); err != nil {
+		return fmt.Errorf("not a twillingate database (%w)", err)
+	}
+	if applied == 0 {
+		return errors.New("not a twillingate database (no migrations applied)")
 	}
 	return nil
 }

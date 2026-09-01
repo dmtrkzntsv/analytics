@@ -2,6 +2,7 @@ package dashboards
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"io/fs"
 	"log/slog"
@@ -36,6 +37,21 @@ func stubNPM(t *testing.T, fail bool) *int {
 	}
 	t.Cleanup(func() { execCommand = old })
 	return &calls
+}
+
+// stubNPMReportingABrokenSource replaces the npm exec with one that exits 0
+// while printing what Evidence prints for a source it could not read. The
+// marker is the point of the fixture, so it is written out as the character
+// Evidence emits rather than as an escape.
+func stubNPMReportingABrokenSource(t *testing.T) {
+	t.Helper()
+	old := execCommand
+	execCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		const line = `  projects ✖ Error: "SQLITE_ERROR: no such table: projects"`
+		return exec.CommandContext(ctx, "sh", "-c",
+			"mkdir -p build && touch build/index.html && printf '%s' '"+line+"'")
+	}
+	t.Cleanup(func() { execCommand = old })
 }
 
 func newTestBuilder(t *testing.T) *Builder {
@@ -144,5 +160,69 @@ func TestServeHTTPServesTheBuild(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "snapshot.db") {
 		t.Errorf("body = %q, want the recorded Evidence source path", rec.Body.String())
+	}
+}
+
+// A replica that never received the schema is the failure the builder cannot
+// see from Evidence's exit status: every source query fails, npm still exits
+// 0, and the site is rebuilt from the previous pass's data.
+func TestBuildRejectsADatabaseWithoutTheTwillingateSchema(t *testing.T) {
+	calls := stubNPM(t, false)
+	b := newTestBuilder(t)
+	other := filepath.Join(t.TempDir(), "other.db")
+	db, err := sql.Open("sqlite", other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("create table unrelated(x)"); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	b.cfg.DBPath = other
+
+	err = b.Build(context.Background())
+	if err == nil {
+		t.Fatal("want an error for a database with no twillingate schema")
+	}
+	if !strings.Contains(err.Error(), "not a twillingate database") {
+		t.Errorf("error = %v, want it to name the database", err)
+	}
+	if !strings.Contains(err.Error(), other) {
+		t.Errorf("error = %v, want it to name %s", err, other)
+	}
+	if *calls != 0 {
+		t.Errorf("ran npm %d times; the check belongs before the build", *calls)
+	}
+}
+
+// A database that has the table but no rows in it has been created by
+// something other than a migration run — an empty file the driver made.
+func TestCheckSchemaRejectsAnUnmigratedDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fresh.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("create table schema_migrations(version integer primary key)"); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	if err := checkSchema(context.Background(), path); err == nil {
+		t.Fatal("want an error when no migration has been applied")
+	}
+}
+
+func TestBuildRejectsASourceEvidenceCouldNotRead(t *testing.T) {
+	stubNPMReportingABrokenSource(t)
+	b := newTestBuilder(t)
+	err := b.Build(context.Background())
+	if err == nil {
+		t.Fatal("want an error when Evidence could not read a source")
+	}
+	if !strings.Contains(err.Error(), "could not read a source") {
+		t.Errorf("error = %v, want it to name the failed source step", err)
+	}
+	if b.site.Load() != nil {
+		t.Error("a build that could not read its sources was published")
 	}
 }

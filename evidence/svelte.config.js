@@ -1,13 +1,17 @@
 // Evidence merges this file into its generated SvelteKit config
 // (see loadUserConfiguration in .evidence/template/svelte.config.js).
 //
-// Why it exists: Evidence resolves page queries in the browser via DuckDB
-// WASM, so the server-rendered HTML of pages/index.md contains no links to
-// /web/<project> or /product/<project>. SvelteKit's prerender crawler
-// therefore never reaches those templated routes and fails the build with
-// "marked as prerenderable, but were not prerendered". Listing the routes
-// explicitly is the supported fix, so we read the project aliases straight
-// out of the twillingate database at build time.
+// Why it exists: SvelteKit prerenders a templated route only if something
+// names it, and two of ours are unreachable by the crawler. pages/index.md
+// links /web/<project> and its five siblings from server-rendered HTML, but
+// only once a project exists — a stack that has never ingested anything
+// leaves the crawler nothing to follow. /web/<project>/page is worse: the
+// only link to it is a table cell, and Evidence resolves the query behind it
+// in the browser via DuckDB WASM, so it is absent from the built HTML with
+// data and without. Either way the build fails with "marked as prerenderable,
+// but were not prerendered". Listing the routes explicitly is the supported
+// fix, so we read the project aliases straight out of the twillingate
+// database at build time.
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -55,6 +59,38 @@ function projectAliases() {
 	}
 }
 
+// Every page under pages/, as the route SvelteKit will serve it at.
+function pageRoutes(dir, prefix = '') {
+	const routes = [];
+	for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+		if (entry.isDirectory()) {
+			routes.push(...pageRoutes(path.join(dir, entry.name), `${prefix}/${entry.name}`));
+		} else if (entry.name.endsWith('.md')) {
+			const base = entry.name.slice(0, -'.md'.length);
+			routes.push(base === 'index' ? prefix || '/' : `${prefix}/${base}`);
+		}
+	}
+	return routes;
+}
+
+// The templated routes are read off the pages directory rather than listed
+// here. A hand-kept copy of the tree goes stale silently: /web/[project]/page
+// was missing from one, and since nothing links to it in server-rendered HTML
+// either, every dashboards build failed on it — data or no data.
+function templatedRoutes() {
+	const routes = pageRoutes(path.join(projectRoot(), 'pages')).filter((r) => r.includes('['));
+	for (const route of routes) {
+		for (const param of route.match(/\[[^\]]*\]/g)) {
+			if (param !== '[project]') {
+				throw new Error(
+					`svelte.config.js: ${route} takes ${param}; teach this file how to fill it`
+				);
+			}
+		}
+	}
+	return routes;
+}
+
 function prerenderEntries() {
 	let aliases = [];
 	try {
@@ -63,18 +99,13 @@ function prerenderEntries() {
 		console.warn(`svelte.config.js: could not read project aliases (${err.message})`);
 	}
 	if (aliases.length === 0) aliases = [PLACEHOLDER];
-	// Every templated route needs at least one entry, or the build fails with
-	// "marked as prerenderable, but were not prerendered".
+	const templated = templatedRoutes();
+	// '*' covers every route that takes no parameter. The templated ones need
+	// at least one entry each, or the build fails with "marked as
+	// prerenderable, but were not prerendered".
 	return [
 		'*',
-		...aliases.flatMap((a) => [
-			`/web/${a}`,
-			`/product/${a}`,
-			`/app/${a}`,
-			`/users/${a}`,
-			`/groups/${a}`,
-			`/retention/${a}`
-		])
+		...aliases.flatMap((a) => templated.map((r) => r.replaceAll('[project]', a)))
 	];
 }
 

@@ -166,6 +166,16 @@ modification time and does not need to be told. `DASHBOARDS_INTERVAL`
 snapshots the database into `DASHBOARDS_WORK_DIR`, so the host needs room
 for one more copy.
 
+A rebuild that cannot read its data does not publish. A database that is not
+a twillingate one — a replica the restore never filled, a volume left behind
+by another stack — stops the build at `not a twillingate database`, and a
+source Evidence cannot read stops it at `could not read a source`. Either
+way the previous site keeps serving and no `dashboards: rebuilt` line
+appears, because a build that quietly renders the last pass's data is
+indistinguishable from a current one. Both point at the database rather than
+the dashboards: check `docker compose logs restore`, and that `SOURCE_DB`
+matches the `path:` in `litestream.yml` exactly.
+
 ### One server
 
 Add the second file next to the tracking `docker-compose.yml` and let
