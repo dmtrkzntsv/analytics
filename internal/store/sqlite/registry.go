@@ -86,6 +86,14 @@ func (d *DB) CreateProject(ctx context.Context, p store.RegistryProject, a store
 		if err != nil {
 			return fmt.Errorf("create project: %w", err)
 		}
+		var taken int
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM projects WHERE alias=?`, p.Alias).Scan(&taken); err != nil {
+			return err
+		}
+		if taken > 0 {
+			return fmt.Errorf("create project: alias %q: %w", p.Alias, store.ErrConflict)
+		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO projects
 			(id, alias, name, identity, allowed_origins, retention, attributes)
 			VALUES (?,?,?,?,?,NULLIF(?,''),?)`,
@@ -107,7 +115,7 @@ func (d *DB) UpdateProject(ctx context.Context, p store.RegistryProject, a store
 			return err
 		}
 		if n, _ := res.RowsAffected(); n == 0 {
-			return fmt.Errorf("update project: unknown alias %q", p.Alias)
+			return fmt.Errorf("update project: unknown alias %q: %w", p.Alias, store.ErrNotFound)
 		}
 		return auditAndBump(ctx, tx, a)
 	})
@@ -132,7 +140,7 @@ func (d *DB) SetProjectArchived(ctx context.Context, alias string, archived bool
 				return err
 			}
 			if c == 0 {
-				return fmt.Errorf("archive: unknown alias %q", alias)
+				return fmt.Errorf("archive: unknown alias %q: %w", alias, store.ErrNotFound)
 			}
 		}
 		return auditAndBump(ctx, tx, a)
@@ -148,7 +156,7 @@ func (d *DB) InsertIngestKey(ctx context.Context, k store.RegistryKey, a store.A
 			return err
 		}
 		if c > 0 {
-			return fmt.Errorf("key label %q already exists for project %q", k.Label, k.Project)
+			return fmt.Errorf("key label %q for project %q: %w", k.Label, k.Project, store.ErrConflict)
 		}
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO ingest_keys (key, project, label) VALUES (?,?,?)`,
@@ -170,7 +178,7 @@ func (d *DB) SetIngestKeyDisabled(ctx context.Context, project, label string, di
 			return err
 		}
 		if n, _ := res.RowsAffected(); n == 0 {
-			return fmt.Errorf("key %s/%s not found", project, label)
+			return fmt.Errorf("key %s/%s: %w", project, label, store.ErrNotFound)
 		}
 		return auditAndBump(ctx, tx, a)
 	})
@@ -205,7 +213,7 @@ func (d *DB) DeleteProjectData(ctx context.Context, alias string, a store.AuditE
 			return err
 		}
 		if n, _ := res.RowsAffected(); n == 0 {
-			return fmt.Errorf("delete: unknown alias %q", alias)
+			return fmt.Errorf("delete: unknown alias %q: %w", alias, store.ErrNotFound)
 		}
 		for _, table := range projectTables {
 			if _, err := tx.ExecContext(ctx,
@@ -244,14 +252,14 @@ func (d *DB) RenameProject(ctx context.Context, old, new string, a store.AuditEn
 			return err
 		}
 		if taken > 0 {
-			return fmt.Errorf("rename: alias %q already exists", new)
+			return fmt.Errorf("rename: alias %q: %w", new, store.ErrConflict)
 		}
 		res, err := tx.ExecContext(ctx, `UPDATE projects SET alias=? WHERE alias=?`, new, old)
 		if err != nil {
 			return err
 		}
 		if n, _ := res.RowsAffected(); n == 0 {
-			return fmt.Errorf("rename: unknown alias %q", old)
+			return fmt.Errorf("rename: unknown alias %q: %w", old, store.ErrNotFound)
 		}
 		for _, table := range projectTables {
 			if _, err := tx.ExecContext(ctx,

@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/dmtrkzntsv/twillingate/internal/config"
-	"github.com/dmtrkzntsv/twillingate/internal/store"
 )
 
 type Project struct {
@@ -48,7 +47,7 @@ type Snapshot struct {
 const pollInterval = time.Second
 
 type Registry struct {
-	st       store.Store
+	st       Store
 	defaults config.Retention
 	logger   *slog.Logger
 
@@ -57,7 +56,7 @@ type Registry struct {
 	lastCheck atomic.Int64 // UnixNano of the last version poll
 }
 
-func New(st store.Store, defaults config.Retention, logger *slog.Logger) *Registry {
+func New(st Store, defaults config.Retention, logger *slog.Logger) *Registry {
 	r := &Registry{st: st, defaults: defaults, logger: logger}
 	r.snap.Store(&Snapshot{byAlias: map[string]*Project{}, origins: map[string]originSet{}, defaults: defaults})
 	return r
