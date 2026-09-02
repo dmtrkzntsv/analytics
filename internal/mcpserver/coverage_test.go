@@ -89,10 +89,17 @@ func TestCreateProjectToolValidationError(t *testing.T) {
 	}
 }
 
+// Project-scoped tools answer an unknown alias with the valid ones listed
+// (the recoverable form a model can act on), whichever layer noticed the
+// miss: archive learns it from the store, issue_ingest_key from manage.
 func TestArchiveToolUnknownAlias(t *testing.T) {
 	_, cs := newTestHost(t)
-	if res := callTool(t, cs, "archive_project", map[string]any{"alias": "ghost"}); !res.IsError {
+	res := callTool(t, cs, "archive_project", map[string]any{"alias": "ghost"})
+	if !res.IsError {
 		t.Fatal("archive of unknown alias accepted")
+	}
+	if msg := textOf(res); !strings.Contains(msg, "valid aliases: blog") {
+		t.Errorf("error = %q, want the valid aliases listed", msg)
 	}
 }
 
@@ -113,6 +120,9 @@ func TestIssueKeyToolUnknownProject(t *testing.T) {
 		"project": "ghost", "label": "web"})
 	if !res.IsError {
 		t.Fatal("issue_ingest_key for unknown project accepted")
+	}
+	if msg := textOf(res); !strings.Contains(msg, "valid aliases: blog") {
+		t.Errorf("error = %q, want the valid aliases listed", msg)
 	}
 }
 
@@ -152,7 +162,8 @@ func TestListKeysFilterAndUnfiltered(t *testing.T) {
 
 func TestListKeysPropagatesStoreError(t *testing.T) {
 	h, cs := newTestHost(t)
-	if err := h.ops.St.Close(); err != nil {
+	// manage.Store has no Close; the test reaches the real store's.
+	if err := h.ops.St.(interface{ Close() error }).Close(); err != nil {
 		t.Fatal(err)
 	}
 	res := callTool(t, cs, "list_ingest_keys", nil)

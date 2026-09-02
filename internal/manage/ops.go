@@ -17,10 +17,10 @@ import (
 // immediately (spec §3.3).
 type Ops struct {
 	Reg *Registry
-	St  store.Store
+	St  Store
 }
 
-func NewOps(reg *Registry, st store.Store) *Ops { return &Ops{Reg: reg, St: st} }
+func NewOps(reg *Registry, st Store) *Ops { return &Ops{Reg: reg, St: st} }
 
 // rebuildFlatView refreshes v_events_flat from the registry's CURRENT
 // snapshot, so a config edit (a new/changed attribute list, or — for a
@@ -47,7 +47,7 @@ type ProjectSpec struct {
 
 func (sp *ProjectSpec) validate() error {
 	if sp.Alias == "" {
-		return fmt.Errorf("project alias must not be empty")
+		return fmt.Errorf("%w: alias must not be empty", ErrInvalid)
 	}
 	if sp.Name == "" {
 		sp.Name = sp.Alias
@@ -58,12 +58,12 @@ func (sp *ProjectSpec) validate() error {
 	switch sp.Identity {
 	case config.IdentityAnonymous, config.IdentityIdentified:
 	default:
-		return fmt.Errorf("identity must be %q or %q, got %q",
+		return fmt.Errorf("%w: identity must be %q or %q, got %q", ErrInvalid,
 			config.IdentityAnonymous, config.IdentityIdentified, sp.Identity)
 	}
 	for _, o := range sp.AllowedOrigins {
 		if o == "" {
-			return fmt.Errorf("allowed_origins must not contain an empty origin")
+			return fmt.Errorf("%w: allowed_origins must not contain an empty origin", ErrInvalid)
 		}
 	}
 	return nil
@@ -83,7 +83,7 @@ func (sp *ProjectSpec) validateNew() error {
 		return err
 	}
 	if !validAlias(sp.Alias) {
-		return fmt.Errorf("project alias %q must match ^[a-z0-9]+$", sp.Alias)
+		return fmt.Errorf("%w: alias %q must match ^[a-z0-9]+$", ErrInvalid, sp.Alias)
 	}
 	return nil
 }
@@ -189,7 +189,7 @@ func (o *Ops) IssueIngestKey(ctx context.Context, actor, project, label string) 
 	s := o.Reg.Snapshot(ctx)
 	p := s.Project(project)
 	if p == nil {
-		return "", fmt.Errorf("unknown project %q", project)
+		return "", fmt.Errorf("unknown project %q: %w", project, ErrNotFound)
 	}
 	key, err := MintIngestKey()
 	if err != nil {

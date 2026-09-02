@@ -1,5 +1,48 @@
 # CLAUDE.md
 
+## Layout
+
+One binary, one SQLite file, three surfaces (ingest HTTP, MCP, CLI).
+Packages are layered, and `internal/archtest` fails `make check` when an
+import points up or sideways:
+
+```
+cmd/twillingate/ ....... subcommand dispatch and flag parsing; the only importer of internal/app
+internal/app/ .......... composition root: opens the store, wires the surfaces, owns shutdown order
+internal/server/ ....... ingest HTTP API, plus the JS SDK and docs it serves
+internal/mcpserver/ .... MCP endpoint: read tools over the views, management tools over manage
+internal/jobs/ ......... daily pass: salt rotation, aggregation, prune, flat-view rebuild
+internal/pipeline/ ..... write buffer between ingest and the store
+internal/dashboards/ ... Evidence build and snapshot for the reporting image
+internal/manage/ ....... project registry snapshot and its audited operations
+internal/store/ ........ the Store interface and row types; store/sqlite implements it and owns every migration and view
+internal/config/ ....... environment loading
+internal/identity/ ..... actor hashing and salt rotation
+internal/enrich/ ....... user-agent and URL parsing for web hits
+internal/geo/ .......... MaxMind lookup
+internal/civil/ ........ calendar dates
+internal/version/ ...... build version
+docs/ .................. the two contract pages, embedded and served over MCP
+sdk/ ................... browser SDK source (TypeScript); the built file is embedded by internal/server
+evidence/ .............. the Evidence dashboards project
+deploy/ ................ installer, systemd units, compose files, litestream config
+```
+
+The rule, top to bottom: `app` imports the surfaces; the surfaces
+(`server`, `mcpserver`, `jobs`, `pipeline`, `dashboards`) import `manage`
+and the leaves but never each other; `manage` imports only leaves; leaves
+(`store` and below) import only leaves. A surface that needs another
+surface's behaviour takes an interface and `app` passes the
+implementation (`server.Enqueuer` is `pipeline.Buffer`). Each consumer
+declares the slice of the store it uses (`jobs.Store`, `manage.Store`,
+`server.NameStore`) rather than taking `store.Store` whole. A new package
+is added to the rank table in `internal/archtest/archtest_test.go` when
+it is created.
+
+Refusals are typed: `manage.ErrNotFound`, `manage.ErrConflict` and
+`manage.ErrInvalid` (the first two are the store's own values). Edges map
+them with `errors.Is`; message text is for humans, never for matching.
+
 ## Commit messages
 
 Use [Conventional Commits](https://www.conventionalcommits.org/). The release

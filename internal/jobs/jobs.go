@@ -12,7 +12,6 @@ import (
 	"github.com/dmtrkzntsv/twillingate/internal/civil"
 	"github.com/dmtrkzntsv/twillingate/internal/config"
 	"github.com/dmtrkzntsv/twillingate/internal/manage"
-	"github.com/dmtrkzntsv/twillingate/internal/store"
 )
 
 // Rotator is the slice of identity.Salter the scheduler needs.
@@ -21,8 +20,30 @@ type Rotator interface {
 	Current(ctx context.Context) (string, error)
 }
 
+// Store is the slice of store.Store the daily pass drives: enumerate the
+// raw days behind the window, roll each up, prune what has aged out, and
+// reclaim pages. Declared here so the ingest and registry halves of the
+// store can change without touching this package.
+type Store interface {
+	ProjectAliases(ctx context.Context) ([]string, error)
+	WebDaysBefore(ctx context.Context, project string, before civil.Date) ([]civil.Date, error)
+	ProductDaysBefore(ctx context.Context, project string, before civil.Date) ([]civil.Date, error)
+	AppDaysBefore(ctx context.Context, project string, before civil.Date) ([]civil.Date, error)
+	AggregateWebDay(ctx context.Context, project string, day civil.Date) error
+	AggregateProductDay(ctx context.Context, project string, day civil.Date, attrs []string, topN int) error
+	AggregateAppDay(ctx context.Context, project string, day civil.Date) error
+	UpsertActors(ctx context.Context, project string, day civil.Date) error
+	AggregateRetentionDay(ctx context.Context, project string, day civil.Date) error
+	PruneActors(ctx context.Context, project string, before civil.Date) error
+	AggregateIdentityDay(ctx context.Context, project string, day civil.Date) error
+	PruneIdentities(ctx context.Context, project string, before civil.Date) error
+	PruneAggregates(ctx context.Context, project string, webBefore, productBefore, appBefore civil.Date) error
+	RebuildFlatView(ctx context.Context, keys []string) error
+	IncrementalVacuum(ctx context.Context) error
+}
+
 type Runner struct {
-	store  store.Store
+	store  Store
 	cfg    *config.Config
 	reg    *manage.Registry
 	salt   Rotator
@@ -40,7 +61,7 @@ type Runner struct {
 	topN int
 }
 
-func New(st store.Store, cfg *config.Config, reg *manage.Registry, salt Rotator, logger *slog.Logger, now func() time.Time) *Runner {
+func New(st Store, cfg *config.Config, reg *manage.Registry, salt Rotator, logger *slog.Logger, now func() time.Time) *Runner {
 	return &Runner{store: st, cfg: cfg, reg: reg, salt: salt, logger: logger, now: now,
 		topN: cfg.ProductAttributesTopN}
 }

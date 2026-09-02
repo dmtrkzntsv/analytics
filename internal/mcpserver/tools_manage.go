@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/dmtrkzntsv/twillingate/internal/manage"
@@ -85,7 +86,7 @@ func (h *host) createProject(ctx context.Context, _ *mcp.CallToolRequest, in pro
 func (h *host) updateProject(ctx context.Context, _ *mcp.CallToolRequest, in projectIn) (*mcp.CallToolResult, projectToolOut, error) {
 	cur := h.reg.Snapshot(ctx).Project(in.Alias)
 	if cur == nil {
-		return nil, projectToolOut{}, fmt.Errorf("unknown project %q", in.Alias)
+		return nil, projectToolOut{}, h.unknownProjectErr(ctx, in.Alias)
 	}
 	spec := manage.ProjectSpec{
 		Alias:          in.Alias,
@@ -109,9 +110,20 @@ func (h *host) updateProject(ctx context.Context, _ *mcp.CallToolRequest, in pro
 	}
 	p, err := h.ops.UpdateProject(ctx, "mcp", spec)
 	if err != nil {
-		return nil, projectToolOut{}, err
+		return nil, projectToolOut{}, h.projectErr(ctx, in.Alias, err)
 	}
 	return nil, projectToolOut{Alias: p.Alias, Identity: p.Identity}, nil
+}
+
+// projectErr rewrites a not-found refusal into the recoverable form
+// (the valid aliases listed, see unknownProjectErr) for tools whose only
+// lookup is the project itself. Key tools keep the store's message: there
+// the missing thing may be the label, and a list of aliases would mislead.
+func (h *host) projectErr(ctx context.Context, alias string, err error) error {
+	if errors.Is(err, manage.ErrNotFound) {
+		return h.unknownProjectErr(ctx, alias)
+	}
+	return err
 }
 
 type aliasIn struct {
@@ -123,7 +135,7 @@ type okOut struct {
 
 func (h *host) archiveProject(ctx context.Context, _ *mcp.CallToolRequest, in aliasIn) (*mcp.CallToolResult, okOut, error) {
 	if err := h.ops.ArchiveProject(ctx, "mcp", in.Alias); err != nil {
-		return nil, okOut{}, err
+		return nil, okOut{}, h.projectErr(ctx, in.Alias, err)
 	}
 	return nil, okOut{Status: "archived; ingestion rejected, data kept, reversible with restore_project"}, nil
 }
@@ -149,7 +161,7 @@ type keyOut struct {
 func (h *host) issueKey(ctx context.Context, _ *mcp.CallToolRequest, in keyIn) (*mcp.CallToolResult, keyOut, error) {
 	key, err := h.ops.IssueIngestKey(ctx, "mcp", in.Project, in.Label)
 	if err != nil {
-		return nil, keyOut{}, err
+		return nil, keyOut{}, h.projectErr(ctx, in.Project, err)
 	}
 	out := keyOut{Key: key, Status: "issued"}
 	// Project should still exist (the key issue above would have failed
