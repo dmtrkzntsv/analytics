@@ -3,14 +3,14 @@
 ```sql active_projects
 select alias, name, identity
 from twillingate.projects
-where archived_at is null and alias != ''
+where archived = 0 and alias != ''
 order by name
 ```
 
 ```sql archived_projects
 select alias, name
 from twillingate.projects
-where archived_at is not null and alias != ''
+where archived = 1 and alias != ''
 order by name
 ```
 
